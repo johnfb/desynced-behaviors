@@ -134,6 +134,8 @@ Ported from and cross-validated against the official [StageGames/DesyncedJavaScr
 
 ## Design Docs Built on This Data
 
+`instructions_index.md` (workspace root) is an auto-generated reference of every entry in `data.instructions` (`data/instructions.lua`) — visual-editor name, op id, and argument list (in/out/exec, in declaration order, with filter type tags). Regenerate by re-parsing that file if it changes. `behavior_format.md` (workspace root) is the companion reverse-engineered spec for the *wire* format `dsc_codec.py` decodes a behavior into/from — register/slot addressing, branch and fall-through resolution, `make_asm`/hidden-literal (`c`) fields, and variable-length-arg instructions — cross-checked line-for-line against `observer.dsc`. Together these two are the missing layer between `dsc_codec.py` (string ⟷ dict transport only, no instruction semantics) and hand-authoring a new behavior; read both before writing or editing any `.dsc` content by hand.
+
 `combat_squad_spec.md` (workspace root) is a hand-written behavior design spec (squad AI roles: Beacon/Scout/Gunner/Support) built from real instructions in `data/instructions.lua` and components in `data/components.lua` — a consumer of this extract, not part of the extract itself. `observer.dsc` is a companion example behavior clipboard string it references, decodable with `dsc_codec.py`.
 
 `main.zip` (workspace root, ~290MB, untracked) is a full pristine zip of this same asset tree (matches `def.json` + all package directories) — likely the raw download this extract was populated from. Not otherwise referenced by any tooling here.
