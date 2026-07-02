@@ -17,6 +17,25 @@ Table representation used by this module: a Lua table decodes to a Python
 numeric keys, or `str` for everything else). encode_dsc() accepts the same
 shapes, and also accepts numeric-looking string keys (e.g. from JSON, which
 can't have int keys) -- it normalizes those to int automatically.
+
+Validated against the official StageGames/DesyncedJavaScriptUtils dsconvert.js
+(decode and encode, both directions, plus round-trips) using a real captured
+behavior string and a synthetic object covering size-class boundaries,
+negative/large integers, nesting, and unicode. Two real bugs in the official
+reference encoder were found in the process (this module intentionally does
+NOT reproduce them):
+  1. Integers outside int32/uint32 range (< -2147483648 or > 4294967295) crash
+     the official encoder outright -- it calls a DataView method
+     (`setUint64`) that doesn't exist in JavaScript. This module writes a
+     proper signed Int64 instead, and the official *decoder* reads it back
+     correctly (confirmed), so this is a one-sided limitation of their
+     encoder, not a wire-format incompatibility.
+  2. Strings containing multi-byte UTF-8 characters (accents, CJK, etc.) are
+     encoded with a length header measured in JS UTF-16 code units instead of
+     UTF-8 bytes, corrupting the output -- confirmed the official *decoder*
+     fails to read back the official *encoder's* own output for such
+     strings. This module uses the correct UTF-8 byte length throughout, and
+     the official decoder reads its output correctly (confirmed).
 """
 import json
 import struct
