@@ -39,10 +39,26 @@ few sibling metadata keys:
 - `pnames` (optional) — parallel array of display names for `parameters`.
 - `keepvars` (optional) — if set, local-variable memory slots persist
   across calls instead of being reset. Rarely needed for a fresh behavior.
+- `dependencies` (optional) — present when this behavior `call`s a
+  sub-behavior that is *embedded* rather than referenced by saved-library
+  id (see `call`'s `sub` field under "Hidden literal fields" below). A
+  flat JSON list, one entry per embedded sub-behavior, each shaped exactly
+  like this same top-level envelope (its own instruction dict, `name`,
+  `parameters`, `pnames`, ...). Confirmed via `hexat_test.dsc`: pasting the
+  top-level behavior into the library reconstructs both it *and* the
+  embedded sub-behavior as a separate library entry — that reconstruction
+  is driven entirely by `dependencies`.
 
-You will not typically need `parameters`/`pnames`/`keepvars` for a
-top-level, non-parameterized behavior like a bot's main program — `name`
-plus the instruction list is enough (see `observer.dsc`).
+Every example this doc has hand-built or examined closely so far
+(`observer.dsc`, the first `hexat.dsc` drafts) happens to be a small,
+flat, non-parameterized behavior, where `name` plus the instruction list
+is enough. Don't over-generalize from that: it's a property of those
+*simple* examples, not of top-level/main-program behaviors in general —
+real, more elaborate behaviors commonly do have `parameters` (to be
+callable, or just to receive/expose values), and `dependencies` (to embed
+sub-behaviors) frequently, as `hexat_test.dsc` (the "HexAt Test" harness,
+itself parameterized, calling an embedded `HexAt` sub-behavior) already
+demonstrates.
 
 ## Instruction record shape
 
@@ -79,18 +95,89 @@ What you put in a numbered slot depends on what that argument represents:
 |---|---|---|
 | Literal number | `{ "num": N }` | `{ "num": 10 }` |
 | Literal item/frame/component/tech/signal id | `{ "id": "item_xxx" }` | `{ "id": "v_enemy_faction" }` |
-| Literal coordinate | `{ "coord": [x, y] }` | `{ "coord": [5, -2] }` |
+| Literal coordinate | `{ "coord": { "x": x, "y": y } }` | `{ "coord": { "x": 5, "y": -2 } }` |
 | Frame register | plain negative int `-1` to `-4` | `-4` (see table below) |
 | Local variable | any string | `"A"`, `"CNT"`, `"Self"` |
 | Behavior parameter | plain positive int `1..N` | only valid if `parameters` has ≥N entries |
 | Faction (shared) register | `{ "fr": <id> }` | `{ "fr": "some_key" }` |
-| `exec` branch target | plain int = instruction index to jump to; omit = fall through to the next instruction; `false` = stop, take no further action on this path | `11` |
+| `exec` branch target | plain int = **target's rendered dict key + 1** (see "Branch and fall-through resolution" — these values are never adjusted to the 0-based keys used elsewhere in this format); omit = fall through to the next instruction; `false` = stop, take no further action on this path | `11` jumps to dict key `"10"` |
 
 Local variables are the easy path for anything you don't need to persist
 outside the behavior: pick any string name, use it consistently as both an
 `out` target and later `in` source, and the game allocates the storage slot
 for you when it compiles the behavior. There's no fixed register table to
 manage by hand.
+
+**⚠️ Coordinate literal shape, confirmed the hard way:** an earlier draft of
+this doc claimed a positional list `[x, y]`. That is wrong — a hand-authored
+`{ "coord": [0, 0] }` loaded in-game as a visibly corrupt value (rendered
+like a garbled entity reference), because Lua distinguishes an array table
+(`{[1]=x, [2]=y}`) from a hash table (`{x=x, y=y}`), and the coordinate
+reader looks for `.x`/`.y` fields specifically. `dsc_codec.py` happily
+encodes and round-trips a JSON list into a Lua array table — it has no
+instruction-semantics layer to know that's wrong for this slot — so this
+bug is invisible to our own encode→decode round-trip and only surfaces once
+the game itself tries to read the value. Confirmed fix: re-setting the same
+coordinate in the in-game register editor and re-exporting produced
+`{ "coord": { "x": 0, "y": 0 } }`. Always use the keyed-object form.
+
+### Composite values and the `num` field
+
+Every value in this format is really a pair: an optional "data" part —
+**coordinate, entity, or item id, mutually exclusive** — and a separate
+numeric `num` part, whose meaning depends on context (e.g. `domove`'s Target
+uses it as the arrival range; `item`-typed values use it as a count).
+Confirmed in the in-game register editor: setting a coordinate/entity/item
+on a value clears whichever of the other two was previously set — a value
+can never hold, say, a coordinate *and* an entity at once. `add`/`sub` in
+`data/instructions.lua` are thin Lua wrappers over the engine-native `+`/`-`
+operators on this Value type (`Set(comp, state, res, Get(left) + Get(right))`)
+— the operator implementation itself lives in the engine, not in this Lua
+extract, so its exact semantics aren't derivable from source and had to be
+confirmed by direct testing (a single-instruction test rig: an `add`/`sub`
+node with 3 registers wired to `To`/`From`, `Num`, and `Result`, values set
+by hand). Confirmed rules, by operand shape:
+
+- **number ⊕ number** (neither side has data): ordinary scalar arithmetic on
+  `num`. Nothing surprising.
+- **coordinate ⊕ coordinate**: both parts genuinely combine — coordinates
+  add/subtract component-wise, **and** the `num` fields add/subtract too.
+  Confirmed via `formation-hold.dsc`'s own `AnchorPos + Offset`:
+  `add(To={coord:(17,50), num:0}, Num={coord:(-6,2), num:1})` →
+  `{coord:(11,52), num:1}` (`17-6,50+2` and `0+1`).
+- **coordinate ⊕ bare number** (other side has no data): the bare number
+  broadcasts onto **both** coordinate components, as if it were `(n,n)` —
+  e.g. `add(To={coord:(10,100), num:5}, Num={num:3})` → `{coord:(13,103),
+  num:5}`. Order/slot doesn't matter for which side "wins" the coordinate
+  shape (confirmed by swapping `To`/`Num`), and `Subtract` respects
+  `From - Num` direction either way (`From={num:3}, Num={coord:(10,100),
+  num:5}` → `{coord:(-7,-97), num:5}`, i.e. `(3,3) - (10,100)`). In all of
+  these, **the coordinate operand's own `num` survives untouched** — the
+  bare number's value is fully consumed into the coordinate math and does
+  *not* additionally add into the result's `num`. This is the load-bearing
+  rule behind `formation-hold.dsc`'s Tolerance-preload trick (§ below).
+- **entity/item ⊕ bare number**: the entity/item reference passes through
+  into `Result` unchanged, and — unlike the coordinate case — the `num`
+  fields **add normally** (e.g. `entity, num:5` + `num:3` → same entity,
+  `num:8`).
+- **entity/item ⊕ entity/item**: `Result` inherits the `To`/`From` (first
+  slot's) reference, not `Num`'s; `num` fields still add/subtract normally.
+- **coordinate ⊕ entity/item**: not constructible at all (see the
+  mutual-exclusion note above), so this combination never has to be
+  reasoned about.
+
+So the `num` field is *not* uniformly "always adds" or "always preserved" —
+it depends on whether the data-bearing operand is a coordinate (num
+preserved, bare number consumed spatially) versus an entity/item (num adds
+normally, bare number has nowhere spatial to go).
+
+Practical implication for `formation-hold.dsc`'s Tolerance-preload trick
+(setting `num` on `Offset` once, so it rides along through every later `add`
+into `Spot`): this relies on the "coordinate ⊕ bare number" rule above, and
+holds because `Offset`/`AnchorPos`/`Spot` are always plain coordinates,
+never entities — if any of them ever became entity-typed, the `num` would
+start adding instead of being preserved, corrupting the intended Tolerance
+value. Not yet tested: `mul`/`div` may or may not follow the same rules.
 
 ### Frame registers
 
@@ -127,10 +214,16 @@ Every "what happens next" value — whether it's the instruction-level `next`
 field or the value in an `exec`-typed argument slot — resolves the same way:
 
 - **omitted / not present** → fall through to the next instruction in
-  sequence (index + 1)
-- **an integer** → jump to that instruction index
-- **`false`** (or an index beyond the end of the instruction list) → stop;
-  don't continue down this path this tick
+  sequence (dict key + 1)
+- **an integer** → jump to the instruction whose rendered dict key is
+  **that integer minus 1** (see off-by-one warning below)
+- **`false`** (or a value whose `-1` target is beyond the end of the
+  instruction list) → stop *this path* — **not the same as stopping the
+  behavior**: inside a loop/`sequence`/other block context it just advances
+  that block (next iteration/next pin, see "Block-type instructions"
+  below); only at the true outermost level does it fall back to Program
+  Start, and even then without yielding the tick (see "Stopping a
+  behavior" below, which covers a real crash mode this causes)
 
 Instructions with more than one `exec` argument (e.g. `check_number`'s
 "If Larger" / "If Smaller") branch based on which condition the instruction's
@@ -138,6 +231,185 @@ own logic decides is true at runtime — you supply a target (or leave it to
 fall through, or set `false`) for each, and only the one that actually
 matches fires. Instructions with zero `exec` args just use the top-level
 `next` field (or its default) unconditionally.
+
+### ⚠️ Off-by-one: jump values are raw 1-based Lua positions, not dict keys
+
+`dsc_codec.py` renumbers the *instruction list itself* from Lua's native
+1-based array down to the 0-based dict keys shown throughout this doc (see
+"Top-level envelope" above) — but a jump/`next` value is just a plain
+integer sitting in an argument slot, indistinguishable to the codec from any
+other number (it has no instruction-metadata layer, per `CLAUDE.md`). It is
+**never adjusted**, so it stays a raw 1-based Lua position. Concretely: a
+jump value of `11` targets rendered dict key `"10"`, not `"11"`.
+
+Proof from `observer.dsc`'s four identically-shaped `scan` fallback blocks —
+each one's "No Result" target really lands on the *next* scan attempt only
+if you subtract 1:
+
+```
+"2":  scan(v_enemy_faction) -> A, No Result -> 11   // true target: key "10"
+"10": scan(v_damaged)       -> A, No Result -> 14   // true target: key "13"
+"13": scan(v_infected)      -> A, No Result -> 17   // true target: key "16"
+"16": scan(v_droppeditem)   -> A, No Result -> 20   // true target: key "19"
+"19": label "Random walk if we can move"
+```
+
+Reading the raw values as direct dict keys would skip every scan but the
+first (each "No Result" would land one instruction *past* the next scan
+call, on that scan's post-processing step, with a stale/unset `A`). Reading
+them as `value - 1` chains cleanly through all four attempts into the
+random-walk fallback — which is obviously the intended behavior.
+
+**When decoding:** to find what dict key an `exec`/`next` integer targets,
+subtract 1. **When hand-authoring/encoding:** to jump to dict key `K`,
+write `K + 1` in the argument slot.
+
+## Computed jumps: the `jump`/`label` instruction pair
+
+Everything above (`next`, `exec` slots) is a **compile-time-fixed** branch —
+the target dict key is baked into the encoded value. There's a separate
+pair of instructions for a **runtime-computed** target, confirmed by reading
+`data/instructions.lua` (`label` ~line 522, `jump` ~line 534) and validated
+in-game (`hexat.dsc`/`hexat2.dsc`, a `HexAt` test behavior with a 6-way
+computed dispatch on a side index `k`):
+
+- `label` (`op: "label"`) takes one `in` arg, "Label identifier" (`{"0":
+  <value>}`) — a no-op marker at runtime, but its value is what `jump`
+  matches against.
+- `jump` (`op: "jump"`) takes one `in` arg, also "Label identifier". At
+  runtime it reads that value, then linearly scans *every* instruction in
+  the compiled behavior for a `label` whose own value is equal, and jumps
+  there — the position of the matching `label` in the instruction list is
+  irrelevant, it can be anywhere, in any order.
+- If no `label` matches, `jump` falls through to its own `next` (default:
+  the following instruction) — so a `jump` can have a `next`/`false` too,
+  as a "no matching state" fallback.
+
+Because the match is a runtime value comparison rather than a fixed dict
+key, this is the only way to encode a genuine computed/indirect jump (e.g.
+"jump to the label named by this variable"), as opposed to a chain of
+`check_number`/`compare_register` branches. Confirmed working with plain
+numeric label ids (`{"num": 0}` .. `{"num": 5}`, matched against a variable
+holding a computed integer 0-5) — the game correctly dispatched to the
+matching branch. Per direct user experience writing other behaviors: a
+common idiom is to drive this with an **id-typed value** (item/signal id)
+rather than a bare number, as a readable state discriminator for a
+parameter-driven state machine (jump to the label representing "current
+state"); this doc doesn't yet have a worked example of that form.
+
+Don't reach for `jump`/`label` for a branch whose target is always the same
+dict position — a plain `next: K+1` is simpler and is what the in-game
+editor itself produces when you ask it to converge several branches on the
+same following instruction (confirmed: cleaning up a `hexat.dsc` draft that
+used `jump`-to-a-shared-"done"-label for every branch, the game's own
+re-export collapsed it to a plain `next` on each branch instead, keeping
+`jump`/`label` reserved solely for the one genuinely dynamic dispatch).
+
+## Stopping a behavior: `exit`/`restart` vs. `next: false`
+
+`next: false` (or falling off the end of the instruction list) only ends
+*the current instruction's own* execution path for this tick — it does
+**not** halt the behavior, and it does **not** yield the tick either. At the
+top level (outside any Loop/Sequence-style block), running out of
+instructions this way is the *implicit default*: flow falls back to the
+Program Start node, same destination `restart` jumps to explicitly (see
+below) — but, critically, without yielding. Under the default Locked mode
+(one instruction per tick) that's invisible, since only one instruction runs
+regardless. But under `unlock` (see that instruction's own `explain` text),
+which runs instructions back-to-back until something actually yields, this
+implicit jump-to-start is not a yield point, so a behavior with no
+`wait`/`exit` anywhere spins through the whole program repeatedly within the
+same tick and trips the engine's safety limit ("If more than 1000
+instructions are executed in one tick then the behavior controller will
+crash at that location" — this is exactly what happened to an early
+`hexat.dsc` draft: 51 instructions, `unlock`, no `wait`/`exit`, `next: false`
+on the last instruction, and it still hit the crash).
+
+Two dedicated instructions, per their `func`s in `data/instructions.lua`,
+and corrected here from an earlier wrong read of that source (verified
+in-game):
+
+- **`exit`** (~line 459, zero args) — **actually stops the behavior.**
+  Nothing more executes on this or any later tick until something else
+  explicitly restarts it — it is a genuine halt, not "yield and resume next
+  tick" (an earlier version of this doc guessed the latter from the source
+  alone, since `state.counter` gets reset to `1` and the func `return`s
+  `true`; that guess was wrong — confirmed against real behavior in-game).
+  This is what actually fixed the `unlock` crash above: unlike the implicit
+  fall-off-the-end path, `exit` really yields *and stays stopped*, so there
+  is no next-tick re-entry to spin on.
+- **`restart`** (~line 482, zero args) — forces program flow immediately
+  back to the **Program Start** node, unconditionally. This matters
+  specifically from *inside* a block-style instruction (Loop, Sequence,
+  etc.) — those maintain their own internal notion of "what happens when
+  this block's body falls off the end" (e.g. next loop iteration, next
+  sequence step), which is *not* the same as jumping to the true program
+  start. `restart` overrides that and forces the real start regardless of
+  what block(s) you're nested in — it's the explicit-instruction form of
+  the same implicit jump a flat, non-block program takes for free when it
+  falls off the end. Note `restart`'s func does not `return true`, so
+  (unlike `exit`) it does not yield either — reaching it under `unlock` with
+  no other yield point would still spin.
+
+Practical rule of thumb: **any `unlock`ed behavior needs a reachable
+`wait` or `exit` on every path** — `restart` and plain fall-off-the-end
+both loop back to the start without yielding, so neither one alone
+prevents the 1000-instruction crash.
+
+## Block-type instructions: what `next: false` means *inside* one
+
+The "falls back to Program Start" story above is only true at the outermost
+level. Confirmed from `data/instructions.lua`'s `sequence` (~line 3722) and
+`last`/Break (~line 438), and empirically from `hexat_test.dsc` (a `HexAt`
+sub-behavior with a nested nested loop + sequence, called from a 6×T-range
+test harness, matched by hand against `hex_expansion_math.md`'s formulas
+for all 92 `(R, T)` combinations with zero mismatches): several instructions
+push a **block context** (`BeginBlock`, stored on `state.blocks`) around
+their own body. Inside that context, a `next: false` (or a dead-ended
+fall-through) doesn't restart the whole program — it pops back to the
+*enclosing* block, which decides what happens next on its own terms:
+
+- **`sequence`** (args: `First`/`Second`/`Third`/`Fourth` exec, all
+  optional, plus `Last` exec) chains whichever of `First..Fourth` are
+  wired, in order — each one runs to its own dead end, then control
+  returns to `sequence` to start the next wired one, and finally jumps to
+  `Last`. An omitted pin is simply skipped (not pushed onto the internal
+  step list at all). This is the confirmed idiom for "run these two
+  independent calculations, then continue once both are done" — e.g.
+  `hexat_test.dsc`'s `HexAt` computes X (`First`) then Y (`Second`/`Third`)
+  then combines them (`Last`), with a `next: false` ending each of the
+  first three legs.
+- **Loops** (`for_number` and everything else `instructions_index.md` tags
+  `*(loop)*`) use the same mechanism for their body: a `next: false` (or
+  running off the end of the loop body) advances to the *next iteration*,
+  not a program restart. Confirmed with a nested loop in
+  `hexat_test.dsc`: the inner `for_number` (looping `T`) has its own
+  `Done` exec explicitly set to `false` — and this correctly falls back to
+  advancing the *outer* `for_number` (looping `R`) to its next iteration,
+  rather than crashing or halting the behavior, because the inner loop's
+  block sits nested inside the outer loop's block.
+- **`last`** (Break, ~line 438) is the explicit-break instruction for
+  this same stack: it looks up the *innermost* entry on `state.blocks` and
+  invokes that block type's own `.last` handler (for `sequence`, this
+  jumps straight to `Last`, skipping any remaining pins).
+
+Net effect: "does `next: false` stop the behavior?" doesn't have a single
+answer — it depends on block nesting depth at that point. It only reaches
+the true top-level fall-off-the-end behavior (described above) once it has
+popped through every enclosing block.
+
+### `check_number`'s implicit "equal" case
+
+A confirmed idiom from `hexat_test.dsc`'s own `R == 0` guard: `check_number`
+only has exec pins for **If Larger** and **If Smaller** — there's no
+**If Equal**. To test for equality, point *both* `If Larger` and `If
+Smaller` at the same "not equal, do the general-case work" target, and
+leave the instruction's own top-level `next` (or let it fall through) to
+the "equal" logic. Concretely, `HexAt`'s guard is `check_number(Value=R,
+Compare=<omitted, defaults to 0>, If Larger -> general case, If Smaller ->
+general case)`, falling through (no explicit `next`) straight into
+`Result = Origin` — i.e. the `R == 0` branch is just "neither larger nor
+smaller."
 
 ## Hidden literal fields (`make_asm`)
 
@@ -149,7 +421,7 @@ in `data/instructions.lua` (field name, and the default if omitted):
 
 | Instruction id | Field | Default | Meaning |
 |---|---|---|---|
-| `call` | `sub` | `false` | id of the library behavior to call |
+| `call` | `sub` | `false` | id of the library behavior to call, **or** a 1-based index into the top-level `dependencies` array for an embedded sub-behavior — see below |
 | `load_behavior` | `sub` | `false` | id of the library behavior to load remotely |
 | `domove` | `c` | `1` | `1` = Synchronous, `2` = Asynchronous |
 | `moveaway_range` | `c` | `1` | movement mode, as above |
@@ -175,6 +447,35 @@ For the numeric `c` fields, check that instruction's `node_ui` in
 each integer value corresponds to — the meaning is UI-label-specific and
 not worth duplicating here.
 
+### `call`'s `sub`: saved-library id vs. embedded dependency index
+
+`call`'s `sub` field takes two genuinely different shapes depending on
+whether the target sub-behavior has been saved to the faction's library or
+is just embedded/private to this one `.dsc`:
+
+- A **string** — the id of an existing saved-library behavior (the
+  `data/library.lua` runtime resolves this via `GetFactionBehaviorAsmById`).
+- A **small integer** — a **1-based index into the top-level
+  `dependencies` array** (see "Top-level envelope" above), for a
+  sub-behavior that only exists embedded in this `.dsc`, never saved
+  separately. Confirmed from `data/library.lua`'s
+  `PackLibraryItemToCompactedItem` (the export path): `depnum = #dependencies
+  + 1; dependencies[depnum] = item` — the *n*-th embedded dependency is
+  assigned `sub = n` (1-based Lua), which is `dependencies[n-1]` in
+  `dsc_codec.py`'s 0-based JSON rendering. `-1` is a reserved sentinel
+  ("reference to outer") for a behavior that calls **itself** recursively,
+  distinct from a real dependency index; the legacy runtime format instead
+  used `sub == 0` for the same self-call case (`call`'s own `func`, and a
+  comment in `UnpackCompactedItemToLibraryTable`, both note this).
+
+Concretely, in `hexat_test.dsc`, the harness's `call` node has `"sub": 1`
+and the top-level `dependencies` array has exactly one entry (the `HexAt`
+sub-behavior) — `dependencies[0]` in JSON, i.e. Lua-array slot 1. There's
+only one dependency in this example so index-vs-something-else can't be
+fully disambiguated from this case alone, but it matches
+`PackLibraryItemToCompactedItem`'s numbering exactly, and is the natural
+reading given `dependencies` is documented as a plain array.
+
 ## Variable-length argument instructions (`var_args`)
 
 `call`, `load_behavior`, `build`, and `produce` accept extra trailing
@@ -196,13 +497,13 @@ Annotated opening instructions of `observer.dsc` (decode it yourself with
 "2": {                                            // scan: Filter1, Filter2, Filter3, Result(out), No Result(exec)
   "0": { "id": "v_enemy_faction" },               //   Filter1 = enemy faction
   "3": "A",                                       //   Result -> local var "A"
-  "4": 11,                                        //   No Result -> jump to instruction 11
+  "4": 11,                                        //   No Result -> jump to instruction 11 - 1 = key "10" (next scan attempt)
   "op": "scan"
 },
 "3": { "0": { "id": "v_enemy_faction" }, "1": -3, "op": "set_reg" },  // Store <- enemy faction id (unused marker)
 "4": { "0": "A", "1": -4, "op": "set_reg" },      // Goto <- found enemy (var A): move to attack it
 "5": {                                            // check_number: IfLarger(exec), IfSmaller(exec), Value(in), Compare(in)
-  "0": 8,                                         //   If Larger -> jump to 8
+  "0": 8,                                         //   If Larger -> jump to 8 - 1 = key "7" (add)
   "2": "CNT", "3": { "num": 0 },                  //   comparing CNT > 0
   "op": "check_number"                            //   (If Smaller omitted -> falls through to 6)
 },
@@ -234,9 +535,11 @@ To hand-author safely:
    `instructions_index.md` for each instruction's `args` order and this
    file for value/branch encoding.
 3. Re-index every instruction key if you insert/delete entries in the
-   middle — `exec`/`next` targets are absolute instruction indices, so
-   inserting an instruction shifts every index after it and any jump that
-   pointed past that point needs updating.
+   middle — `exec`/`next` targets are absolute positions, so inserting an
+   instruction shifts every index after it and any jump that pointed past
+   that point needs updating. Remember the off-by-one when writing these:
+   a jump to dict key `K` is encoded as the integer `K + 1` (see "Branch and
+   fall-through resolution").
 4. Encode with `dsc_codec.py encode`, then immediately decode the result
    again and diff against what you intended — this round-trip is your only
    correctness check outside the game itself.
