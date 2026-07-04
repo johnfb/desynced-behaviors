@@ -138,12 +138,75 @@ class Interpreter:
             rows.append(t("label" if op == "label" else op, None, *args))
         self.engine.lua.globals().CurrentAsm = t(*rows)
 
+    def _enter_for_number(self, instr, i: int, blocks: list[dict]):
+        """`for_number`'s block-stack driving is simulated in Python (same tier as `sequence`,
+        per this module's docstring -- reusing the real `InstBeginBlock`/per-tick dispatcher is
+        deferred, see CLAUDE.md), but the per-iteration advance/termination decision -- including
+        the documented `Step` auto-direction quirk (behavior_format.md) and `REG_INFINITE`
+        wraparound -- is genuinely delegated to the real `data.instructions.for_number.next`/
+        `.last`, the same way `check_number`/`jump` delegate their own branch decisions above.
+        Returns a 0-based instruction index to jump to, or None (caller should call dead_end())."""
+        from_a = self._translate_arg(instr[1])
+        to_a = self._translate_arg(instr[2])
+        step_raw = instr[3]
+        step_a = self._translate_arg(step_raw) if step_raw is not None else False
+        val_raw = instr[4]
+        val_a = self.mem.var(val_raw) if isinstance(val_raw, str) else val_raw
+        done_0based = _resolve_next(instr, 5, i + 1)
+        exec_done_raw = False if done_0based is None else done_0based + 1
+
+        instr_def = self.engine.data.instructions["for_number"]
+        reg_infinite = self.engine.lua.globals().REG_INFINITE
+
+        def call_last():
+            instr_def.last(self.comp, self.state, it, from_a, to_a, step_a, val_a, exec_done_raw)
+            return None if self.state.counter is False else int(self.state.counter) - 1
+
+        nfrom = self.engine.get_num(self.comp, self.state, from_a)
+        nto = self.engine.get_num(self.comp, self.state, to_a)
+        nstep = self.engine.get_num(self.comp, self.state, step_a) if step_a is not False else None
+        if nfrom == reg_infinite or nstep == 0:
+            it = None  # never touched -- func's own early-exit skips BeginBlock entirely
+            self.state.counter = exec_done_raw
+            return None if self.state.counter is False else int(self.state.counter) - 1
+
+        # Port of `for_number.func`'s own initial-offset formula (behavior_format.md's "Step
+        # auto-direction"): `.next` always advances by step before checking/writing, so the seed
+        # value is one step before the first real iteration.
+        initial = nfrom + (
+            -nstep if nstep is not None else (-1 if (nfrom <= nto or nto == reg_infinite) else 1)
+        )
+        it = self.engine.lua.table(initial)
+        body_start = i + 1
+
+        def advance():
+            finished = instr_def.next(
+                self.comp, self.state, it, from_a, to_a, step_a, val_a, exec_done_raw
+            )
+            if not finished:
+                return False, body_start
+            return True, call_last()
+
+        finished, target = advance()
+        if finished:
+            return target
+        blocks.append({"kind": "loop", "advance": advance, "break_": call_last})
+        return target  # == body_start
+
     def run(self, max_steps: int = 20000) -> None:
         blocks: list[dict] = []
 
         def dead_end():
             while blocks:
                 block = blocks[-1]
+                if block["kind"] == "loop":
+                    finished, target = block["advance"]()
+                    if not finished:
+                        return target
+                    blocks.pop()
+                    if target is not None:
+                        return target
+                    continue
                 if block["thunks"]:
                     return block["thunks"].pop(0)()
                 blocks.pop()
@@ -153,7 +216,18 @@ class Interpreter:
 
         i = 0
         steps = 0
-        while 0 <= i < self.n:
+        while True:
+            if not (0 <= i < self.n):
+                # Falling off the true end of the instruction array without ever hitting an
+                # explicit `next=false` still has to pop any enclosing block (a loop body whose
+                # last instruction is also the program's last instruction, e.g.) -- matching
+                # behavior_format.md's "next: false means... pops back to the enclosing block",
+                # which applies to any dead end, not just an explicit `false`.
+                nxt = dead_end()
+                if nxt is None:
+                    return
+                i = nxt
+                continue
             steps += 1
             if steps > max_steps:
                 raise RuntimeError("runaway")
@@ -164,7 +238,7 @@ class Interpreter:
             if op in ("unlock", "lock", "label", "nop"):
                 pass
             elif op == "sequence":
-                blocks.append({"thunks": _seq_targets(instr, i), "done": None})
+                blocks.append({"kind": "sequence", "thunks": _seq_targets(instr, i), "done": None})
                 nxt = dead_end()
                 if nxt is None:
                     return
@@ -224,6 +298,29 @@ class Interpreter:
                     i = int(self.state.counter) - 1
                     continue
                 nexti = _resolve_next(instr, None, i + 1)
+            elif op == "for_number":
+                target = self._enter_for_number(instr, i, blocks)
+                if target is None:
+                    nxt = dead_end()
+                    if nxt is None:
+                        return
+                    i = nxt
+                    continue
+                i = target
+                continue
+            elif op == "last":
+                if not blocks or blocks[-1]["kind"] != "loop":
+                    raise RuntimeError("last (Break) requires an enclosing for_number loop")
+                block = blocks.pop()
+                target = block["break_"]()
+                if target is None:
+                    nxt = dead_end()
+                    if nxt is None:
+                        return
+                    i = nxt
+                    continue
+                i = target
+                continue
             elif op in ("add", "sub", "mul", "div"):
                 a = self._translate_arg(instr[1])
                 b = self._translate_arg(instr[2])
