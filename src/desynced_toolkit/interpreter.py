@@ -175,21 +175,38 @@ class Interpreter:
             elif op == "check_number":
                 value_arg = self._translate_arg(instr[3])
                 compare_arg = self._translate_arg(instr[4])
+                # Genuinely delegate the branch decision to the real func (matching `jump`,
+                # below) rather than re-deriving it in Python: resolve If Larger/If Smaller to
+                # raw 1-based asm targets (or `False`) ourselves, pass those straight through as
+                # the func's own `if_larger`/`if_smaller` args, and let its actual logic --
+                # including the real `REG_INFINITE` handling -- decide `state.counter`.
+                larger_target = _resolve_next(instr, 1, i + 1)
+                smaller_target = _resolve_next(instr, 2, i + 1)
+                larger_raw = False if larger_target is None else larger_target + 1
+                smaller_raw = False if smaller_target is None else smaller_target + 1
                 self.state.counter = None
                 self.engine.call(
-                    op, self.comp, self.state, None, None, value_arg, compare_arg
+                    op,
+                    self.comp,
+                    self.state,
+                    larger_raw,
+                    smaller_raw,
+                    value_arg,
+                    compare_arg,
                 )
-                # re-dispatch using OUR semantics (If Larger/If Smaller resolved via the
-                # program's own next-encoding), not the raw asm-index the real func would set,
-                # since we didn't wire it to CurrentAsm's 1-based indices for this instruction
-                a = self.engine.get_num(self.comp, self.state, value_arg)
-                b = self.engine.get_num(self.comp, self.state, compare_arg)
-                if a > b:
-                    nexti = _resolve_next(instr, 1, i + 1)
-                elif a < b:
-                    nexti = _resolve_next(instr, 2, i + 1)
-                else:
-                    nexti = _resolve_next(instr, None, i + 1)
+                if self.state.counter is False:
+                    nxt = dead_end()
+                    if nxt is None:
+                        return
+                    i = nxt
+                    continue
+                if self.state.counter is not None:
+                    i = int(self.state.counter) - 1
+                    continue
+                # neither branch fired (Value == Compare, per the real func's own comparison) --
+                # it leaves state.counter untouched for this case, so resolve the instruction's
+                # own fallthrough/`next` ("Equal") ourselves, same as `jump`'s fallback below
+                nexti = _resolve_next(instr, None, i + 1)
                 if nexti is None:
                     nxt = dead_end()
                     if nxt is None:
