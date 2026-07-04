@@ -1,5 +1,7 @@
 """Minimal proof-of-concept compiler: a small subset of Python syntax (parsed via the stdlib
-`ast` module) -> the instruction-dict format `dsc_codec.py`/behavior_format.md document.
+`ast` module) -> a genuine Lua table in the source-level shape `behavior_format.md` documents
+(1-based instruction list, `op` string key plus 1-based positional args per instruction -- the
+same shape `dsc_wire.decode_dsc()` hands back, not a Python dict standing in for one).
 
 Supported so far (deliberately small -- this is a first proof, not full coverage):
   - `x = <int literal>` / `x = y`                       -> set_reg
@@ -24,28 +26,37 @@ class CompileError(Exception):
 
 
 class AstCompiler:
-    def __init__(self) -> None:
-        self._instrs: list[dict] = []
+    def __init__(self, lua) -> None:
+        self._lua = lua
+        self._instrs: list = []  # Lua tables, in order (Python list is just our own bookkeeping)
 
-    def _emit(self, rec: dict) -> int:
+    def _new_instr(self, op: str) -> "lupa._LuaTable":
+        t = self._lua.table()
+        t["op"] = op
+        return t
+
+    def _emit(self, t) -> int:
         idx = len(self._instrs)
-        self._instrs.append(rec)
+        self._instrs.append(t)
         return idx
 
-    @staticmethod
-    def _operand(node: ast.expr):
+    def _operand(self, node: ast.expr):
         if isinstance(node, ast.Name):
-            return node.id
+            return node.id  # a plain Lua string once assigned into a table
         if isinstance(node, ast.Constant) and isinstance(node.value, int):
-            return {"num": node.value}
+            lit = self._lua.table()
+            lit["num"] = node.value
+            return lit
         raise CompileError(f"unsupported operand: {ast.dump(node)}")
 
-    def compile_source(self, source: str, name: str = "compiled") -> dict:
+    def compile_source(self, source: str, name: str = "compiled"):
         tree = ast.parse(source)
         self._compile_body(tree.body)
-        out = {str(i): rec for i, rec in enumerate(self._instrs)}
-        out["name"] = name
-        return out
+        prog = self._lua.table()
+        for i, instr in enumerate(self._instrs, start=1):
+            prog[i] = instr
+        prog["name"] = name
+        return prog
 
     def _compile_body(self, stmts: list[ast.stmt]) -> None:
         for stmt in stmts:
@@ -66,16 +77,16 @@ class AstCompiler:
         value = stmt.value
         if isinstance(value, ast.BinOp) and type(value.op) in _BINOP_TO_INSTR:
             op = _BINOP_TO_INSTR[type(value.op)]
-            self._emit(
-                {
-                    "0": self._operand(value.left),
-                    "1": self._operand(value.right),
-                    "2": target,
-                    "op": op,
-                }
-            )
+            t = self._new_instr(op)
+            t[1] = self._operand(value.left)
+            t[2] = self._operand(value.right)
+            t[3] = target
+            self._emit(t)
         elif isinstance(value, (ast.Name, ast.Constant)):
-            self._emit({"0": self._operand(value), "1": target, "op": "set_reg"})
+            t = self._new_instr("set_reg")
+            t[1] = self._operand(value)
+            t[2] = target
+            self._emit(t)
         else:
             raise CompileError(f"unsupported assignment value: {ast.dump(value)}")
 
@@ -91,29 +102,29 @@ class AstCompiler:
             )
         op = test.ops[0]
         if isinstance(op, ast.Gt):
-            larger_body, smaller_body = stmt.body, stmt.orelse
+            true_key = 1  # If Larger
         elif isinstance(op, ast.Lt):
-            larger_body, smaller_body = stmt.orelse, stmt.body
+            true_key = 2  # If Smaller
         else:
             raise CompileError("only > and < comparisons are supported in `if`")
 
-        check_idx = self._emit(
-            {
-                "2": self._operand(test.left),
-                "3": self._operand(test.comparators[0]),
-                "op": "check_number",
-            }
-        )
-        # "If Larger" branch falls through naturally (physically next instruction); compile it
-        # first, then a `nop` to skip over the "If Smaller" branch once it's done.
-        self._compile_body(larger_body)
-        skip_idx = self._emit(
-            {"op": "nop"}
-        )  # `next` patched below, once we know where "after" is
-        smaller_start = len(self._instrs)
-        self._instrs[check_idx]["1"] = (
-            smaller_start + 1
-        )  # If Smaller -> here (raw 1-based)
-        self._compile_body(smaller_body)
+        # `check_number` has no "If Equal" slot (see behavior_format.md's "check_number's
+        # 'equal' case") -- equality is carried by the instruction's own fallthrough/`next`,
+        # same as an omitted If Larger/If Smaller. So the FALSE branch of the Python `if`
+        # (`stmt.orelse`, which for both `a > b` and `a < b` is exactly "not true, including
+        # equal") must be the one compiled as the physically-next fallthrough -- not whichever
+        # comparison direction happens to be tested. Only the TRUE branch needs an explicit
+        # (forward-patched) jump target.
+        check_t = self._new_instr("check_number")
+        check_t[3] = self._operand(test.left)
+        check_t[4] = self._operand(test.comparators[0])
+        check_idx = self._emit(check_t)
+
+        self._compile_body(stmt.orelse)
+        skip_t = self._new_instr("nop")
+        skip_idx = self._emit(skip_t)  # `next` patched below, once "after" is known
+        true_start = len(self._instrs)
+        check_t[true_key] = true_start + 1  # raw 1-based Lua position
+        self._compile_body(stmt.body)
         after = len(self._instrs)
-        self._instrs[skip_idx]["next"] = after + 1
+        skip_t["next"] = after + 1

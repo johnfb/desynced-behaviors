@@ -1,10 +1,23 @@
 # Desynced Behavior Source Format
 
-This documents the schema that `dsc_codec.py` decodes a behavior clipboard string
-(`.dsc`, and entries in `data.behaviors`) into, and that you must produce (as a
-Python `dict`/`list`) to encode a new one. It is the missing layer between
-[`instructions_index.md`](instructions_index.md) (what each instruction does and
-its argument order) and `dsc_codec.py` (string ⟷ dict transport).
+This documents the schema a behavior clipboard string (`.dsc`, and entries in
+`data.behaviors`) decodes into, and that you must produce to encode a new one.
+It is the missing layer between [`instructions_index.md`](instructions_index.md)
+(what each instruction does and its argument order) and the codec (string ⟷
+transport).
+
+**Tooling note:** this doc was originally written against `dsc_codec.py`, a
+now-retired standalone script that rendered the decoded structure as a Python
+`dict`/`list` with 0-based instruction/arg indices (a JSON/Python-convenience
+choice, not something intrinsic to the format). That tool's logic now lives in
+`src/desynced_toolkit/dsc_wire.py`, which decodes/encodes **genuine Lua tables**
+(1-based, via `lupa`) instead — matching exactly what the game's own
+`Tool.GetClipboard()`/`Tool.SetClipboard()` would hand a real Lua caller, with
+no shifting in either direction. Everything below describing the *actual wire
+format* (register/slot addressing, branch resolution, hidden literals,
+var-args) is still accurate; only examples showing 0-based Python dict keys
+should be read as "shift by one to get the real 1-based Lua key" if you're
+using `dsc_wire.py` directly.
 
 Reverse-engineered from `data/library.lua`'s `GetFactionBehaviorAsm` (the
 function that compiles this exact source form into runtime bytecode) and
@@ -532,7 +545,9 @@ case — most hand-written behaviors won't need it.
 ## Worked example
 
 Annotated opening instructions of `observer.dsc` (decode it yourself with
-`python3 dsc_codec.py decode observer.dsc` to see the rest):
+`LupaEngine(source).decode_dsc(open("observer.dsc").read())` to see the rest
+as a genuine Lua table — the 0-based dict keys below are the retired
+`dsc_codec.py`'s rendering; real Lua keys are one higher):
 
 ```jsonc
 "0": { "op": "unlock" },                          // run multiple instructions per tick
@@ -572,19 +587,25 @@ There's no assembler/validator for this format — the game's compiler
 To hand-author safely:
 
 1. Decode an existing behavior close to what you want (`data.behaviors`,
-   or `observer.dsc`) with `dsc_codec.py decode` to get a real starting
-   structure.
-2. Edit the JSON: add/remove/rewire instructions using
+   or `observer.dsc`) with `desynced_toolkit`'s `LupaEngine.decode_dsc()`
+   (backed by `dsc_wire.py`) to get a real starting structure, as a genuine
+   Lua table — or build one directly with `compiler.AstCompiler` for the
+   subset of syntax it currently supports.
+2. Edit the instruction list: add/remove/rewire instructions using
    `instructions_index.md` for each instruction's `args` order and this
    file for value/branch encoding.
 3. Re-index every instruction key if you insert/delete entries in the
    middle — `exec`/`next` targets are absolute positions, so inserting an
    instruction shifts every index after it and any jump that pointed past
    that point needs updating. Remember the off-by-one when writing these:
-   a jump to dict key `K` is encoded as the integer `K + 1` (see "Branch and
+   a jump to Lua key `K` is encoded as the integer `K + 1` (see "Branch and
    fall-through resolution").
-4. Encode with `dsc_codec.py encode`, then immediately decode the result
-   again and diff against what you intended — this round-trip is your only
-   correctness check outside the game itself.
+4. Encode with `LupaEngine.encode_dsc()`, then immediately decode the
+   result again and diff against what you intended — this round-trip is
+   your only correctness check outside the game itself. `Interpreter` can
+   also run the decoded result directly against the real instruction
+   semantics before spending an in-game test on it, which catches
+   authoring mistakes (as opposed to genuine encoding-understanding gaps)
+   cheaply.
 5. Load it in-game (paste into the behavior library) to confirm it opens
    cleanly in the visual editor and runs as expected.

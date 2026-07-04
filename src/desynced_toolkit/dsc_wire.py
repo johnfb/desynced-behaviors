@@ -1,46 +1,51 @@
-#!/usr/bin/env python3
-"""
-Codec for Desynced "DS" clipboard strings (behaviors/blueprints), ported from the
-official dsconvert.js (https://github.com/StageGames/DesyncedJavaScriptUtils).
+"""Codec for Desynced "DS" clipboard strings (behaviors/blueprints).
+
+Ported from `dsc_codec.py` (the project's original standalone Python-dict-based tool, now
+retired -- see CLAUDE.md/memory for that history), but building directly into genuine Lua tables
+(via `lupa`) rather than Python `dict`/`list`. This isn't a stylistic preference: `Tool.GetClipboard`/
+`Tool.SetClipboard` (`ui/Library.lua`) are the *real* functions that do this in the actual game --
+confirmed to be engine-native (no Lua source for base62/msgpack/clipboard access anywhere in this
+extract) -- so there is no "more real" representation to defer to than the Lua table shape the
+engine hands back to Lua code that calls them. Building straight into that shape, instead of a
+Python dict rendering that then needs re-shifting, removes an entire representation layer (and
+the int-vs-str-key and 0-based-vs-1-based bugs that layer caused earlier in this project).
 
 Format: DS<type><base62-u32-decompressed-len><base62-data>
 Inner data: optionally zlib-compressed, then a MessagePack-like binary format
-customized for Lua tables (sparse-array vacancy bitmasks, 1-based/0-based key
-shifting, and three non-standard type bytes: it repurposes 0xc1 (reserved/unused
-in real MessagePack) and 0xc4/0xc5 (bin8/bin16 in real MessagePack) for
-USERDATA/INVALID/DEADKEY, so this is NOT decodable with a stock MessagePack
+customized for Lua tables (sparse-array vacancy bitmasks, three non-standard type bytes: it
+repurposes 0xc1 (reserved/unused in real MessagePack) and 0xc4/0xc5 (bin8/bin16 in real
+MessagePack) for USERDATA/INVALID/DEADKEY, so this is NOT decodable with a stock MessagePack
 library despite looking like one).
 
-Table representation used by this module: a Lua table decodes to a Python
-`list` if it was a pure array, or a `dict` if it has any hash-part entries
-(dict keys are Python `int`, 0-based, for what were originally 1-based Lua
-numeric keys, or `str` for everything else). encode_dsc() accepts the same
-shapes, and also accepts numeric-looking string keys (e.g. from JSON, which
-can't have int keys) -- it normalizes those to int automatically.
+Table representation: every table on the wire is a genuine Lua table (1-based), matching exactly
+what the game's own `Tool.GetClipboard()` would hand a Lua caller -- no key-shifting in either
+direction, since the wire format already stores the real 1-based Lua key values directly.
 
-Validated against the official StageGames/DesyncedJavaScriptUtils dsconvert.js
-(decode and encode, both directions, plus round-trips) using a real captured
-behavior string and a synthetic object covering size-class boundaries,
-negative/large integers, nesting, and unicode. Two real bugs in the official
-reference encoder were found in the process (this module intentionally does
-NOT reproduce them):
-  1. Integers outside int32/uint32 range (< -2147483648 or > 4294967295) crash
-     the official encoder outright -- it calls a DataView method
-     (`setUint64`) that doesn't exist in JavaScript. This module writes a
-     proper signed Int64 instead, and the official *decoder* reads it back
-     correctly (confirmed), so this is a one-sided limitation of their
-     encoder, not a wire-format incompatibility.
-  2. Strings containing multi-byte UTF-8 characters (accents, CJK, etc.) are
-     encoded with a length header measured in JS UTF-16 code units instead of
-     UTF-8 bytes, corrupting the output -- confirmed the official *decoder*
-     fails to read back the official *encoder's* own output for such
-     strings. This module uses the correct UTF-8 byte length throughout, and
-     the official decoder reads its output correctly (confirmed).
+Ported from and cross-validated against the official
+[StageGames/DesyncedJavaScriptUtils](https://github.com/StageGames/DesyncedJavaScriptUtils)
+`dsconvert.js` reference implementation (decode-vs-decode, encode-then-decode-with-the-other-
+implementation, both ways) using both `observer.dsc` and a synthetic object covering size-class
+boundaries, negative/large integers, nesting, and unicode. Two real bugs in the official
+reference encoder were found in the process (this module intentionally does NOT reproduce them):
+  1. Integers outside int32/uint32 range (< -2147483648 or > 4294967295) crash the official
+     encoder outright -- it calls a DataView method (`setUint64`) that doesn't exist in
+     JavaScript. This module writes a proper signed Int64 instead, and the official *decoder*
+     reads it back correctly (confirmed), so this is a one-sided limitation of their encoder, not
+     a wire-format incompatibility.
+  2. Strings containing multi-byte UTF-8 characters (accents, CJK, etc.) are encoded with a
+     length header measured in JS UTF-16 code units instead of UTF-8 bytes, corrupting the
+     output -- confirmed the official *decoder* fails to read back the official *encoder's* own
+     output for such strings. This module uses the correct UTF-8 byte length throughout, and the
+     official decoder reads its output correctly (confirmed).
 """
-import json
+
+from __future__ import annotations
+
 import struct
 import sys
 import zlib
+
+import lupa
 
 BASE62_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 B62 = [255] * 256
@@ -77,6 +82,7 @@ MP_DESYNCED_DEADKEY = 0xC5
 
 
 # --- Base62 (custom framing, not a standard base62) ---
+
 
 def b62_read_u32(data, idx, end):
     u = 0
@@ -125,25 +131,49 @@ def b62_read_data(data, idx, end):
             i += 1
         chksum = (chksum + bits) % 0x100000000
         if i == 6:
-            buf[datalen] = bits & 0xFF; bits >>= 8; datalen += 1
-            buf[datalen] = bits & 0xFF; bits >>= 8; datalen += 1
-            buf[datalen] = bits & 0xFF; bits >>= 8; datalen += 1
-            buf[datalen] = bits & 0xFF; datalen += 1
+            buf[datalen] = bits & 0xFF
+            bits >>= 8
+            datalen += 1
+            buf[datalen] = bits & 0xFF
+            bits >>= 8
+            datalen += 1
+            buf[datalen] = bits & 0xFF
+            bits >>= 8
+            datalen += 1
+            buf[datalen] = bits & 0xFF
+            datalen += 1
         elif i == 5:
-            buf[datalen] = bits & 0xFF; bits >>= 8; datalen += 1
-            buf[datalen] = bits & 0xFF; bits >>= 8; datalen += 1
-            buf[datalen] = bits & 0xFF; datalen += 1
+            buf[datalen] = bits & 0xFF
+            bits >>= 8
+            datalen += 1
+            buf[datalen] = bits & 0xFF
+            bits >>= 8
+            datalen += 1
+            buf[datalen] = bits & 0xFF
+            datalen += 1
         elif i == 3:
-            buf[datalen] = bits & 0xFF; bits >>= 8; datalen += 1
-            buf[datalen] = bits & 0xFF; datalen += 1
+            buf[datalen] = bits & 0xFF
+            bits >>= 8
+            datalen += 1
+            buf[datalen] = bits & 0xFF
+            datalen += 1
         elif i == 2:
-            buf[datalen] = bits & 0xFF; datalen += 1
+            buf[datalen] = bits & 0xFF
+            datalen += 1
     if B62[data[idx]] != (chksum % 62):
-        print(f"WARNING: checksum mismatch (got {B62[data[idx]]}, expected {chksum % 62})", file=sys.stderr)
+        print(
+            f"WARNING: checksum mismatch (got {B62[data[idx]]}, expected {chksum % 62})",
+            file=sys.stderr,
+        )
     return bytes(buf[:datalen])
 
 
-CHARS_FOR_BYTES = [0, 2, 3, 5]  # indexed by remaining-byte-count (1,2,3) -> char count; 6 chars for a full 4-byte chunk
+CHARS_FOR_BYTES = [
+    0,
+    2,
+    3,
+    5,
+]  # indexed by remaining-byte-count (1,2,3) -> char count; 6 chars for a full 4-byte chunk
 
 
 def b62_write_data(data):
@@ -193,9 +223,10 @@ def push_int_packed(out, v):
             break
 
 
-# --- Decode ---
+# --- Decode: builds genuine Lua tables (1-based), given a lupa.LuaRuntime ---
 
-def decode_dsc(s):
+
+def decode_dsc(lua: "lupa.LuaRuntime", s: str):
     data = [ord(c) for c in s]
     idx, end = 0, len(data)
     while idx < end and B62[data[idx]] == 255:
@@ -203,7 +234,7 @@ def decode_dsc(s):
     while end > idx and B62[data[end - 1]] == 255:
         end -= 1
     assert end - idx >= 5, "Too short"
-    assert data[idx] == ord('D') and data[idx + 1] == ord('S'), "Missing DS prefix"
+    assert data[idx] == ord("D") and data[idx + 1] == ord("S"), "Missing DS prefix"
     type_char = chr(data[idx + 2])
     idx += 3
 
@@ -214,14 +245,14 @@ def decode_dsc(s):
 
     buf = zlib.decompress(raw) if decompress_len else raw
 
-    return type_char, parse_msgpack(buf)
+    return type_char, parse_msgpack(buf, lua)
 
 
-def parse_msgpack(buf):
+def parse_msgpack(buf, lua: "lupa.LuaRuntime"):
     p = [0]
 
     def read(n):
-        v = buf[p[0]:p[0] + n]
+        v = buf[p[0] : p[0] + n]
         p[0] += n
         return v
 
@@ -234,7 +265,7 @@ def parse_msgpack(buf):
             size_array = sz
             size_node = 0
 
-        t = {} if is_map else []
+        t = lua.table()
         total = size_array + size_node
         i = 0
         while i < total:
@@ -246,23 +277,18 @@ def parse_msgpack(buf):
                 if not (vacancy_bits & mask):
                     val = parse()
                     if i < size_array:
-                        if isinstance(t, list):
-                            t.append(val)
-                        else:
-                            t[i] = val
+                        t[i + 1] = (
+                            val  # genuine 1-based Lua array index, no shift needed
+                        )
                     else:
                         if buf[p[0]] == MP_DESYNCED_DEADKEY:
                             p[0] += 1
                             get_int_packed(buf, p)
                         else:
                             key = parse(is_key=True)
-                            if isinstance(key, int):
-                                t[key - 1] = val
-                            else:
-                                try:
-                                    t[int(key) - 1] = val
-                                except (ValueError, TypeError):
-                                    t[key] = val
+                            # the wire already stores the real (1-based, for ints) Lua key --
+                            # no shift, unlike the retired dsc_codec.py's Python-dict rendering
+                            t[key] = val
                             get_int_packed(buf, p)  # Lua memory layout, skip
                 i += 1
                 mask <<= 1
@@ -280,49 +306,49 @@ def parse_msgpack(buf):
         if tp == MP_FixZero:
             return 0
         if tp == MP_Float32:
-            return struct.unpack_from('<f', read(4))[0]
+            return struct.unpack_from("<f", read(4))[0]
         if tp == MP_Float64:
-            return struct.unpack_from('<d', read(8))[0]
+            return struct.unpack_from("<d", read(8))[0]
         if tp == MP_Uint8:
-            return struct.unpack_from('<B', read(1))[0]
+            return struct.unpack_from("<B", read(1))[0]
         if tp == MP_Uint16:
-            return struct.unpack_from('<H', read(2))[0]
+            return struct.unpack_from("<H", read(2))[0]
         if tp == MP_Uint32:
-            return struct.unpack_from('<I', read(4))[0]
+            return struct.unpack_from("<I", read(4))[0]
         if tp == MP_Uint64:
-            return struct.unpack_from('<Q', read(8))[0]
+            return struct.unpack_from("<Q", read(8))[0]
         if tp == MP_Int8:
-            return struct.unpack_from('<b', read(1))[0]
+            return struct.unpack_from("<b", read(1))[0]
         if tp == MP_Int16:
-            return struct.unpack_from('<h', read(2))[0]
+            return struct.unpack_from("<h", read(2))[0]
         if tp == MP_Int32:
-            return struct.unpack_from('<i', read(4))[0]
+            return struct.unpack_from("<i", read(4))[0]
         if tp == MP_Int64:
-            return struct.unpack_from('<q', read(8))[0]
+            return struct.unpack_from("<q", read(8))[0]
         if tp == MP_Str8:
-            n = struct.unpack_from('<B', read(1))[0]
-            return read(n).decode('utf-8')
+            n = struct.unpack_from("<B", read(1))[0]
+            return read(n).decode("utf-8")
         if tp == MP_Str16:
-            n = struct.unpack_from('<H', read(2))[0]
-            return read(n).decode('utf-8')
+            n = struct.unpack_from("<H", read(2))[0]
+            return read(n).decode("utf-8")
         if tp == MP_Str32:
-            n = struct.unpack_from('<I', read(4))[0]
-            return read(n).decode('utf-8')
+            n = struct.unpack_from("<I", read(4))[0]
+            return read(n).decode("utf-8")
         if tp == MP_FixStr:
             return ""
         if tp == MP_Array16:
-            n = struct.unpack_from('<H', read(2))[0]
+            n = struct.unpack_from("<H", read(2))[0]
             return parse_table(n, False)
         if tp == MP_Array32:
-            n = struct.unpack_from('<I', read(4))[0]
+            n = struct.unpack_from("<I", read(4))[0]
             return parse_table(n, False)
         if tp == MP_FixArray:
             return parse_table(0, False)
         if tp == MP_Map16:
-            n = struct.unpack_from('<H', read(2))[0]
+            n = struct.unpack_from("<H", read(2))[0]
             return parse_table(n, True)
         if tp == MP_Map32:
-            n = struct.unpack_from('<I', read(4))[0]
+            n = struct.unpack_from("<I", read(4))[0]
             return parse_table(n, True)
         if tp == MP_FixMap:
             return parse_table(0, True)
@@ -336,7 +362,7 @@ def parse_msgpack(buf):
             return parse_table(tp - MP_FixArray, False)
         if tp < MP_Nil:
             n = tp - MP_FixStr
-            return read(n).decode('utf-8')
+            return read(n).decode("utf-8")
         if tp > MP_Map32:
             return tp - 256  # negative fixint
         raise ValueError(f"Unknown type byte: 0x{tp:02x}")
@@ -344,19 +370,11 @@ def parse_msgpack(buf):
     return parse()
 
 
-# --- Encode ---
-
-def _is_int_str(s):
-    if s in ("", "-"):
-        return False
-    body = s[1:] if s[0] == "-" else s
-    return body.isdigit()
+# --- Encode: consumes genuine Lua tables (1-based) ---
 
 
-def _normalize_keys(v):
-    """JSON objects can only have string keys; treat numeric-looking ones as
-    the int keys our table representation (and the wire format) expects."""
-    return {(int(k) if isinstance(k, str) and _is_int_str(k) else k): val for k, val in v.items()}
+def _lua_table_keys(t) -> list:
+    return list(t.keys()) if hasattr(t, "keys") else list(t)
 
 
 def serialize(out, v, is_table_key=False):
@@ -372,7 +390,7 @@ def serialize(out, v, is_table_key=False):
         _serialize_number(out, v)
     elif isinstance(v, str):
         _serialize_string(out, v)
-    elif isinstance(v, (dict, list)):
+    elif lupa.lua_type(v) == "table":
         if is_table_key:
             raise ValueError("Unable to serialize table key of type 'table'")
         _serialize_table(out, v)
@@ -383,18 +401,18 @@ def serialize(out, v, is_table_key=False):
 def _serialize_number(out, v):
     if isinstance(v, float) and not v.is_integer():
         out.append(MP_Float64)
-        out.extend(struct.pack('<d', v))
+        out.extend(struct.pack("<d", v))
         return
     n = int(v)
     if n > 0xFFFFFFFF:
         out.append(MP_Uint64)
-        out.extend(struct.pack('<Q', n))
+        out.extend(struct.pack("<Q", n))
     elif n > 0xFFFF:
         out.append(MP_Uint32)
-        out.extend(struct.pack('<I', n))
+        out.extend(struct.pack("<I", n))
     elif n > 0xFF:
         out.append(MP_Uint16)
-        out.extend(struct.pack('<H', n))
+        out.extend(struct.pack("<H", n))
     elif n > 0x7F:
         out.append(MP_Uint8)
         out.append(n)
@@ -404,24 +422,24 @@ def _serialize_number(out, v):
         out.append(n + 256)
     elif n >= -128:
         out.append(MP_Int8)
-        out.extend(struct.pack('<b', n))
+        out.extend(struct.pack("<b", n))
     elif n >= -32768:
         out.append(MP_Int16)
-        out.extend(struct.pack('<h', n))
+        out.extend(struct.pack("<h", n))
     elif n >= -2147483648:
         out.append(MP_Int32)
-        out.extend(struct.pack('<i', n))
+        out.extend(struct.pack("<i", n))
     else:
         # The reference JS encoder emits MP_Uint64 here and calls a DataView
         # method (setUint64) that doesn't actually exist -- a dead/broken
         # path for numbers below INT32_MIN. We implement it properly as a
         # signed Int64 instead of reproducing the crash.
         out.append(MP_Int64)
-        out.extend(struct.pack('<q', n))
+        out.extend(struct.pack("<q", n))
 
 
 def _serialize_string(out, v):
-    encoded = v.encode('utf-8')
+    encoded = v.encode("utf-8")
     n = len(encoded)
     if n < 32:
         out.append(MP_FixStr | n)
@@ -430,34 +448,37 @@ def _serialize_string(out, v):
         out.append(n)
     elif n < 65536:
         out.append(MP_Str16)
-        out.extend(struct.pack('<H', n))
+        out.extend(struct.pack("<H", n))
     else:
         out.append(MP_Str32)
-        out.extend(struct.pack('<I', n))
+        out.extend(struct.pack("<I", n))
     out.extend(encoded)
 
 
 def _serialize_table(out, v):
-    if isinstance(v, list):
-        v = dict(enumerate(v))
-    else:
-        v = _normalize_keys(v)
+    all_keys = _lua_table_keys(v)
 
-    # Scan how far the "array part" extends, allowing exactly one gap (a
-    # missing index immediately followed by a present one).
+    def has(k):
+        return v[k] is not None
+
+    # Scan how far the "array part" extends (1-based, genuine Lua convention), allowing
+    # exactly one gap (a missing index immediately followed by a present one).
     size_array = 0
     array_keys = 0
     while True:
-        if size_array in v:
+        if has(size_array + 1):
             array_keys += 1
-        elif (size_array + 1) not in v:
+        elif not has(size_array + 2):
             break
         size_array += 1
 
-    all_keys = list(v.keys())
     key_count = len(all_keys)
     map_keys = key_count - array_keys
-    keys = [k for k in all_keys if not (isinstance(k, int) and not isinstance(k, bool) and 0 <= k < size_array)]
+    keys = [
+        k
+        for k in all_keys
+        if not (isinstance(k, int) and not isinstance(k, bool) and 1 <= k <= size_array)
+    ]
 
     if map_keys:
         sz = (len(bin(map_keys - 1)[2:]) << 1) | (1 if size_array else 0)
@@ -468,10 +489,10 @@ def _serialize_table(out, v):
         out.append((MP_FixMap if map_keys else MP_FixArray) | sz)
     elif sz < 65536:
         out.append(MP_Map16 if map_keys else MP_Array16)
-        out.extend(struct.pack('<H', sz))
+        out.extend(struct.pack("<H", sz))
     else:
         out.append(MP_Map32 if map_keys else MP_Array32)
-        out.extend(struct.pack('<I', sz))
+        out.extend(struct.pack("<I", sz))
 
     size_node = 0
     if map_keys:
@@ -486,25 +507,25 @@ def _serialize_table(out, v):
     vacancy_bits = 0
     while i != total:
         bit = i & 7
-        vacant = (i >= last) or (i < size_array and i not in v)
+        vacant = (i >= last) or (i < size_array and not has(i + 1))
         vacancy_bits = (vacancy_bits if bit else 0) | ((1 if vacant else 0) << bit)
         i += 1
         if i == total or bit == 7:
             out.append(vacancy_bits)
             start = i - 1 - bit
             for j in range(start, i):
-                if j >= last or (j < size_array and j not in v):
+                if j >= last or (j < size_array and not has(j + 1)):
                     continue
                 if j < size_array:
-                    serialize(out, v[j])
+                    serialize(out, v[j + 1])
                 else:
                     key = keys[j - size_array]
                     serialize(out, v[key])
-                    if isinstance(key, int) and not isinstance(key, bool):
-                        serialize(out, key + 1, is_table_key=True)
-                    else:
-                        serialize(out, key, is_table_key=True)
-                    out.append(0)  # Lua table memory-layout hint; unused by any decoder here
+                    # the wire stores the real Lua key directly -- no shift
+                    serialize(out, key, is_table_key=True)
+                    out.append(
+                        0
+                    )  # Lua table memory-layout hint; unused by any decoder here
 
 
 def encode_dsc(type_char, obj):
@@ -523,27 +544,3 @@ def encode_dsc(type_char, obj):
     parts.append(b62_write_u32(compressed_length))
     parts.append(b62_write_data(payload))
     return "".join(parts)
-
-
-if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] in ('decode', 'encode'):
-        mode, rest = sys.argv[1], sys.argv[2:]
-    else:
-        mode, rest = 'decode', sys.argv[1:]  # back-compat: bare path == decode
-
-    if mode == 'decode':
-        path = rest[0] if rest else 'observer'
-        with open(path) as f:
-            s = f.read().strip()
-        type_char, obj = decode_dsc(s)
-        print(f"// Type: {type_char}")
-        print(json.dumps(obj, indent=2, default=str))
-    else:
-        if not rest:
-            print("usage: dsc_codec.py encode <infile.json> [type_char]", file=sys.stderr)
-            sys.exit(1)
-        path = rest[0]
-        type_char = rest[1] if len(rest) > 1 else 'C'
-        with open(path) as f:
-            obj = json.load(f)
-        print(encode_dsc(type_char, obj))
