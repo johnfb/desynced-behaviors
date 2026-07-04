@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-This is an extract of the base game data assets for **Desynced** (by The Desynced Team), a factory/automation game with programmable robots. It contains the Lua scripts, textures, sounds, and other assets that define game behavior. There is no build system — this is a read-only reference for analyzing and understanding game mechanics.
+This repo is tooling, documentation, and design work built *on top of* an extract of the base game data assets for **Desynced** (by The Desynced Team), a factory/automation game with programmable robots — the Lua scripts, textures, sounds, and other assets that define game behavior. There is no build system for the game data itself — it's a read-only reference for analyzing and understanding game mechanics.
 
-The entry point manifest is `def.json`, which defines all packages and their load order.
+**The game data extract lives outside this repo**, at `/home/johnfb/workspaces/desynced-game-data/` (moved out on 2026-07-04 to stop ~560MB of vendored, untracked game assets from cluttering a tooling project — see `desynced-toolkit` below for the actual thing being built here). Every path mentioned in this doc as if it were local (`data/instructions.lua`, `ui/ui.lua`, `main.zip`, etc.) is **relative to that external directory**, not this repo's root. Both Bash and Read can reach it directly via absolute path without any special setup; use `/add-dir /home/johnfb/workspaces/desynced-game-data` if a given session needs it added explicitly. `desynced_toolkit.assets.open_asset_source(...)` (this repo's own code) takes that directory (or its `main.zip`) as a plain argument — nothing is hardcoded.
+
+The entry point manifest is `def.json` (in the external directory), which defines all packages and their load order.
 
 ## Package Architecture
 
@@ -114,6 +116,8 @@ Input bindings use `Input.BindAction(name, event, handler)`. Default bindings ar
 
 ## Asset Layout
 
+(All paths below are under the external game-data directory — see "What This Is".)
+
 - `textures/` — PNG icons organized by category (items, frames, components, effects, codex images)
 - `sounds/` — Audio assets
 - `skin/` — UI skin assets (buttons, panels, icons)
@@ -151,4 +155,4 @@ A real Python package (managed with `uv` — `uv run`, `uv add`, `uv format`; ve
 
 `hex_expansion_math.md` (workspace root) is a hand-worked-out coordinate-math spec for a hexagonal-spiral power-pole expansion behavior (`HexAt(origin, R, T) -> coord` and its inverse `HexIndexOf`), built against the integer-only constraints of the Math instructions. `HexAt` is implemented and validated in-game: `hexat_test.dsc` (workspace root) is a self-contained `.dsc` bundling both a reusable `HexAt(R, T, Origin, d_half) -> Result` sub-behavior (via the top-level `dependencies` mechanism documented in `behavior_format.md`) and a test harness that calls it for every `R=0..5, T=0..6R-1` and `debug_print`s the result; `hexat_test_log.txt` is the captured log from that run. Cross-checked by hand against `hex_expansion_math.md`'s formulas for all 92 logged `(R, T)` cases with zero mismatches. This round of building/loading/fixing/re-exporting against the real game is also what surfaced and corrected several wrong assumptions in `behavior_format.md` (coordinate-literal encoding, `exit`/`restart`/block-scoped `next: false` semantics, the `call`/`dependencies` embedding mechanism, the `jump`/`label` computed-dispatch pair) — read `behavior_format.md` itself for the details rather than re-deriving them. `HexIndexOf` now has a `.dsc` too: `HexIndexOf_test_1.dsc` (workspace root) bundles a `HexIndexOf(Coord, Origin, d_half) -> (R, T)` sub-behavior alongside `HexAt` as a second embedded dependency, plus a harness that round-trips `HexAt`'s output back through `HexIndexOf` for every `R=0..5, T=0..6R-1` and `debug_print`s both pairs for comparison. Self-checked with an independent Python re-implementation of the instruction semantics before handoff (exact round-trip plus ~19.5k off-lattice/random coordinates against the cube-rounding math), but **not yet loaded/run in-game** — treat it like `beacon.dsc`/`beacon2.dsc` (built and self-verified, real-engine confirmation still pending).
 
-`main.zip` (workspace root, ~290MB, untracked) is a full pristine zip of this same asset tree (matches `def.json` + all package directories) — likely the raw download this extract was populated from. Not otherwise referenced by any tooling here.
+`main.zip` (in the external game-data directory, ~290MB) is a full pristine zip of this same asset tree (matches `def.json` + all package directories) — likely the raw download this extract was populated from. `desynced_toolkit.assets.open_asset_source()` can load directly from it (see "What This Is" and the `desynced-toolkit` section).
