@@ -235,6 +235,9 @@ return (R, T)
 - Whether a nudged-away-from-ideal placement should feed back into planning the *next* point from
   the ideal grid position or the actual nudged one — not yet decided.
 - `HexIndexOf` now has a `.dsc` (`HexIndexOf_test_1.dsc`, workspace root, round-tripping through
-  `HexAt`) — self-verified against an independent Python re-implementation, but not yet loaded or
-  run in-game, unlike `HexAt` (see `hexat_test.dsc`). Per `combat_squad_spec.md`'s pattern of
-  separating design spec from implementation.
+  `HexAt`) and is validated by `desynced-toolkit`'s `tests/test_hex_expansion.py`, which runs both
+  routines through the real `data/instructions.lua` via `Interpreter` (217 `(R, T)` cases up to
+  `R=8`) — a much stronger check than the original hand-rolled Python re-implementation this was
+  first verified against. Still not yet loaded/run in the actual game client, unlike `HexAt` (see
+  `hexat_test.dsc`/`hexat_test_log.txt`). Per `combat_squad_spec.md`'s pattern of separating design
+  spec from implementation.
