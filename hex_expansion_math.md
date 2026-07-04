@@ -159,20 +159,27 @@ the "rational ratios partway through" approach (avoids any premature precision l
 cube-rounding error comparison work on exact integers instead of fractions).
 
 **Not yet implemented or in-game-validated** (unlike `HexAt` — see `hexat_test.dsc`). The
-pseudocode below has been reworked to use the same idioms `HexAt` proved out, but hasn't itself
-been through the build → load → observe → fix loop, so treat the control-flow restructuring
-(the shared `done` tail, the region-gate cascade) as a design carried over by analogy, not as
-independently confirmed.
+pseudocode below was revised in a second pass (user-driven review) that caught four real
+inefficiencies in the first draft and ruled out one further idea (using `switch` for region
+detection — see inline note at that spot), none of which change the result. Still carried over by
+analogy from `HexAt`'s proven idioms, not independently confirmed in-game.
 
 Signature matches `HexAt`'s convention (see previous section): takes `d_half`, not `d` — `d` and
 `Den` are both derived internally from it, never caller-visible, same reasoning as `HexAt`.
 
 ```
-d   = d_half * 2
-Den = 2 * d * K                      # = 4 * d_half * K
+Den = (4*K) * d_half                  # `d` itself is never needed: the original draft computed
+                                       # d = d_half*2 only to feed Den = 2*d*K = 4*d_half*K. Since
+                                       # 4*K is a fixed literal (34640), Den is one Multiply against
+                                       # a precomputed constant -- no intermediate `d` at all.
 
-dx = Coord.x - Origin.x
-dy = Coord.y - Origin.y
+Delta   = Coord - Origin              # coordinate (-) coordinate: component-wise subtract, confirmed
+                                       # semantics (behavior_format.md's "coordinate (+) coordinate"
+                                       # rule, via formation-hold.dsc). Replaces splitting Coord and
+                                       # Origin separately (2x Separate Coordinate) then subtracting
+                                       # each component (2x Subtract) -- 4 instructions -- with 1
+                                       # Subtract on the coordinates themselves.
+dx, dy  = Separate Coordinate(Delta)  # 1 Separate Coordinate. Total: 2 instructions instead of 4.
 
 # rational axial coords, all over shared denominator Den:
 q_num  = 2*K*dx - SCALE*dy
@@ -195,36 +202,65 @@ err_z = Abs(rz*Den - r_num)
 
 # check_number only has "If Larger"/"If Smaller", no "If Equal" -- same equal-idiom HexAt used
 # for its R==0 guard applies to each ">" test below (an exact tie falls through as "not larger"):
+#
+# Only rx and rz are ever read again (q, r below) -- ry itself is dead past this point, the same
+# way standard axial (q, r) drops the redundant cube `y` (y = -x-z is always derivable). The
+# standard 3-way cube-round correction (this is the textbook algorithm, unmodified) picks whichever
+# of rx/ry/rz has the largest rounding error and recomputes *that one* from the other two, to
+# restore the x+y+z=0 constraint exactly. When ry is the one with the largest error, its premise is
+# "rx and rz's own independent roundings were already the trustworthy pair" -- which is exactly the
+# case where nothing needs correcting for our purposes, since we only ever read rx/rz. So the
+# middle case collapses to a true no-op (not just an unread assignment):
 if err_x > err_y and err_x > err_z:  rx = -ry - rz
-elif err_y > err_z:                   ry = -rx - rz
-else:                                  rz = -rx - ry
+elif err_z >= err_y:                  rz = -rx - ry
+# else (err_y strictly largest): rx, rz already correct -- nothing to do, no instructions needed.
 
 q, r = rx, rz
 R = max(abs(q), abs(r), abs(q+r))    # pairwise Compare Number, per "Why integer-only"
 if R == 0: return (0, 0)             # same check_number equal-idiom as HexAt's R==0 guard
 
-# Region detection: first region whose t lands in [0, R-1] wins (corners satisfy two at once), so
-# this stays a Compare-Number cascade with early exit, not a computed jump table -- `k` is exactly
-# what's being solved for here, so (per behavior_format.md's note on `jump`/`label`) there's
-# nothing to dispatch on until a region has already matched. What *does* carry over from HexAt:
-# each region that matches sets k/t and Jumps straight to one shared `done` tail, instead of each
-# region duplicating the `T = k*R + t; return` logic the way the original draft of this pseudocode
-# inlined it six times.
+# Region detection, rewritten as a for_number SEARCH LOOP over candidate side k=0..5, using the
+# same jump/label computed-dispatch idiom HexAt already validated in-game for its own (forward)
+# k=0..5 dispatch. The first draft's own comment argued jump/label couldn't apply here because
+# "k is exactly what's being solved for" -- true for using jump/label as the OUTER dispatch (you
+# can't jump to an unknown k), but that doesn't rule out combining it with a loop that *enumerates*
+# candidate k values and only uses jump/label to pick each candidate's arithmetic, exactly as below.
 #
-# Each region gate is an equality test (via the same equal-idiom) AND a `t in [0, R-1]` range
-# test (two more check_numbers: fail if t < 0, fail if t > R-1); failing either falls through to
-# the next region's gate.
+# NOT the `switch` instruction (a live option worth ruling out explicitly): `switch`
+# (data/instructions.lua ~3261) resolves each Case via `GetId`/`test_id`, comparing a value's *id*
+# field for unit/item/frame/tech filtering -- it has no numeric-equality mode at all, so it cannot
+# test "does this arithmetic expression equal R", no matter how many Case slots are chained or
+# nested.
+#
+# The six sides' gate equalities (q==±R / r==±R / q+r==±R) and `t` formulas are irreducibly
+# different arithmetic, same as HexAt's forward direction -- that part doesn't collapse. What does
+# collapse from 6 duplicated copies down to 1 is the `t in [0, R-1]` range check and the "not a
+# match, try next side" plumbing: inside a loop body, an exec pin wired to `false` (not omitted --
+# see behavior_format.md's gotcha on that distinction) pops back to the loop, which just advances
+# to the next iteration -- free "continue" semantics, no explicit "jump to next region" wiring.
+# `last` (Break) then jumps straight to the loop's own Done pin once a match is found.
 
-region(0): gate r == R,     then (q+R) in [0,R-1];  on pass: k=0; t=q+R;  Jump(done)
-region(1): gate q+r == R,   then q     in [0,R-1];  on pass: k=1; t=q;    Jump(done)
-region(2): gate q == R,     then (-r)  in [0,R-1];  on pass: k=2; t=-r;   Jump(done)
-region(3): gate r == -R,    then (R-q) in [0,R-1];  on pass: k=3; t=R-q;  Jump(done)
-region(4): gate q+r == -R,  then (-q)  in [0,R-1];  on pass: k=4; t=-q;   Jump(done)
-region(5): gate q == -R,    then r     in [0,R-1];  on pass: k=5; t=r;    # last region, falls through
+for_number(0, 5) -> k:                        # Value = k, this iteration's candidate side
+  Jump(k)                                     # computed dispatch, same idiom as HexAt's Jump(k)
 
-done:
-T = k*R + t
-return (R, T)
+  Label(0): check_number(r,   R, IfLarger->false, IfSmaller->false); t = q + R  # falls into tail
+  Label(1): check_number(q+r, R, IfLarger->false, IfSmaller->false); t = q;     Jump(tail)
+  Label(2): check_number(q,   R, IfLarger->false, IfSmaller->false); t = -r;    Jump(tail)
+  Label(3): check_number(r,  -R, IfLarger->false, IfSmaller->false); t = R - q; Jump(tail)
+  Label(4): check_number(q+r,-R, IfLarger->false, IfSmaller->false); t = -q;    Jump(tail)
+  Label(5): check_number(q,  -R, IfLarger->false, IfSmaller->false); t = r;     Jump(tail)
+
+  tail:                                        # written once, shared by all 6 labels
+    check_number(t, 0,   IfSmaller->false)     # t < 0     -> not this side, next iteration
+    check_number(t, R-1, IfLarger->false)      # t > R-1   -> not this side, next iteration
+    last()                                     # match: break straight to the loop's Done pin
+
+Done:                                          # reached via `last` (match found), or after k=5's
+                                                # iteration runs out with no match -- should be
+                                                # unreachable for a valid (q,r), but is now a free
+                                                # defensive fallback the old flat cascade didn't have
+  T = k*R + t
+  return (R, T)
 ```
 
 ## Open items / not yet decided
@@ -236,6 +272,11 @@ return (R, T)
   retry count) — not yet worked out.
 - Whether a nudged-away-from-ideal placement should feed back into planning the *next* point from
   the ideal grid position or the actual nudged one — not yet decided.
+- `HexIndexOf_test_1.dsc` (`tests/data/`) predates the pseudocode revision above — it implements
+  the original flat region-gate cascade (with `d`, the 4-instruction coordinate split, and the
+  dead `ry` branch all still present), not the `for_number`/`jump`/`label` restructuring. The
+  in-game/test validation below applies to that earlier design; the revised pseudocode is
+  design-only until it's rebuilt and re-exported through the same loop.
 - `HexIndexOf` now has a `.dsc` (`HexIndexOf_test_1.dsc`, `tests/data/`, round-tripping through
   `HexAt`) and is validated by `desynced-toolkit`'s `tests/test_hex_expansion.py`, which runs both
   routines through the real `data/instructions.lua` via `Interpreter` (217 `(R, T)` cases up to
