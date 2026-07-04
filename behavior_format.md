@@ -398,18 +398,61 @@ answer — it depends on block nesting depth at that point. It only reaches
 the true top-level fall-off-the-end behavior (described above) once it has
 popped through every enclosing block.
 
-### `check_number`'s implicit "equal" case
+### `for_number`'s `Step` auto-direction
 
-A confirmed idiom from `hexat_test.dsc`'s own `R == 0` guard: `check_number`
-only has exec pins for **If Larger** and **If Smaller** — there's no
-**If Equal**. To test for equality, point *both* `If Larger` and `If
-Smaller` at the same "not equal, do the general-case work" target, and
-leave the instruction's own top-level `next` (or let it fall through) to
-the "equal" logic. Concretely, `HexAt`'s guard is `check_number(Value=R,
-Compare=<omitted, defaults to 0>, If Larger -> general case, If Smaller ->
-general case)`, falling through (no explicit `next`) straight into
-`Result = Origin` — i.e. the `R == 0` branch is just "neither larger nor
-smaller."
+`for_number`'s `Step` arg (`instructions_index.md`: "use -1 or 1 based on
+inputs if left empty") auto-detects direction from `From`/`To` when
+omitted, confirmed by an artifact in both `hexat_test_log.txt` and
+`HexIndexOf_test_1.dsc`'s own harness: for `R == 0`, the inner loop is
+built as `for_number(0, 6*R - 1, ...)` = `for_number(0, -1, ...)` with
+`Step` omitted — since `From (0) > To (-1)`, it silently runs with an
+implicit `Step = -1`, iterating `T = 0` then `T = -1` (two iterations, not
+zero). This is correct/documented behavior, not a bug — but it's easy to
+trip over: any omitted-`Step` loop whose bound expression can invert
+sign (as `6*R - 1` does at `R = 0`) will silently reverse direction and
+run at least once, rather than running zero times the way a fixed-step
+loop with `From > To` normally would.
+
+### `check_number`'s "equal" case
+
+A confirmed idiom from `hexat_test.dsc`'s own `R == 0` guard. The in-game
+editor shows `check_number` with three labeled pins — **If Larger**, **If
+Smaller**, **Equal** — but only `If Larger`/`If Smaller` get their own
+numbered argument slots (`"0"`/`"1"`); `Equal` isn't a separate slot at
+all, it's carried by the instruction's ordinary top-level `next` field (or
+plain fallthrough if that's also omitted). To test for equality, point
+*both* `If Larger` and `If Smaller` at the same "not equal, do the
+general-case work" target, and let `next`/fallthrough be the "equal" case.
+Concretely, `HexAt`'s guard is `check_number(Value=R, Compare=<omitted,
+defaults to 0>, If Larger -> general case, If Smaller -> general case)`,
+falling through (no explicit `next`) straight into `Result = Origin` — i.e.
+the `R == 0` branch is exactly `Equal`, just encoded as a fallthrough
+rather than a numbered slot.
+
+### ⚠️ Gotcha: an omitted exec arg never consults the top-level `next`
+
+Found while hand-authoring `HexIndexOf_test_1.dsc`'s cube-rounding
+correction cascade (three chained `>` comparisons where the "false"
+destination for the first two isn't the physically-next instruction).
+`If Larger`, `If Smaller`, and `Equal` (via `next`, see above) are three
+independent slots, each resolving its own omission the same way any
+instruction's output does when left unwired — falling through to the
+physically-next instruction. Setting the top-level `next` field does
+**not** also cover an omitted `If Smaller` (or `If Larger`); it only ever
+supplies the `Equal` pin.
+
+Concretely, for a plain `value > compare` test where "false" (smaller-or-
+equal) needs to jump somewhere other than dict-key+1: setting `If Larger`
+explicitly and leaving `If Smaller` omitted, while also setting the
+top-level `next` to your intended "false" target, **does not work** — the
+omitted `If Smaller` still resolves to dict-key+1, ignoring your `next`.
+You must wire `If Smaller` explicitly to the same target, in addition to
+`next` (needed separately to also catch the equal case), or restructure so
+the false destination genuinely is the physically-next instruction (as the
+`check_number`'s-implicit-equal idiom above does deliberately). All three
+outcomes (`If Larger`, `If Smaller`, top-level `next`) are independent
+slots with independent omission behavior — never assume setting one
+implicitly covers another.
 
 ## Hidden literal fields (`make_asm`)
 

@@ -234,5 +234,7 @@ return (R, T)
   retry count) — not yet worked out.
 - Whether a nudged-away-from-ideal placement should feed back into planning the *next* point from
   the ideal grid position or the actual nudged one — not yet decided.
-- `HexIndexOf` has no `.dsc` yet — only `HexAt` has been implemented and validated so far, per
-  `combat_squad_spec.md`'s pattern of separating design spec from implementation.
+- `HexIndexOf` now has a `.dsc` (`HexIndexOf_test_1.dsc`, workspace root, round-tripping through
+  `HexAt`) — self-verified against an independent Python re-implementation, but not yet loaded or
+  run in-game, unlike `HexAt` (see `hexat_test.dsc`). Per `combat_squad_spec.md`'s pattern of
+  separating design spec from implementation.
