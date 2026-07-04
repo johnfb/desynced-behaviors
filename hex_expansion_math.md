@@ -2,10 +2,12 @@
 
 Coordinate math for a behavior that expands a power-pole network outward from an origin in a
 hexagonal spiral, one ring at a time, checking each candidate point against the logistics network
-before building. Worked out in conversation. `HexAt` below is now implemented and validated
-in-game as a reusable sub-behavior (`hexat_test.dsc`, workspace root — a `HexAt(R, T, Origin,
-d_half) -> Result` sub-behavior plus a test harness that calls it for every `R=0..5, T=0..6R-1`
-and logs the result); `HexIndexOf` is not yet wired into a `.dsc`. Two routines:
+before building. Worked out in conversation. `HexAt` below is implemented and validated in-game
+as a reusable sub-behavior (`hexat_test.dsc`, `tests/data/` — a `HexAt(R, T, Origin, d_half) ->
+Result` sub-behavior plus a test harness that calls it for every `R=0..5, T=0..6R-1` and logs the
+result); `HexIndexOf` also has a `.dsc` now (`HexIndexOf_test_1.dsc`, `tests/data/`), validated by
+running both routines through the real game Lua (`tests/test_hex_expansion.py`), though not yet
+loaded/run in the actual game client itself. Two routines:
 
 - `HexAt(R, T, Origin, d_half)` — given a ring number `R` and a running index `T` within that
   ring, returns the world coordinate of that lattice point.
@@ -234,10 +236,18 @@ return (R, T)
   retry count) — not yet worked out.
 - Whether a nudged-away-from-ideal placement should feed back into planning the *next* point from
   the ideal grid position or the actual nudged one — not yet decided.
-- `HexIndexOf` now has a `.dsc` (`HexIndexOf_test_1.dsc`, workspace root, round-tripping through
+- `HexIndexOf` now has a `.dsc` (`HexIndexOf_test_1.dsc`, `tests/data/`, round-tripping through
   `HexAt`) and is validated by `desynced-toolkit`'s `tests/test_hex_expansion.py`, which runs both
   routines through the real `data/instructions.lua` via `Interpreter` (217 `(R, T)` cases up to
   `R=8`) — a much stronger check than the original hand-rolled Python re-implementation this was
-  first verified against. Still not yet loaded/run in the actual game client, unlike `HexAt` (see
-  `hexat_test.dsc`/`hexat_test_log.txt`). Per `combat_squad_spec.md`'s pattern of separating design
-  spec from implementation.
+  first verified against. **Now also loaded and run in the actual game client**: spot-checked
+  (not exhaustive) output at several log points was correct. User's reaction to the generated
+  node graph itself, though: poor organization/readability — too many single-use temp variables
+  cluttering the view, everything clumped together with no grouping/separation (comments helped,
+  structure didn't). **Planned follow-up (not yet done):** user will hand-rewrite/reorganize
+  `HexIndexOf` in the in-game editor for clarity, then export it back here for a diff against the
+  current `HexIndexOf_test_1.dsc` — same build → load → observe → fix → export → diff loop as
+  `hexat.dsc` → `hexat2.dsc` earlier in this project. Whatever changes shake out should inform how
+  future hand-authored/generated instruction sequences in this project get structured (fewer
+  single-use temps, deliberate grouping) — see `combat_squad_spec.md`'s pattern of separating
+  design spec from implementation for how that doc records this kind of thing.

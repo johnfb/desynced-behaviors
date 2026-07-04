@@ -544,9 +544,10 @@ case — most hand-written behaviors won't need it.
 
 ## Worked example
 
-Annotated opening instructions of `observer.dsc` (decode it yourself with
-`LupaEngine(source).decode_dsc(open("observer.dsc").read())` to see the rest
-as a genuine Lua table — the 0-based dict keys below are the retired
+Annotated opening instructions of `observer.dsc` (now at `tests/data/observer.dsc`
+— decode it yourself with
+`LupaEngine(source).decode_dsc(open("tests/data/observer.dsc").read())` to see
+the rest as a genuine Lua table — the 0-based dict keys below are the retired
 `dsc_codec.py`'s rendering; real Lua keys are one higher):
 
 ```jsonc

@@ -7,10 +7,13 @@ executed by genuine game Lua end to end.
 """
 
 import math
+from pathlib import Path
 
 import pytest
 
 from desynced_toolkit import Interpreter
+
+DATA_DIR = Path(__file__).parent / "data"
 
 D_HALF = 5
 ORIGIN = (0, 0)
@@ -49,7 +52,7 @@ def _rt_cases(max_r=8):
 
 @pytest.fixture(scope="module")
 def hexat_hexindexof(engine):
-    s = open("HexIndexOf_test_1.dsc").read().strip()
+    s = (DATA_DIR / "HexIndexOf_test_1.dsc").read_text().strip()
     _, prog = engine.decode_dsc(s)
     deps = prog["dependencies"]
     return deps[1], deps[2]  # HexAt, HexIndexOf
