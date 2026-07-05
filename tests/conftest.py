@@ -1,17 +1,18 @@
 """Shared fixtures. Tests need the external game-data extract -- see CLAUDE.md's "What This
-Is" for why it lives outside this repo. GAME_DATA_DIR matches the path documented there; if
-you've moved it, update both places (or better: this is the one spot worth making
-configurable via an env var if that ever becomes annoying)."""
+Is" for why it lives outside this repo. Defaults to the sibling-directory convention
+documented there (../desynced-game-data relative to this repo); override with the
+DESYNCED_GAME_DATA env var if your copy lives elsewhere."""
 
 import os
+from pathlib import Path
 
 import pytest
 
 from desynced_toolkit import LupaEngine, open_asset_source
 
-GAME_DATA_DIR = os.environ.get(
-    "DESYNCED_GAME_DATA", "/home/johnfb/workspaces/desynced-game-data"
-)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_GAME_DATA_DIR = REPO_ROOT.parent / "desynced-game-data"
+GAME_DATA_DIR = os.environ.get("DESYNCED_GAME_DATA", str(DEFAULT_GAME_DATA_DIR))
 
 
 @pytest.fixture(scope="session")
