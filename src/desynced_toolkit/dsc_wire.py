@@ -45,7 +45,7 @@ import struct
 import sys
 import zlib
 
-import lupa
+import lupa.lua54 as lupa
 
 BASE62_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 B62 = [255] * 256

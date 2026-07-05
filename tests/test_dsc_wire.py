@@ -9,7 +9,7 @@ one represents design-wise (they're also referenced from `behavior_format.md`/
 
 from pathlib import Path
 
-import lupa
+import lupa.lua54 as lupa
 import pytest
 
 DATA_DIR = Path(__file__).parent / "data"

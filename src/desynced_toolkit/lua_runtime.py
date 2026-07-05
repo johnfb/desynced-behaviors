@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from importlib import resources
 
-import lupa
+import lupa.lua54 as lupa
 
 from . import dsc_wire
 from .assets import AssetSource, get_package_manifest, resolve_include

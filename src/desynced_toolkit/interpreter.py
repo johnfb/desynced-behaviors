@@ -16,7 +16,7 @@ docstring).
 
 from __future__ import annotations
 
-import lupa
+import lupa.lua54 as lupa
 
 from .lua_runtime import LupaEngine, Memory
 
