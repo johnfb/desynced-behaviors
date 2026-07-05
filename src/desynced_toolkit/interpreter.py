@@ -350,6 +350,12 @@ class Interpreter:
                     self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
                 )
                 self.engine.call(op, self.comp, self.state, a, x_slot, y_slot)
+            elif op == "debug_print":
+                # No real log to write to here -- just surface it on stdout so a script driving
+                # the Interpreter directly (as opposed to a pytest assertion reading `mem` back)
+                # can observe it, matching what the in-game log would show.
+                val = self.engine.get_value(self.comp, self.state, self._translate_arg(instr[1]))
+                print(f"[debug_print] num={val.num} coord={val.coord} id={val.id}")
             else:
                 raise RuntimeError(f"unhandled op {op}")
 

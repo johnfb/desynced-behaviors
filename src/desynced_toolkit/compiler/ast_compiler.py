@@ -172,6 +172,14 @@ class AstCompiler:
             t[1] = self._compile_operand(call.args[0])
             self._emit(t)
             return
+        if name in ("unlock", "lock", "exit") and len(call.args) == 0:
+            self._emit(self._new_instr(name))
+            return
+        if name == "debug_print" and len(call.args) == 1:
+            t = self._new_instr(name)
+            t[1] = self._compile_operand(call.args[0])
+            self._emit(t)
+            return
         raise CompileError(f"unsupported statement-call: {name}")
 
     def _compile_for(self, stmt: ast.For) -> None:
