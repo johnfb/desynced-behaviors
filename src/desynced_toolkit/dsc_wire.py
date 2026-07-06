@@ -10,6 +10,17 @@ engine hands back to Lua code that calls them. Building straight into that shape
 Python dict rendering that then needs re-shifting, removes an entire representation layer (and
 the int-vs-str-key and 0-based-vs-1-based bugs that layer caused earlier in this project).
 
+Directly confirmed, not just inferred, on 2026-07-05: disassembling the shipped `Desynced.exe`
+(radare2 + r2ghidra) found the native `Tool.*` Lua-registration table (a `luaL_Reg`-style
+{name, funcptr} array in `.rdata`) and traced `GetClipboard`'s inner decode worker against this
+module's logic -- the literal `'D'`/`'S'` magic-byte check, the type-char position right after,
+and a base-31 length-header decode loop matched this module's `b62_read_u32` with no
+discrepancies. Stopped before the innermost base62-payload/checksum sub-function (not needed --
+already cross-validated against the official `dsconvert.js` and empirical `.dsc` round-trips
+below). Also separately confirmed via the binary: the actual embedded Lua is exactly version
+5.4.4 (see CLAUDE.md's "Lua version pin" note -- this project's `lupa` usage must import
+`lupa.lua54`, not bare `lupa`, to match).
+
 Format: DS<type><base62-u32-decompressed-len><base62-data>
 Inner data: optionally zlib-compressed, then a MessagePack-like binary format
 customized for Lua tables (sparse-array vacancy bitmasks, three non-standard type bytes: it
