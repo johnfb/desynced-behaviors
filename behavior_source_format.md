@@ -41,6 +41,13 @@ instruction := INDEX ":" OP "(" arg_list? ")" branch_note*
 arg_list := arg ("," arg)*
 arg := ARGNAME "=" value
 
+value := NUMBER
+       | "coord" "(" NUMBER "," NUMBER ")" ("[" "num" "=" NUMBER "]")?
+       | IDENTIFIER ("[" "num" "=" NUMBER "]")?      -- id-typed literal, optionally with num
+       | "$" NAME                                    -- variable
+       | NAME                                        -- resolved parameter name
+       | "@" ("goto" | "store" | "visual" | "signal" | NUMBER)  -- frame register; symbolic name when N is 1-4, else bare @N
+
 branch_note := ">" (INDEX | "STOP") "(" PINNAME ")"
              -- omitted entirely for a plain implicit fallthrough (see below)
 
@@ -54,10 +61,30 @@ sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
 |---|---|---|
 | number literal `{num=N}` or bare int used as a literal | `N` | plain |
 | coordinate `{coord={x=,y=}}` | `coord(x, y)` | never the `[x,y]` array form — see `behavior_format.md`'s corruption gotcha |
-| id-typed literal `{id="x"}` (item/frame/component/tech/value id) | bare identifier, e.g. `c_behavior`, `v_enemy_faction`, `metalbar` | safe to leave bare — real ids never collide with variable-name convention (below) |
+| id-typed literal `{id="x"}` (item/frame/component/tech/value id) | bare identifier, e.g. `c_behavior`, `v_enemy_faction`, `c_radar` | safe to leave bare — real ids never collide with variable-name convention (below). The syntax does not distinguish which *kind* of id it is (item/frame/component/tech/value) — that's inherent to the underlying value shape itself, not something this format could disambiguate further; look the id up in the real data files (or `instructions_index.md`) if its category matters |
+
+### Composite values (`num` plus a coord/id/entity)
+
+Per `behavior_format.md`'s composite-value semantics: `coord`/`entity`/`id`
+are mutually exclusive on one value, but `num` is a **separate** field that
+coexists with any of them (`{coord={x=,y=}, num=N}` is a real, valid, and
+fairly common shape — e.g. a coordinate paired with an associated
+distance/priority, or an item/component id paired with a quantity). This
+format renders that pairing with a `[num=N]` suffix on the base value:
+
+```
+coord(-5, 6)[num=3]      -- coordinate (-5, 6) carrying num=3
+c_radar[num=10]          -- component id c_radar carrying num=10
+```
+
+A bare `N` (no brackets) is reserved for a value that is *only* a number
+(the common case: `{num=N}` alone, nothing else set). The bracket form is
+only used when a coord/id/entity is present *and* carries a `num` alongside
+it — the two are visually distinct on purpose, since they come from
+different real value shapes and collapsing them would lose information.
 | local variable (string arg value, e.g. `"A"`) | `$A` | `$`-prefixed to stay unambiguous against bare identifiers, even though real behaviors only ever seem to use short letter names |
 | parameter (positive int ≤ param count) | the real name from `pnames[i]`, or `param<i>` if unnamed | resolved once at the top of the behavior/sub, referenced by name throughout |
-| frame register (small negative int) | `@N` (N = absolute value) | symbolic names (`@goto`, `@store`, ...) deferred — `FRAMEREG_*` constants are engine-native with no Lua-side numeric definition found in this extract; mapping them precisely is unconfirmed, not guessed |
+| frame register (small negative int) | `@goto` / `@store` / `@visual` / `@signal` for -1/-2/-3/-4; bare `@N` for any other negative value | confirmed via `ui/Skin.lua:680`'s `data.frame_regs` array order (`{Goto, Store, Visual, Signal}`, 1-based) cross-anchored against `ui/FrameView.lua:2413`'s `i == -FRAMEREG_GOTO` comparison — not a guess. See https://wiki.desyncedgame.com/Registers for what each register does at the gameplay level (async goto/store/visual-icon/signal-emit) |
 | entity/other runtime-only value | not directly literal-izable; only appears as a register read, never a source literal | n/a |
 
 ## Control edges
@@ -167,8 +194,6 @@ array).
   (e.g. preserve original positions for untouched instructions, only
   auto-layout newly-added ones) — that's a separate concern from this
   format's grammar and not addressed here.
-- **Frame register symbolic names** (`@goto` vs `@1`) — deferred, see the
-  Values table above.
 
 ## Visualization (secondary, generated on demand)
 
@@ -184,9 +209,14 @@ edited directly, and carries no information the listing doesn't already have.
 ## Status
 
 This is a specification, not yet a shipped decompiler. `scripts/render_examples.py`
-is the current working prototype implementing the grammar above (validated
-by hand against two real corpus behaviors — a 5-instruction simple case and
-a 16-instruction case with a real `jump`/`label` loop). Not yet built: the
-reverse direction (parsing this format back into a real Lua instruction
+is a working prototype of the underlying *graph extraction and edge-resolution
+logic* (validated by hand against two real corpus behaviors — a 5-instruction
+simple case and a 16-instruction case with a real `jump`/`label` loop) — it
+predates this document and its literal output syntax (`num:5`, `var:A`,
+`id:x` prefixes) does not yet match the cleaner surface syntax finalized here
+(bare `5`, `$A`, bare `x`, `[num=N]` composites). That's a cosmetic gap in
+the prototype, not a change to the underlying grammar — worth fixing before
+the prototype is relied on for anything beyond the comparison it was built
+for. Not yet built: the reverse direction (parsing this format back into a real Lua instruction
 table for `dsc_wire.py` to encode), integration replacing `ast_compiler.py`,
 and the `sequence`/`for_number` block-extent problem above.
