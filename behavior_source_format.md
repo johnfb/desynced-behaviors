@@ -298,11 +298,14 @@ Remaining real gap in the prototype's literal syntax: it still prints
 surface syntax (`5`/`$A`/`x`) — cosmetic, not a correctness issue, but worth
 closing before relying on the prototype for anything beyond ad hoc rendering.
 A second, non-cosmetic gap found while documenting faction registers
-(2026-07-07): `resolve_value` in `scripts/render_examples.py` has no case at
-all for `{"fr": "name"}` — it falls through to the generic composite-value
-branch (no `num`/`coord`/`id` key matches) and mislabels it `literal:{'fr':
-'name'}`, which reads as a fixed value rather than a register reference.
-Not yet fixed.
+(2026-07-07) and now fixed: `resolve_value` in `scripts/render_examples.py`
+had no case at all for `{"fr": "name"}` — it fell through to the generic
+composite-value branch (no `num`/`coord`/`id` key matches) and mislabeled it
+`literal:{'fr': 'name'}`, which reads as a fixed value rather than a register
+reference. It now renders `fr:name`, matching this prototype's existing
+prefixed style (`id:x`, `coord:(x,y)`) rather than this doc's final bare
+`fr(name)` surface syntax — still subject to the same not-yet-closed
+prefix-vs-bare-syntax gap noted just above.
 Not yet built: the reverse direction (parsing this format back into a real Lua instruction
 table for `dsc_wire.py` to encode — the live edit above was still constructed
 by hand-building Lua tables directly in Python, not by parsing this format's

@@ -69,6 +69,14 @@ def resolve_value(v, nparams: int) -> str:
         # render distinctly from a real literal, not silently as if it were one.
         return f"slot{v}(undeclared)"
     if isinstance(v, dict):
+        if "fr" in v:
+            # Faction (shared) register reference (behavior_format.md's
+            # "Faction (shared) registers" section). data/library.lua's
+            # GetFactionBehaviorAsm checks val.fr before anything else and
+            # never reads a coexisting num/coord/id off this same table, so
+            # unlike the composite values below, no num suffix is rendered
+            # here -- there's nothing for it to mean.
+            return f"fr:{v['fr']}"
         if "num" in v and len(v) == 1:
             return f"num:{v['num']}"
         # Composite: num coexists with coord/id/entity on the same value
