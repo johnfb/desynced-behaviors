@@ -47,6 +47,7 @@ value := NUMBER
        | "$" NAME                                    -- variable
        | NAME                                        -- resolved parameter name
        | "@" ("goto" | "store" | "visual" | "signal" | NUMBER)  -- frame register; symbolic name when N is 1-4, else bare @N
+       | "fr" "(" NAME ")" ("[" "num" "=" NUMBER "]")?  -- faction (shared) register, resolved by name at runtime
 
 branch_note := ">" (INDEX | "STOP") "(" PINNAME ")"
              -- omitted entirely for a plain implicit fallthrough (see below)
@@ -65,6 +66,7 @@ sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
 | local variable (string arg value, e.g. `"A"`) | `$A` | `$`-prefixed to stay unambiguous against bare identifiers, even though real behaviors only ever seem to use short letter names |
 | parameter (bare positive int) | the real name from `pnames[i]` when `i` is covered by this behavior's own declared `parameters`, else `param<i>` if `parameters` exists but is unnamed, else `slot<i>(undeclared)` | a bare positive int is **only ever** a mem-slot/parameter reference, never a plain number by itself (see the literal row above) — confirmed by direct comparison of the same real behavior copied two different ways (see project memory, 2026-07-06): a node-*selection* clipboard copy (Ctrl+A/Ctrl+C on nodes) can carry a bare int referencing a slot with no `parameters`/`pnames` table at all, while the identical value in a full Library-export copy of the same behavior is accompanied by `parameters={1:true}, pnames={1:"Result"}` and correctly resolves as a named parameter. The `slot<i>(undeclared)` fallback is a real, expected case for partial-selection fragments, not just a defensive placeholder — this is precisely the shape a "copy a portion of a behavior for review/editing" workflow will routinely produce |
 | frame register (small negative int) | `@goto` / `@store` / `@visual` / `@signal` for -1/-2/-3/-4; bare `@N` for any other negative value | confirmed via `ui/Skin.lua:680`'s `data.frame_regs` array order (`{Goto, Store, Visual, Signal}`, 1-based) cross-anchored against `ui/FrameView.lua:2413`'s `i == -FRAMEREG_GOTO` comparison — not a guess. See https://wiki.desyncedgame.com/Registers for what each register does at the gameplay level (async goto/store/visual-icon/signal-emit) |
+| faction (shared) register `{fr="name"}` | `fr(name)` | shared, named storage visible to every behavior the faction runs, and the backing store for Radio Transmitter/Receiver "band" links — resolved by *name* every access, never a fixed slot index (renaming/reordering a faction's registers doesn't break code that references them). See `behavior_format.md`'s "Faction (shared) registers" section for the full compile-time (`-99-n` synthetic address + `asm.fregs` name table) and runtime (`CallRadio`, name→index re-lookup) mechanism, including the write-guard when a register is currently link-driven by a Transmitter. The name must already exist for the target faction — unlike `$var`, `fr(name)` does not self-declare a new register |
 | entity/other runtime-only value | not directly literal-izable; only appears as a register read, never a source literal | n/a |
 
 ### Composite values (`num` plus a coord/id/entity)
@@ -295,6 +297,12 @@ Remaining real gap in the prototype's literal syntax: it still prints
 `num:5`/`var:A`/`id:x`-style prefixes instead of this doc's bare-value
 surface syntax (`5`/`$A`/`x`) — cosmetic, not a correctness issue, but worth
 closing before relying on the prototype for anything beyond ad hoc rendering.
+A second, non-cosmetic gap found while documenting faction registers
+(2026-07-07): `resolve_value` in `scripts/render_examples.py` has no case at
+all for `{"fr": "name"}` — it falls through to the generic composite-value
+branch (no `num`/`coord`/`id` key matches) and mislabels it `literal:{'fr':
+'name'}`, which reads as a fixed value rather than a register reference.
+Not yet fixed.
 Not yet built: the reverse direction (parsing this format back into a real Lua instruction
 table for `dsc_wire.py` to encode — the live edit above was still constructed
 by hand-building Lua tables directly in Python, not by parsing this format's

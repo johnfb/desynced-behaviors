@@ -112,7 +112,7 @@ What you put in a numbered slot depends on what that argument represents:
 | Frame register | plain negative int `-1` to `-4` | `-4` (see table below) |
 | Local variable | any string | `"A"`, `"CNT"`, `"Self"` |
 | Behavior parameter | plain positive int `1..N` | only valid if `parameters` has ≥N entries |
-| Faction (shared) register | `{ "fr": <id> }` | `{ "fr": "some_key" }` |
+| Faction (shared) register | `{ "fr": <name> }` (name, resolved at runtime — not a fixed slot, see "Faction (shared) registers" below) | `{ "fr": "some_key" }` |
 | `exec` branch target | plain int = **target's rendered dict key + 1** (see "Branch and fall-through resolution" — these values are never adjusted to the 0-based keys used elsewhere in this format); omit = fall through to the next instruction; `false` = stop, take no further action on this path | `11` jumps to dict key `"10"` |
 
 Local variables are the easy path for anything you don't need to persist
@@ -205,6 +205,61 @@ integers. Mapping confirmed from `data/instructions.lua` (`GetRegisterOrComponen
 | `-4` | Goto |
 
 (`observer.dsc` clears both at reset: `set_reg` with target `-3` and `-4`.)
+
+### Faction (shared) registers
+
+Unlike the 4 fixed frame registers (per-entity) or local variables (per-behavior),
+a faction register is shared, named storage visible to every behavior running
+on any entity owned by that faction — and it's also the backing store for the
+Radio Transmitter/Receiver component pair. Confirmed against
+`ui/Faction.lua`, `data/library.lua`, and `data/instructions.lua`:
+
+- **Storage.** The first time a faction touches a faction register, the game
+  creates a hidden, bodyless entity (`Map.CreateEntity(faction, "f_empty")`)
+  and attaches a `c_radio_storage` component to it, cached at
+  `faction.extra_data.radio_storage`. That component's own register array
+  *is* the set of faction registers. Three parallel tables in its
+  `extra_data` track bookkeeping: `names` (register name string → register
+  index), `bands` (index → a "band" value, e.g. `{id="v_letter_R", num=1}`,
+  shown in-game as `R1`), and `conns` (index → reference count, so a deleted
+  register's slot can be reused). Managed in-game from the Faction tab's
+  "Manage Faction Registers" button (`ui/Faction.lua`); create/rename/remove/
+  rebind-band all go through `FactionAction.FactionRegister`.
+- **Bands = radio channels.** Radio Transmitter and Radio Receiver components
+  each have their own "Band" register; connecting either one
+  (`RadioConnect`/`RadioDisconnect` in `data/components.lua`) links its value
+  register to whichever faction register currently has a matching band,
+  auto-creating one if no band matches yet. So a Transmitter "broadcasting on
+  band R1" is really just writing into the faction register whose band
+  happens to be `R1` — any Receiver on the same band, *and* any behavior
+  referencing that faction register directly by name, all see the same value.
+- **Referencing one directly from a behavior** (no physical Transmitter/
+  Receiver needed): the Program editor's argument popup has a "Read/Write
+  Faction Register" section listing the faction's current register names;
+  picking one sets the argument to `{ "fr": "<name>" }`, exactly like the
+  literal-value table above. **The name must already exist for the faction**
+  (created via the UI, or already used elsewhere) — unlike a local variable,
+  a bare `fr` name doesn't self-declare a new register on first use.
+- **Compile-time encoding is by name, not index.** `GetFactionBehaviorAsm`
+  (`data/library.lua`) can't bake in a fixed register index, since a
+  register's index can change (renamed/reassigned as others are added or
+  removed). Instead it assigns each distinct `fr` name found in the behavior
+  a synthetic negative address `-99 - n` (a *fourth* address range, disjoint
+  from frame registers `-1..-4`, parameters `1..N`, and local-variable/
+  constant mem slots `>N`), and records the mapping in `asm.fregs[n] = name`.
+- **Runtime resolution re-looks-up the name every access.** In
+  `data/instructions.lua`, any resolved address `<= -100` routes through
+  `CallRadio`: it reads the name back out of the compiled `fregs` table, then
+  re-resolves *that name* to whatever index it currently has via
+  `radio_storage.extra_data.names`, then reads/writes the `c_radio_storage`
+  component's register at that index. This is why renaming or reordering a
+  faction's registers in the UI doesn't break existing behaviors that
+  reference them — they're bound by name, not by a baked-in slot number, and
+  are re-resolved fresh every time they're touched.
+- **Write guard.** If a faction register is currently link-driven by a Radio
+  Transmitter (`RegisterIsLink` returns true for its index), a behavior's
+  direct `fr`-write is silently dropped rather than fighting the transmitter
+  for the value. Reads are never affected by this — only writes.
 
 ### Parameters (sub-behaviors only)
 
