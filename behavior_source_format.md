@@ -254,6 +254,9 @@ loop's dynamic scope, which this heuristic can't disambiguate — but it will
 be correct for realistic behaviors and is a real, buildable next step, not
 an open research problem the way the original (incorrect) "extent
 detection" framing suggested. Not yet implemented.
+
+## Known open items
+
 - **Free-floating node position (`nx`/`ny`).** Deliberately excluded from
   this source format — it's a visual-editor layout affordance, not
   behavioral semantics. A future write-back tool will need its own policy
@@ -276,13 +279,24 @@ edited directly, and carries no information the listing doesn't already have.
 
 This is a specification, not yet a shipped decompiler. `scripts/render_examples.py`
 is a working prototype of the underlying *graph extraction and edge-resolution
-logic* (validated by hand against two real corpus behaviors — a 5-instruction
-simple case and a 16-instruction case with a real `jump`/`label` loop) — it
-predates this document and its literal output syntax (`num:5`, `var:A`,
-`id:x` prefixes) does not yet match the cleaner surface syntax finalized here
-(bare `5`, `$A`, bare `x`, `[num=N]` composites). That's a cosmetic gap in
-the prototype, not a change to the underlying grammar — worth fixing before
-the prototype is relied on for anything beyond the comparison it was built
-for. Not yet built: the reverse direction (parsing this format back into a real Lua instruction
-table for `dsc_wire.py` to encode), integration replacing `ast_compiler.py`,
+logic*, exercised for real on a live end-to-end edit (2026-07-06: a user
+selected/copied a real 28-instruction fragment from the in-game editor, Claude
+read/decoded/rebuilt it — extending it to cover all real `c_turret`-descendant
+components with a `[num=charge_time]` composite value on each, per the user's
+ask — and the user confirmed the pasted-back result was correct in-game; see
+project memory for the full trail). That real test caught and fixed two bugs
+in the prototype, both now implemented, not just planned: the `STOP` vs.
+plain-omission distinction (see "Control edges" above — an earlier version
+silently rendered a real `next: false` termination identically to implicit
+fallthrough) and the `[num=N]` composite-value suffix (existed only in this
+doc, not in `resolve_value`, until that same session — the underlying data
+was always correct, only the display silently dropped a coexisting `num`).
+Remaining real gap in the prototype's literal syntax: it still prints
+`num:5`/`var:A`/`id:x`-style prefixes instead of this doc's bare-value
+surface syntax (`5`/`$A`/`x`) — cosmetic, not a correctness issue, but worth
+closing before relying on the prototype for anything beyond ad hoc rendering.
+Not yet built: the reverse direction (parsing this format back into a real Lua instruction
+table for `dsc_wire.py` to encode — the live edit above was still constructed
+by hand-building Lua tables directly in Python, not by parsing this format's
+text), integration replacing `ast_compiler.py`,
 and the `sequence`/`for_number` block-extent problem above.
