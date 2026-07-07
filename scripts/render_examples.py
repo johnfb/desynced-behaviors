@@ -58,15 +58,32 @@ def resolve_value(v, nparams: int) -> str:
             return f"framereg[{-v}]"
         if 1 <= v <= nparams:
             return f"param{v}"
-        return str(v)
+        # A bare positive int is ONLY ever a mem-slot/parameter reference
+        # (behavior_format.md: literal numbers are always the {num=N} table
+        # shape, never a bare int) -- never a plain literal number. If it's
+        # not covered by this behavior's own declared `parameters` count,
+        # it's an undeclared slot reference (confirmed real, not hypothetical:
+        # a node-selection clipboard copy can reference a mem slot that was a
+        # declared, named parameter in the *original* full behavior, with no
+        # `parameters` table carried into the copied fragment at all) -- must
+        # render distinctly from a real literal, not silently as if it were one.
+        return f"slot{v}(undeclared)"
     if isinstance(v, dict):
         if "num" in v and len(v) == 1:
             return f"num:{v['num']}"
+        # Composite: num coexists with coord/id/entity on the same value
+        # (behavior_format.md's composite-value semantics) -- must stay
+        # visible, not silently dropped (a real bug: this branch used to
+        # check "id" before "num" and never rendered num when both were
+        # present, even though the underlying data had it correctly).
+        num_suffix = f"[num={v['num']}]" if "num" in v else ""
         if "coord" in v:
             c = v["coord"]
-            return f"coord:({c.get('x') if isinstance(c, dict) else c[0]},{c.get('y') if isinstance(c, dict) else c[1]})"
+            return f"coord:({c.get('x') if isinstance(c, dict) else c[0]},{c.get('y') if isinstance(c, dict) else c[1]}){num_suffix}"
         if "id" in v:
-            return f"id:{v['id']}"
+            return f"id:{v['id']}{num_suffix}"
+        if num_suffix:
+            return f"num:{v['num']}"
         return f"literal:{v}"
     if v is None:
         return "?"
@@ -120,11 +137,18 @@ def build_graph(behavior: dict, argcache: ArgCache):
         if type(val) is int:
             return val, aname  # explicit, intentional wire -- keep the real pin name
         if val is False:
-            return None, None  # real termination, no edge
+            # Real, intentional termination -- must stay visually distinct
+            # from an omitted arg's implicit fallthrough (conflating the two
+            # was a real bug: instruction 8 in a real live-tested fragment
+            # has an explicit `next: false` specifically so its "not found"
+            # case does NOT fall into the following set_reg, but an earlier
+            # version of this function returned (None, None) here, making it
+            # indistinguishable from plain omission in every rendering).
+            return "STOP", aname
         # omitted entirely -> implicit fallthrough, not a meaningful branch
         if idx + 1 in insts:
             return idx + 1, None
-        return None, None  # falls off the true end
+        return "STOP", aname  # falls off the true end -- also a real stop
 
     for idx, inst in sorted(insts.items()):
         op = inst.get("op")
@@ -172,6 +196,8 @@ def to_dot(nodes, edges, title) -> str:
         safe = label.replace('"', '\\"')
         lines.append(f'  n{idx} [label="{safe}"];')
     for src, dst, label in edges:
+        if dst == "STOP":
+            continue  # no real target node to point an arrow at -- see to_compact for this info
         attrs = f' [label="{label}"]' if label else ""
         lines.append(f"  n{src} -> n{dst}{attrs};")
     lines.append("}")
@@ -184,6 +210,8 @@ def to_mermaid(nodes, edges, title) -> str:
         safe = label.replace('"', "'")
         lines.append(f'  n{idx}["{safe}"]')
     for src, dst, label in edges:
+        if dst == "STOP":
+            continue  # no real target node to point an arrow at -- see to_compact for this info
         if label:
             lines.append(f"  n{src} -->|{label}| n{dst}")
         else:
@@ -224,6 +252,14 @@ def main():
     _, table = dsc_wire.decode_dsc(lua, raw)
     root = to_py(table)
     behavior = navigate(root, behavior_path)
+    if isinstance(behavior, list):
+        # A behavior with no non-integer keys at all (no name/parameters/etc)
+        # -- a real, valid case -- looks like a pure sequential array to
+        # to_py()'s generic Lua-table-shape heuristic and gets converted to a
+        # plain Python list instead of a dict. Behaviors are addressed 1-based
+        # like any other Lua array; re-wrap as the dict shape the rest of this
+        # script expects.
+        behavior = {i + 1: v for i, v in enumerate(behavior)}
 
     title = behavior.get("name") or Path(dsc_path).stem
     nodes, edges = build_graph(behavior, argcache)

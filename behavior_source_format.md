@@ -59,9 +59,13 @@ sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
 
 | Real value shape | Source syntax | Notes |
 |---|---|---|
-| number literal `{num=N}` or bare int used as a literal | `N` | plain |
+| number literal `{num=N}` | `N` | plain. A bare (unwrapped) int is never this shape — see the parameter/slot row below |
 | coordinate `{coord={x=,y=}}` | `coord(x, y)` | never the `[x,y]` array form — see `behavior_format.md`'s corruption gotcha |
 | id-typed literal `{id="x"}` (item/frame/component/tech/value id) | bare identifier, e.g. `c_behavior`, `v_enemy_faction`, `c_radar` | safe to leave bare — real ids never collide with variable-name convention (below). The syntax does not distinguish which *kind* of id it is (item/frame/component/tech/value) — that's inherent to the underlying value shape itself, not something this format could disambiguate further; look the id up in the real data files (or `instructions_index.md`) if its category matters |
+| local variable (string arg value, e.g. `"A"`) | `$A` | `$`-prefixed to stay unambiguous against bare identifiers, even though real behaviors only ever seem to use short letter names |
+| parameter (bare positive int) | the real name from `pnames[i]` when `i` is covered by this behavior's own declared `parameters`, else `param<i>` if `parameters` exists but is unnamed, else `slot<i>(undeclared)` | a bare positive int is **only ever** a mem-slot/parameter reference, never a plain number by itself (see the literal row above) — confirmed by direct comparison of the same real behavior copied two different ways (see project memory, 2026-07-06): a node-*selection* clipboard copy (Ctrl+A/Ctrl+C on nodes) can carry a bare int referencing a slot with no `parameters`/`pnames` table at all, while the identical value in a full Library-export copy of the same behavior is accompanied by `parameters={1:true}, pnames={1:"Result"}` and correctly resolves as a named parameter. The `slot<i>(undeclared)` fallback is a real, expected case for partial-selection fragments, not just a defensive placeholder — this is precisely the shape a "copy a portion of a behavior for review/editing" workflow will routinely produce |
+| frame register (small negative int) | `@goto` / `@store` / `@visual` / `@signal` for -1/-2/-3/-4; bare `@N` for any other negative value | confirmed via `ui/Skin.lua:680`'s `data.frame_regs` array order (`{Goto, Store, Visual, Signal}`, 1-based) cross-anchored against `ui/FrameView.lua:2413`'s `i == -FRAMEREG_GOTO` comparison — not a guess. See https://wiki.desyncedgame.com/Registers for what each register does at the gameplay level (async goto/store/visual-icon/signal-emit) |
+| entity/other runtime-only value | not directly literal-izable; only appears as a register read, never a source literal | n/a |
 
 ### Composite values (`num` plus a coord/id/entity)
 
@@ -82,10 +86,6 @@ A bare `N` (no brackets) is reserved for a value that is *only* a number
 only used when a coord/id/entity is present *and* carries a `num` alongside
 it — the two are visually distinct on purpose, since they come from
 different real value shapes and collapsing them would lose information.
-| local variable (string arg value, e.g. `"A"`) | `$A` | `$`-prefixed to stay unambiguous against bare identifiers, even though real behaviors only ever seem to use short letter names |
-| parameter (positive int ≤ param count) | the real name from `pnames[i]`, or `param<i>` if unnamed | resolved once at the top of the behavior/sub, referenced by name throughout |
-| frame register (small negative int) | `@goto` / `@store` / `@visual` / `@signal` for -1/-2/-3/-4; bare `@N` for any other negative value | confirmed via `ui/Skin.lua:680`'s `data.frame_regs` array order (`{Goto, Store, Visual, Signal}`, 1-based) cross-anchored against `ui/FrameView.lua:2413`'s `i == -FRAMEREG_GOTO` comparison — not a guess. See https://wiki.desyncedgame.com/Registers for what each register does at the gameplay level (async goto/store/visual-icon/signal-emit) |
-| entity/other runtime-only value | not directly literal-izable; only appears as a register read, never a source literal | n/a |
 
 ## Control edges
 
@@ -106,29 +106,54 @@ to one of three cases, per `behavior_format.md`'s documented semantics:
    through to the physically next instruction. This is the common case for a
    straight-line instruction sequence and would be pure noise if annotated.
 
-## Computed `jump`/`label` dispatch
+## Dynamic `jump`/`label` dispatch
 
-`jump(Label=X)` and `label(Label=X)` do not wire a static instruction index
-at all — the real dispatch is a runtime value match on `X` (an id or number),
-resolved by the actual dispatcher, not stored as an index anywhere in the
-table (see `behavior_format.md`'s `jump`/`label` section). The decompiler
-resolves this **statically, at decompile time**, by matching every `jump`'s
-`Label` value against every `label`'s `Label` value within the same
-behavior, and additionally renders the resolved edge:
+**`jump`'s target is not statically known in the general case, and that is
+the normal, intended way to use it, not an edge case.** The real
+`data.instructions.jump` implementation's own `explain` text says so
+directly: *"Jumps can be dynamic and passed via parameter or variable"* —
+and its `func` confirms this isn't just descriptive copy: it resolves the
+`Label` argument's actual value at the moment the instruction executes,
+linearly searches the current behavior's compiled instruction list for a
+`label` whose own resolved value matches, and jumps there if found. **If no
+`label` matches, the function returns without setting `state.counter` at
+all, which means execution falls through via the instruction's ordinary
+`next` field** — the same implicit/explicit `next` resolution every other
+instruction gets (see "Control edges" above). This is a real, named idiom
+(confirmed directly by a user of this project): jump to a value representing
+a state; if no `label` for that state exists yet, `next` runs the
+initialization code for it.
+
+Both `jump` and `label`'s `Label` argument are ordinary `in`-typed values,
+rendered with the normal value rules above — so a `Label=` can be a literal
+(`v_transport_route`), a variable (`$State`), a parameter, or a frame
+register, with no special grammar needed:
+
+```
+12: jump(Label=$State)
+13: label(Label=$State)     -- unrelated code here does NOT get a resolved edge
+```
+
+**Static resolution at decompile time is only ever an opportunistic, best-effort
+annotation** — attempted *only* when a `jump`'s `Label` value is a literal
+(never for a variable/parameter/register value, where the actual target
+depends on runtime program state this decompiler has no visibility into).
+When it succeeds, both the raw value and the resolved edge are shown:
 
 ```
 12: jump(Label=v_transport_route)  >3 (jump→label)
 ```
 
-Both parts are kept: the raw `Label=` value (needed to round-trip an edit —
-renaming a label means updating both the `jump` and `label` instructions,
-which only makes sense if the actual value is visible and editable) and the
-resolved `>3 (jump→label)` annotation (needed for readability — without it, a
-reader has to manually search for the matching `label` instruction). If a
-`jump`'s label value is itself computed at runtime (e.g. read from a
-register rather than a literal) rather than a static literal, static
-resolution isn't possible and the `jump→label` annotation is simply omitted
-— the raw `Label=` value is still shown.
+The raw `Label=` value is kept even when resolution succeeds (needed to
+round-trip an edit — renaming a label means updating both the `jump` and
+`label` instructions, which only makes sense if the actual value stays
+visible and editable). When `Label` is dynamic, no `jump→label` annotation
+is shown at all — but the instruction's separate `next` edge (the real
+"no matching label" path) is still rendered normally, exactly as it would be
+for any other instruction. A `jump` with a dynamic target and no explicit
+`next` wired is not "unresolved" or missing information — it's fully and
+correctly described by its raw `Label=` value plus its ordinary implicit
+fallthrough, the same as everything else in this format.
 
 ## `call` / sub-behaviors
 
@@ -172,22 +197,63 @@ matching how the real table addresses them — a `call` target's instruction
 indices are only ever meaningful within that specific sub-behavior's own
 array).
 
-## Known open items — not yet solved, flagged rather than guessed at
+## Loop-type instructions (`for_number`, `for_component`, `for_signal_match`, etc.)
 
-- **`sequence`/`for_number` block-body extent.** These are block-type
-  instructions whose "body" is not a separate nested list in the real table
-  — it's some contiguous run of the same flat instruction array, with scope
-  boundaries enforced by a block-stack the real dispatcher maintains
-  (`InstBeginBlock` in `data/library.lua`). Determining exactly which
-  instructions belong "inside" a given block from the flat array alone is a
-  real structuring problem this project's own `interpreter.py` still
-  Python-simulates rather than solves generally (see its own "not done yet"
-  list). Until solved, this format renders `sequence`/`for_number`
-  instructions as plain flat entries like any other (their real exec-arg
-  edges, e.g. `Done`, still render correctly per the rules above) — no
-  special indented-block syntax is emitted, since inventing one without a
-  real extent-detection algorithm behind it would be decorative, not
-  functional.
+**Correction, caught by direct user feedback — an earlier draft of this
+document treated loop instructions as needing "block-body extent detection,"
+which was a misunderstanding.** They don't need any special handling at all
+for their own pins: every `for_*` instruction (`for_number`, `for_component`
+— "loop over equipped components" — `for_signal`/`for_signal_match`,
+`for_entities_in_range`, `for_inventory_item`, and others) has exactly the
+same shape as any other multi-pin instruction. Checking the real
+`data.instructions.for_number` definition confirms this precisely: its only
+*declared* `exec` arg is `Done` ("Finished loop") — the per-iteration path
+is the instruction's ordinary top-level `next`, exactly like `check_number`'s
+"Equal" case (see "Control edges" above). Both pins render with the existing
+rules, no changes needed:
+
+```
+4: for_component(Filter=c_radar, Component=$C)  >9 (Done)
+```
+
+**The real subtlety is elsewhere: what an unconnected pin means once you're
+inside a loop's iteration.** Per direct user correction: control reached via
+the per-iteration pin is not a bounded "block" of instructions at all — it's
+free to jump, branch, and call like anything else, and the loop is not
+considered done, no matter where control flow wanders (even to a `label`
+positioned before the loop), until either an explicit `break`/`last`
+instruction runs, or control reaches a pin with nothing wired to it at all.
+Checked against the real dispatcher to confirm precisely (`data/instructions.lua`'s
+`InstBeginBlock`, `data/components.lua`'s `c_behavior_on_end`): a loop
+instruction's `func` pushes onto a real runtime stack (`state.blocks`) when
+it begins; a dead end — an explicit `false` on any pin, *or* falling off the
+true end of the instruction array (both are handled identically, confirmed
+by `interpreter.py`'s own fix for exactly this equivalence) — pops the
+innermost still-active loop off that stack and re-invokes *its own* `next`
+handler to decide whether to continue iterating or finish (call `last`, jump
+to `Done`). Only once nothing remains on the block stack does a dead end
+fall back to a `call`-return (if inside a called sub-behavior) or a genuine
+top-level restart. **An omitted (not `false`) exec arg is unaffected by any
+of this** — it's a normal implicit fallthrough to the physically next
+instruction regardless of loop context, confirmed by the same dispatcher
+code (only a real dead end triggers the block-stack check at all).
+
+This means a `false` pin's real meaning ("stop the behavior" vs. "continue
+the innermost enclosing loop" vs. "return to caller") is a **path-dependent
+runtime property** (which loops are active on `state.blocks`, which `call`
+frames are on `state.returns`, at the moment that specific `false` executes)
+— not a fixed property of the instruction's position in the flat array. In
+the overwhelming majority of real behaviors this is still staticly
+resolvable with a reachability heuristic: for each loop instruction, follow
+every edge reachable from its per-iteration pin that doesn't pass through an
+explicit `break`/`last` or a nested loop's own `Done` pin, and any `false`
+found in that reachable set means "continue this loop," not "stop." This is
+not a mathematical guarantee — computed `jump`/`label` dispatch could in
+principle make the same instruction reachable both inside and outside a
+loop's dynamic scope, which this heuristic can't disambiguate — but it will
+be correct for realistic behaviors and is a real, buildable next step, not
+an open research problem the way the original (incorrect) "extent
+detection" framing suggested. Not yet implemented.
 - **Free-floating node position (`nx`/`ny`).** Deliberately excluded from
   this source format — it's a visual-editor layout affordance, not
   behavioral semantics. A future write-back tool will need its own policy
