@@ -1,4 +1,4 @@
-"""Validates the real `HexAt`/`HexIndexOf` sub-behaviors (embedded in `HexIndexOf_test_1.dsc`)
+"""Validates the real `HexAt`/`HexIndexOf` sub-behaviors (embedded in `HexIndexOf_test_1.dcs`)
 against the reference math in `hex_expansion_math.md`, running them through the *real*
 `data/instructions.lua` via `Interpreter` -- not a hand-rolled Python reimplementation. This is
 the strongest validation these routines have: HexAt against closed-form reference math, and
@@ -52,8 +52,8 @@ def _rt_cases(max_r=8):
 
 @pytest.fixture(scope="module")
 def hexat_hexindexof(engine):
-    s = (DATA_DIR / "HexIndexOf_test_1.dsc").read_text().strip()
-    _, prog = engine.decode_dsc(s)
+    s = (DATA_DIR / "HexIndexOf_test_1.dcs").read_text().strip()
+    _, prog = engine.decode_dcs(s)
     deps = prog["dependencies"]
     return deps[1], deps[2]  # HexAt, HexIndexOf
 

@@ -1,6 +1,6 @@
 # Desynced Behavior Source Format
 
-This documents the schema a behavior clipboard string (`.dsc`, and entries in
+This documents the schema a behavior clipboard string (`.dcs`, and entries in
 `data.behaviors`) decodes into, and that you must produce to encode a new one.
 It is the missing layer between [`instructions_index.md`](instructions_index.md)
 (what each instruction does and its argument order) and the codec (string ⟷
@@ -10,18 +10,18 @@ transport).
 now-retired standalone script that rendered the decoded structure as a Python
 `dict`/`list` with 0-based instruction/arg indices (a JSON/Python-convenience
 choice, not something intrinsic to the format). That tool's logic now lives in
-`src/desynced_toolkit/dsc_wire.py`, which decodes/encodes **genuine Lua tables**
+`src/desynced_toolkit/dcs_wire.py`, which decodes/encodes **genuine Lua tables**
 (1-based, via `lupa`) instead — matching exactly what the game's own
 `Tool.GetClipboard()`/`Tool.SetClipboard()` would hand a real Lua caller, with
 no shifting in either direction. Everything below describing the *actual wire
 format* (register/slot addressing, branch resolution, hidden literals,
 var-args) is still accurate; only examples showing 0-based Python dict keys
 should be read as "shift by one to get the real 1-based Lua key" if you're
-using `dsc_wire.py` directly.
+using `dcs_wire.py` directly.
 
 Reverse-engineered from `data/library.lua`'s `GetFactionBehaviorAsm` (the
 function that compiles this exact source form into runtime bytecode) and
-cross-checked line-for-line against `observer.dsc`. This is the *source* form —
+cross-checked line-for-line against `observer.dcs`. This is the *source* form —
 the same shape the in-game visual editor saves — not the compiled bytecode;
 the game recompiles it from this form every time it's loaded (cached by
 revision), so you never need to hand-produce bytecode.
@@ -57,19 +57,19 @@ few sibling metadata keys:
   id (see `call`'s `sub` field under "Hidden literal fields" below). A
   flat JSON list, one entry per embedded sub-behavior, each shaped exactly
   like this same top-level envelope (its own instruction dict, `name`,
-  `parameters`, `pnames`, ...). Confirmed via `hexat_test.dsc`: pasting the
+  `parameters`, `pnames`, ...). Confirmed via `hexat_test.dcs`: pasting the
   top-level behavior into the library reconstructs both it *and* the
   embedded sub-behavior as a separate library entry — that reconstruction
   is driven entirely by `dependencies`.
 
 Every example this doc has hand-built or examined closely so far
-(`observer.dsc`, the first `hexat.dsc` drafts) happens to be a small,
+(`observer.dcs`, the first `hexat.dcs` drafts) happens to be a small,
 flat, non-parameterized behavior, where `name` plus the instruction list
 is enough. Don't over-generalize from that: it's a property of those
 *simple* examples, not of top-level/main-program behaviors in general —
 real, more elaborate behaviors commonly do have `parameters` (to be
 callable, or just to receive/expose values), and `dependencies` (to embed
-sub-behaviors) frequently, as `hexat_test.dsc` (the "HexAt Test" harness,
+sub-behaviors) frequently, as `hexat_test.dcs` (the "HexAt Test" harness,
 itself parameterized, calling an embedded `HexAt` sub-behavior) already
 demonstrates.
 
@@ -155,7 +155,7 @@ by hand). Confirmed rules, by operand shape:
   `num`. Nothing surprising.
 - **coordinate ⊕ coordinate**: both parts genuinely combine — coordinates
   add/subtract component-wise, **and** the `num` fields add/subtract too.
-  Confirmed via `formation-hold.dsc`'s own `AnchorPos + Offset`:
+  Confirmed via `formation-hold.dcs`'s own `AnchorPos + Offset`:
   `add(To={coord:(17,50), num:0}, Num={coord:(-6,2), num:1})` →
   `{coord:(11,52), num:1}` (`17-6,50+2` and `0+1`).
 - **coordinate ⊕ bare number** (other side has no data): the bare number
@@ -168,7 +168,7 @@ by hand). Confirmed rules, by operand shape:
   these, **the coordinate operand's own `num` survives untouched** — the
   bare number's value is fully consumed into the coordinate math and does
   *not* additionally add into the result's `num`. This is the load-bearing
-  rule behind `formation-hold.dsc`'s Tolerance-preload trick (§ below).
+  rule behind `formation-hold.dcs`'s Tolerance-preload trick (§ below).
 - **entity/item ⊕ bare number**: the entity/item reference passes through
   into `Result` unchanged, and — unlike the coordinate case — the `num`
   fields **add normally** (e.g. `entity, num:5` + `num:3` → same entity,
@@ -184,7 +184,7 @@ it depends on whether the data-bearing operand is a coordinate (num
 preserved, bare number consumed spatially) versus an entity/item (num adds
 normally, bare number has nowhere spatial to go).
 
-Practical implication for `formation-hold.dsc`'s Tolerance-preload trick
+Practical implication for `formation-hold.dcs`'s Tolerance-preload trick
 (setting `num` on `Offset` once, so it rides along through every later `add`
 into `Spot`): this relies on the "coordinate ⊕ bare number" rule above, and
 holds because `Offset`/`AnchorPos`/`Spot` are always plain coordinates,
@@ -204,7 +204,7 @@ integers. Mapping confirmed from `data/instructions.lua` (`GetRegisterOrComponen
 | `-3` | Store |
 | `-4` | Goto |
 
-(`observer.dsc` clears both at reset: `set_reg` with target `-3` and `-4`.)
+(`observer.dcs` clears both at reset: `set_reg` with target `-3` and `-4`.)
 
 ### Faction (shared) registers
 
@@ -310,7 +310,7 @@ other number (it has no instruction-metadata layer, per `CLAUDE.md`). It is
 **never adjusted**, so it stays a raw 1-based Lua position. Concretely: a
 jump value of `11` targets rendered dict key `"10"`, not `"11"`.
 
-Proof from `observer.dsc`'s four identically-shaped `scan` fallback blocks —
+Proof from `observer.dcs`'s four identically-shaped `scan` fallback blocks —
 each one's "No Result" target really lands on the *next* scan attempt only
 if you subtract 1:
 
@@ -338,7 +338,7 @@ Everything above (`next`, `exec` slots) is a **compile-time-fixed** branch —
 the target dict key is baked into the encoded value. There's a separate
 pair of instructions for a **runtime-computed** target, confirmed by reading
 `data/instructions.lua` (`label` ~line 522, `jump` ~line 534) and validated
-in-game (`hexat.dsc`/`hexat2.dsc`, a `HexAt` test behavior with a 6-way
+in-game (`hexat.dcs`/`hexat2.dcs`, a `HexAt` test behavior with a 6-way
 computed dispatch on a side index `k`):
 
 - `label` (`op: "label"`) takes one `in` arg, "Label identifier" (`{"0":
@@ -368,7 +368,7 @@ state"); this doc doesn't yet have a worked example of that form.
 Don't reach for `jump`/`label` for a branch whose target is always the same
 dict position — a plain `next: K+1` is simpler and is what the in-game
 editor itself produces when you ask it to converge several branches on the
-same following instruction (confirmed: cleaning up a `hexat.dsc` draft that
+same following instruction (confirmed: cleaning up a `hexat.dcs` draft that
 used `jump`-to-a-shared-"done"-label for every branch, the game's own
 re-export collapsed it to a plain `next` on each branch instead, keeping
 `jump`/`label` reserved solely for the one genuinely dynamic dispatch).
@@ -390,7 +390,7 @@ implicit jump-to-start is not a yield point, so a behavior with no
 same tick and trips the engine's safety limit ("If more than 1000
 instructions are executed in one tick then the behavior controller will
 crash at that location" — this is exactly what happened to an early
-`hexat.dsc` draft: 51 instructions, `unlock`, no `wait`/`exit`, `next: false`
+`hexat.dcs` draft: 51 instructions, `unlock`, no `wait`/`exit`, `next: false`
 on the last instruction, and it still hit the crash).
 
 Two dedicated instructions, per their `func`s in `data/instructions.lua`,
@@ -428,7 +428,7 @@ prevents the 1000-instruction crash.
 
 The "falls back to Program Start" story above is only true at the outermost
 level. Confirmed from `data/instructions.lua`'s `sequence` (~line 3722) and
-`last`/Break (~line 438), and empirically from `hexat_test.dsc` (a `HexAt`
+`last`/Break (~line 438), and empirically from `hexat_test.dcs` (a `HexAt`
 sub-behavior with a nested nested loop + sequence, called from a 6×T-range
 test harness, matched by hand against `hex_expansion_math.md`'s formulas
 for all 92 `(R, T)` combinations with zero mismatches): several instructions
@@ -444,14 +444,14 @@ fall-through) doesn't restart the whole program — it pops back to the
   `Last`. An omitted pin is simply skipped (not pushed onto the internal
   step list at all). This is the confirmed idiom for "run these two
   independent calculations, then continue once both are done" — e.g.
-  `hexat_test.dsc`'s `HexAt` computes X (`First`) then Y (`Second`/`Third`)
+  `hexat_test.dcs`'s `HexAt` computes X (`First`) then Y (`Second`/`Third`)
   then combines them (`Last`), with a `next: false` ending each of the
   first three legs.
 - **Loops** (`for_number` and everything else `instructions_index.md` tags
   `*(loop)*`) use the same mechanism for their body: a `next: false` (or
   running off the end of the loop body) advances to the *next iteration*,
   not a program restart. Confirmed with a nested loop in
-  `hexat_test.dsc`: the inner `for_number` (looping `T`) has its own
+  `hexat_test.dcs`: the inner `for_number` (looping `T`) has its own
   `Done` exec explicitly set to `false` — and this correctly falls back to
   advancing the *outer* `for_number` (looping `R`) to its next iteration,
   rather than crashing or halting the behavior, because the inner loop's
@@ -471,7 +471,7 @@ popped through every enclosing block.
 `for_number`'s `Step` arg (`instructions_index.md`: "use -1 or 1 based on
 inputs if left empty") auto-detects direction from `From`/`To` when
 omitted, confirmed by an artifact in both `hexat_test_log.txt` and
-`HexIndexOf_test_1.dsc`'s own harness: for `R == 0`, the inner loop is
+`HexIndexOf_test_1.dcs`'s own harness: for `R == 0`, the inner loop is
 built as `for_number(0, 6*R - 1, ...)` = `for_number(0, -1, ...)` with
 `Step` omitted — since `From (0) > To (-1)`, it silently runs with an
 implicit `Step = -1`, iterating `T = 0` then `T = -1` (two iterations, not
@@ -483,7 +483,7 @@ loop with `From > To` normally would.
 
 ### `check_number`'s "equal" case
 
-A confirmed idiom from `hexat_test.dsc`'s own `R == 0` guard. The in-game
+A confirmed idiom from `hexat_test.dcs`'s own `R == 0` guard. The in-game
 editor shows `check_number` with three labeled pins — **If Larger**, **If
 Smaller**, **Equal** — but only `If Larger`/`If Smaller` get their own
 numbered argument slots (`"0"`/`"1"`); `Equal` isn't a separate slot at
@@ -499,7 +499,7 @@ rather than a numbered slot.
 
 ### ⚠️ Gotcha: an omitted exec arg never consults the top-level `next`
 
-Found while hand-authoring `HexIndexOf_test_1.dsc`'s cube-rounding
+Found while hand-authoring `HexIndexOf_test_1.dcs`'s cube-rounding
 correction cascade (three chained `>` comparisons where the "false"
 destination for the first two isn't the physically-next instruction).
 `If Larger`, `If Smaller`, and `Equal` (via `next`, see above) are three
@@ -562,13 +562,13 @@ not worth duplicating here.
 
 `call`'s `sub` field takes two genuinely different shapes depending on
 whether the target sub-behavior has been saved to the faction's library or
-is just embedded/private to this one `.dsc`:
+is just embedded/private to this one `.dcs`:
 
 - A **string** — the id of an existing saved-library behavior (the
   `data/library.lua` runtime resolves this via `GetFactionBehaviorAsmById`).
 - A **small integer** — a **1-based index into the top-level
   `dependencies` array** (see "Top-level envelope" above), for a
-  sub-behavior that only exists embedded in this `.dsc`, never saved
+  sub-behavior that only exists embedded in this `.dcs`, never saved
   separately. Confirmed from `data/library.lua`'s
   `PackLibraryItemToCompactedItem` (the export path): `depnum = #dependencies
   + 1; dependencies[depnum] = item` — the *n*-th embedded dependency is
@@ -579,7 +579,7 @@ is just embedded/private to this one `.dsc`:
   used `sub == 0` for the same self-call case (`call`'s own `func`, and a
   comment in `UnpackCompactedItemToLibraryTable`, both note this).
 
-Concretely, in `hexat_test.dsc`, the harness's `call` node has `"sub": 1`
+Concretely, in `hexat_test.dcs`, the harness's `call` node has `"sub": 1`
 and the top-level `dependencies` array has exactly one entry (the `HexAt`
 sub-behavior) — `dependencies[0]` in JSON, i.e. Lua-array slot 1. There's
 only one dependency in this example so index-vs-something-else can't be
@@ -599,9 +599,9 @@ case — most hand-written behaviors won't need it.
 
 ## Worked example
 
-Annotated opening instructions of `observer.dsc` (now at `tests/data/observer.dsc`
+Annotated opening instructions of `observer.dcs` (now at `tests/data/observer.dcs`
 — decode it yourself with
-`LupaEngine(source).decode_dsc(open("tests/data/observer.dsc").read())` to see
+`LupaEngine(source).decode_dcs(open("tests/data/observer.dcs").read())` to see
 the rest as a genuine Lua table — the 0-based dict keys below are the retired
 `dsc_codec.py`'s rendering; real Lua keys are one higher):
 
@@ -643,8 +643,8 @@ There's no assembler/validator for this format — the game's compiler
 To hand-author safely:
 
 1. Decode an existing behavior close to what you want (`data.behaviors`,
-   or `observer.dsc`) with `desynced_toolkit`'s `LupaEngine.decode_dsc()`
-   (backed by `dsc_wire.py`) to get a real starting structure, as a genuine
+   or `observer.dcs`) with `desynced_toolkit`'s `LupaEngine.decode_dcs()`
+   (backed by `dcs_wire.py`) to get a real starting structure, as a genuine
    Lua table — or build one directly with `compiler.AstCompiler` for the
    subset of syntax it currently supports.
 2. Edit the instruction list: add/remove/rewire instructions using
@@ -656,7 +656,7 @@ To hand-author safely:
    that point needs updating. Remember the off-by-one when writing these:
    a jump to Lua key `K` is encoded as the integer `K + 1` (see "Branch and
    fall-through resolution").
-4. Encode with `LupaEngine.encode_dsc()`, then immediately decode the
+4. Encode with `LupaEngine.encode_dcs()`, then immediately decode the
    result again and diff against what you intended — this round-trip is
    your only correctness check outside the game itself. `Interpreter` can
    also run the decoded result directly against the real instruction

@@ -1,7 +1,7 @@
 [project]
 name = "desynced-toolkit"
 version = "0.1.0"
-description = "Compiler/decompiler and lupa-backed runtime for Desynced behavior .dsc files"
+description = "Compiler/decompiler and lupa-backed runtime for Desynced behavior .dcs files"
 authors = [
     { name = "John Bridgman", email = "johnfbiii@gmail.com" }
 ]

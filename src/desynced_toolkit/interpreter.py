@@ -1,4 +1,4 @@
-"""Runs a behavior given as a genuine Lua table (the shape `dsc_wire.decode_dsc()` hands back,
+"""Runs a behavior given as a genuine Lua table (the shape `dcs_wire.decode_dcs()` hands back,
 and this package's `compiler` produces directly) by delegating each leaf instruction's execution
 to the real `data/instructions.lua` via `LupaEngine`, while keeping the branch/block control-flow
 driver in Python (the same model validated against real in-game logs in `sim_common.py` earlier
@@ -10,7 +10,7 @@ branch/coordinate instruction run as the genuine, unmodified game Lua.
 Indexing throughout is genuine 1-based Lua (`instr[1]`, `instr[2]`, ...), matching exactly what
 the game itself stores and what `Tool.GetClipboard()` would hand a real Lua caller -- there is no
 Python-dict 0-based rendering step anywhere in this module (that convention only ever existed as
-`dsc_codec.py`'s -- now retired -- own choice for JSON/Python display, per `dsc_wire.py`'s module
+`dsc_codec.py`'s -- now retired -- own choice for JSON/Python display, per `dcs_wire.py`'s module
 docstring).
 """
 
@@ -115,7 +115,7 @@ class Interpreter:
         while True:
             v = instr[k]
             if v is None and instr[k + 1] is None and k > 1:
-                # allow a single gap (mirrors dsc_wire's own array/hash boundary tolerance)
+                # allow a single gap (mirrors dcs_wire's own array/hash boundary tolerance)
                 break
             if v is None and k == 1:
                 break

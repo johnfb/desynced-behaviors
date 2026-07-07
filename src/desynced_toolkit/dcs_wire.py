@@ -1,4 +1,9 @@
-"""Codec for Desynced "DS" clipboard strings (behaviors/blueprints).
+"""Codec for Desynced Clipboard Strings ("DCS" -- this project's own term, not an in-game or
+community one) -- behaviors, blueprints, and any other `Tool.GetClipboard`/`SetClipboard` payload.
+Renamed 2026-07-07 from this project's original "dsc": that name was a coincidence of which
+examples this project happened to look at first (behaviors, clipboard type char `'C'`) rather than
+a real format identifier -- the wire prefix is just `DS` followed by a one-character type tag
+(`'C'` for behavior/code, `'B'` for blueprint, others uninvestigated), never literally "DSC".
 
 Ported from `dsc_codec.py` (the project's original standalone Python-dict-based tool, now
 retired -- see CLAUDE.md/memory for that history), but building directly into genuine Lua tables
@@ -16,7 +21,7 @@ Directly confirmed, not just inferred, on 2026-07-05: disassembling the shipped 
 module's logic -- the literal `'D'`/`'S'` magic-byte check, the type-char position right after,
 and a base-31 length-header decode loop matched this module's `b62_read_u32` with no
 discrepancies. Stopped before the innermost base62-payload/checksum sub-function (not needed --
-already cross-validated against the official `dsconvert.js` and empirical `.dsc` round-trips
+already cross-validated against the official `dsconvert.js` and empirical `.dcs` round-trips
 below). Also separately confirmed via the binary: the actual embedded Lua is exactly version
 5.4.4 (see CLAUDE.md's "Lua version pin" note -- this project's `lupa` usage must import
 `lupa.lua54`, not bare `lupa`, to match).
@@ -35,7 +40,7 @@ direction, since the wire format already stores the real 1-based Lua key values 
 Ported from and cross-validated against the official
 [StageGames/DesyncedJavaScriptUtils](https://github.com/StageGames/DesyncedJavaScriptUtils)
 `dsconvert.js` reference implementation (decode-vs-decode, encode-then-decode-with-the-other-
-implementation, both ways) using both `observer.dsc` and a synthetic object covering size-class
+implementation, both ways) using both `observer.dcs` and a synthetic object covering size-class
 boundaries, negative/large integers, nesting, and unicode. Two real bugs in the official
 reference encoder were found in the process (this module intentionally does NOT reproduce them):
   1. Integers outside int32/uint32 range (< -2147483648 or > 4294967295) crash the official
@@ -237,7 +242,7 @@ def push_int_packed(out, v):
 # --- Decode: builds genuine Lua tables (1-based), given a lupa.LuaRuntime ---
 
 
-def decode_dsc(lua: "lupa.LuaRuntime", s: str):
+def decode_dcs(lua: "lupa.LuaRuntime", s: str):
     data = [ord(c) for c in s]
     idx, end = 0, len(data)
     while idx < end and B62[data[idx]] == 255:
@@ -539,7 +544,7 @@ def _serialize_table(out, v):
                     )  # Lua table memory-layout hint; unused by any decoder here
 
 
-def encode_dsc(type_char, obj):
+def encode_dcs(type_char, obj):
     raw = bytearray()
     serialize(raw, obj)
     raw = bytes(raw)

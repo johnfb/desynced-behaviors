@@ -2,7 +2,7 @@
 
 A textual, human/LLM-readable representation for Desynced behaviors, designed
 to be decompiled *from* and compiled back *to* the real instruction-table
-shape `dsc_wire.py` already decodes/encodes (see `behavior_format.md` for
+shape `dcs_wire.py` already decodes/encodes (see `behavior_format.md` for
 that underlying wire format — this document is the layer above it).
 
 ## Why this format, not tree-structured pseudocode
@@ -307,7 +307,7 @@ prefixed style (`id:x`, `coord:(x,y)`) rather than this doc's final bare
 `fr(name)` surface syntax — still subject to the same not-yet-closed
 prefix-vs-bare-syntax gap noted just above.
 Not yet built: the reverse direction (parsing this format back into a real Lua instruction
-table for `dsc_wire.py` to encode — the live edit above was still constructed
+table for `dcs_wire.py` to encode — the live edit above was still constructed
 by hand-building Lua tables directly in Python, not by parsing this format's
 text), integration replacing `ast_compiler.py`,
 and the `sequence`/`for_number` block-extent problem above.

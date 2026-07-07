@@ -1,6 +1,6 @@
 # Combat Squad Behavior — Design Spec
 
-Companion system to `observer.dsc`. Defines cooperating behaviors — **Beacon**, **Scout**,
+Companion system to `observer.dcs`. Defines cooperating behaviors — **Beacon**, **Scout**,
 **Gunner**, **Support** — that let multiple independent squads roam the whole map hunting for
 threats and fight as a coordinated group, on top of the faction-wide sensor network your
 **Observer**-equipped units (power poles, mining squads, roamers) already provide. Built entirely
@@ -9,7 +9,7 @@ from real instructions in `data/instructions.lua` and components in `data/compon
 Design corrections applied across this revision:
 
 1. **Observers are not part of the squad — they're shared faction infrastructure.** You already
-   run `observer.dsc` on units all over the map, reporting enemies/damaged/infected/lootable via
+   run `observer.dcs` on units all over the map, reporting enemies/damaged/infected/lootable via
    each unit's own `Signal` register. A squad's Beacon doesn't need dedicated scouts wired in —
    it just listens to whatever nearby Observers (anyone's) are already reporting, faction-wide,
    for free.
@@ -31,7 +31,7 @@ Design corrections applied across this revision:
 
 | Role | Loadout | Job |
 |---|---|---|
-| **Observer** *(already exists, unmodified)* | `observer.dsc`, wherever you already run it | Faction-wide sensing: reports enemies/damaged/infected/lootable via its own `Signal` register. Not squad-owned. |
+| **Observer** *(already exists, unmodified)* | `observer.dcs`, wherever you already run it | Faction-wide sensing: reports enemies/damaged/infected/lootable via its own `Signal` register. Not squad-owned. |
 | **Beacon** | Stationary building, integrated behavior, `c_radio_transmitter` | Sits safely inside the base. Pure comms/aggregation node: reads faction-wide threat reports, picks a target to minimize the squad's travel time, broadcasts it on the squad's Radio band. Never leaves, never fights. |
 | **Scout** | Fast frame, weapon, low HP | Mobile picket that actively drives the squad's map-wide roam (via the engine's own `Scout` explore instruction). Reports contacts the same way Observers do, fights only what it can safely beat, flees the rest. |
 | **Gunner** | Medium turret, internal slots all shields | Trails the Scouts while idle; holds turret range on whatever the squad is engaging, anywhere on the map; retreats to heal on real damage; power-gated. |
@@ -51,7 +51,7 @@ what made earlier drafts of this spec overcomplicated.
 "v_enemy_faction" }` returns **every entity in the faction whose own `Signal` register currently
 holds an entity reference that itself matches the `v_enemy_faction` filter** — i.e. every unit
 (Observer, Scout, anyone) currently broadcasting "I see an enemy," without that broadcaster
-needing to tag itself with anything. This is exactly what `observer.dsc` already produces: it
+needing to tag itself with anything. This is exactly what `observer.dcs` already produces: it
 scans for `v_enemy_faction` / `v_damaged` / `v_infected` and writes the found entity into its own
 `Signal` register (then pings). The read side and write side were already designed as a matched
 pair. Same trick works for `v_damaged`, `v_infected`, `v_droppeditem`/`v_can_loot`, etc.

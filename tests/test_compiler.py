@@ -49,10 +49,10 @@ def test_arithmetic_and_branch_demo(engine):
     assert interp.mem.read("w").num == 6
 
 
-def test_compiled_output_roundtrips_through_dsc_wire(engine):
+def test_compiled_output_roundtrips_through_dcs_wire(engine):
     compiled = AstCompiler(engine.lua).compile_source("x=3\ny=4\nz=x+y\n")
-    dsc_str = engine.encode_dsc("C", compiled)
-    _, decoded = engine.decode_dsc(dsc_str)
+    dcs_str = engine.encode_dcs("C", compiled)
+    _, decoded = engine.decode_dcs(dcs_str)
     interp = Interpreter(engine, decoded)
     interp.run()
     assert interp.mem.read("z").num == 7

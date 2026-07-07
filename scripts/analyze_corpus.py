@@ -20,7 +20,7 @@ from pathlib import Path
 
 import lupa.lua54 as lupa
 
-from desynced_toolkit import assets, dsc_wire
+from desynced_toolkit import assets, dcs_wire
 from desynced_toolkit.lua_runtime import LupaEngine
 
 CORPUS_ROOT = Path(__file__).resolve().parent.parent / "corpus"
@@ -179,14 +179,14 @@ def main() -> None:
             if not line.strip():
                 continue
             rec = json.loads(line)
-            dsc_path = source_dir / rec["file"]
-            if not dsc_path.exists():
+            dcs_path = source_dir / rec["file"]
+            if not dcs_path.exists():
                 continue
-            raw = dsc_path.read_text().strip()
+            raw = dcs_path.read_text().strip()
             try:
-                _, table = dsc_wire.decode_dsc(lua, raw)
+                _, table = dcs_wire.decode_dcs(lua, raw)
             except Exception as e:
-                print(f"[skip] {dsc_path}: decode failed: {e}")
+                print(f"[skip] {dcs_path}: decode failed: {e}")
                 continue
 
             root = to_py(table)

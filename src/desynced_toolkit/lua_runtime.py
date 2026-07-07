@@ -13,7 +13,7 @@ from importlib import resources
 
 import lupa.lua54 as lupa
 
-from . import dsc_wire
+from . import dcs_wire
 from .assets import AssetSource, get_package_manifest, resolve_include
 
 
@@ -42,23 +42,23 @@ class LupaEngine:
         self._inst_get_num = self.lua.globals().InstGetNum
 
         # `Tool.GetClipboard()`/`Tool.SetClipboard(item, type)` (`ui/Library.lua`) are the real,
-        # engine-native functions that turn a `.dsc` clipboard string into the Lua `item` table
-        # (and back) -- confirmed nowhere in this Lua extract, so `dsc_wire.py` is what actually
+        # engine-native functions that turn a `.dcs` clipboard string into the Lua `item` table
+        # (and back) -- confirmed nowhere in this Lua extract, so `dcs_wire.py` is what actually
         # backs that missing logic here. The real signatures read/write the OS clipboard with no
         # string argument; we're not simulating OS clipboard access, so these are exposed as
         # plain, explicitly-named Python methods (taking/returning the string directly) rather
         # than bound onto `Tool.GetClipboard`/`SetClipboard` under a misleadingly-identical
         # calling convention.
 
-    def decode_dsc(self, s: str):
-        """`.dsc` clipboard string -> `(type_char, lua_table)`, matching the shape
+    def decode_dcs(self, s: str):
+        """`.dcs` clipboard string -> `(type_char, lua_table)`, matching the shape
         `Tool.GetClipboard()` would hand a real Lua caller."""
-        return dsc_wire.decode_dsc(self.lua, s)
+        return dcs_wire.decode_dcs(self.lua, s)
 
-    def encode_dsc(self, type_char: str, obj) -> str:
-        """`(type_char, lua_table)` -> `.dsc` clipboard string, matching what
+    def encode_dcs(self, type_char: str, obj) -> str:
+        """`(type_char, lua_table)` -> `.dcs` clipboard string, matching what
         `Tool.SetClipboard(item, type)` would produce."""
-        return dsc_wire.encode_dsc(type_char, obj)
+        return dcs_wire.encode_dcs(type_char, obj)
 
     def new_state(self):
         return self._new_state()

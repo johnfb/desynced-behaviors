@@ -1,6 +1,6 @@
 """Compiler: a Python-syntax subset (parsed via the stdlib `ast` module) -> a genuine Lua table
 in the source-level shape `behavior_format.md` documents (1-based instruction list, `op` string
-key plus 1-based positional args per instruction -- the same shape `dsc_wire.decode_dsc()` hands
+key plus 1-based positional args per instruction -- the same shape `dcs_wire.decode_dcs()` hands
 back, not a Python dict standing in for one).
 
 Supported (grew out of compiling `hex_expansion_math.md`'s revised `HexIndexOf` -- see

@@ -2,9 +2,9 @@
 Mermaid, and a compact custom listing) for comparing tree-vs-graph
 representations concretely, rather than in the abstract.
 
-Usage: uv run python3 scripts/render_examples.py <dsc_file> <behavior_path> <out_prefix>
+Usage: uv run python3 scripts/render_examples.py <dcs_file> <behavior_path> <out_prefix>
 Example: uv run python3 scripts/render_examples.py \
-    corpus/discord_behaviors/83c5f19f875b2575_C_Hedgehog_s_Upgrader.dsc \
+    corpus/discord_behaviors/83c5f19f875b2575_C_Hedgehog_s_Upgrader.dcs \
     root.dependencies.0 /tmp/small
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import lupa.lua54 as lupa
 
-from desynced_toolkit import assets, dsc_wire
+from desynced_toolkit import assets, dcs_wire
 from desynced_toolkit.lua_runtime import LupaEngine
 
 GAME_DATA = Path(__file__).resolve().parent.parent.parent / "desynced-game-data"
@@ -249,15 +249,15 @@ def to_compact(nodes, edges, title) -> str:
 
 
 def main():
-    dsc_path, behavior_path, out_prefix = sys.argv[1], sys.argv[2], sys.argv[3]
+    dcs_path, behavior_path, out_prefix = sys.argv[1], sys.argv[2], sys.argv[3]
 
     src = assets.open_asset_source(str(GAME_DATA))
     engine = LupaEngine(src)
     argcache = ArgCache(engine)
     lua = engine.lua
 
-    raw = Path(dsc_path).read_text().strip()
-    _, table = dsc_wire.decode_dsc(lua, raw)
+    raw = Path(dcs_path).read_text().strip()
+    _, table = dcs_wire.decode_dcs(lua, raw)
     root = to_py(table)
     behavior = navigate(root, behavior_path)
     if isinstance(behavior, list):
@@ -269,7 +269,7 @@ def main():
         # script expects.
         behavior = {i + 1: v for i, v in enumerate(behavior)}
 
-    title = behavior.get("name") or Path(dsc_path).stem
+    title = behavior.get("name") or Path(dcs_path).stem
     nodes, edges = build_graph(behavior, argcache)
 
     dot_src = to_dot(nodes, edges, title)

@@ -3,9 +3,9 @@
 Coordinate math for a behavior that expands a power-pole network outward from an origin in a
 hexagonal spiral, one ring at a time, checking each candidate point against the logistics network
 before building. Worked out in conversation. `HexAt` below is implemented and validated in-game
-as a reusable sub-behavior (`hexat_test.dsc`, `tests/data/` — a `HexAt(R, T, Origin, d_half) ->
+as a reusable sub-behavior (`hexat_test.dcs`, `tests/data/` — a `HexAt(R, T, Origin, d_half) ->
 Result` sub-behavior plus a test harness that calls it for every `R=0..5, T=0..6R-1` and logs the
-result); `HexIndexOf` also has a `.dsc` now (`HexIndexOf_test_1.dsc`, `tests/data/`), validated by
+result); `HexIndexOf` also has a `.dcs` now (`HexIndexOf_test_1.dcs`, `tests/data/`), validated by
 running both routines through the real game Lua (`tests/test_hex_expansion.py`), though not yet
 loaded/run in the actual game client itself. Two routines:
 
@@ -39,7 +39,7 @@ Consequences:
 ## Parameters vs. hardcoded constants
 
 As originally worked out below, `d`/`d_half`/`SCALE`/`K` were all "design-time constants, chosen
-once when the behavior is authored." The implemented `HexAt` (`hexat_test.dsc`) splits that
+once when the behavior is authored." The implemented `HexAt` (`hexat_test.dcs`) splits that
 differently — only some of these are actually fixed at authoring time; the rest are runtime
 parameters of the sub-behavior, in this declared order (`pnames`):
 
@@ -91,7 +91,7 @@ side), `t = T mod R` (0..R-1, position along that side). Advancing to the next p
 counter: `T+1` if `T+1 < 6R`, else `R+1, T=0` — this also bootstraps `(0,0) → (1,0)` correctly
 with no special-casing.
 
-Implemented and in-game-validated (`hexat_test.dsc`, 92/92 `(R, T)` cases across `R=0..5`
+Implemented and in-game-validated (`hexat_test.dcs`, 92/92 `(R, T)` cases across `R=0..5`
 matched by hand). Pseudocode below now mirrors the actual instruction graph, including a couple
 of implementation quirks called out inline — see "As implemented" notes:
 
@@ -158,7 +158,7 @@ intermediate values are carried as exact-integer numerators over a shared denomi
 the "rational ratios partway through" approach (avoids any premature precision loss, and lets the
 cube-rounding error comparison work on exact integers instead of fractions).
 
-**Not yet implemented or in-game-validated** (unlike `HexAt` — see `hexat_test.dsc`). The
+**Not yet implemented or in-game-validated** (unlike `HexAt` — see `hexat_test.dcs`). The
 pseudocode below was revised in a second pass (user-driven review) that caught four real
 inefficiencies in the first draft and ruled out one further idea (using `switch` for region
 detection — see inline note at that spot), none of which change the result. Still carried over by
@@ -175,7 +175,7 @@ Den = (4*K) * d_half                  # `d` itself is never needed: the original
 
 Delta   = Coord - Origin              # coordinate (-) coordinate: component-wise subtract, confirmed
                                        # semantics (behavior_format.md's "coordinate (+) coordinate"
-                                       # rule, via formation-hold.dsc). Replaces splitting Coord and
+                                       # rule, via formation-hold.dcs). Replaces splitting Coord and
                                        # Origin separately (2x Separate Coordinate) then subtracting
                                        # each component (2x Subtract) -- 4 instructions -- with 1
                                        # Subtract on the coordinates themselves.
@@ -272,12 +272,12 @@ Done:                                          # reached via `last` (match found
   retry count) — not yet worked out.
 - Whether a nudged-away-from-ideal placement should feed back into planning the *next* point from
   the ideal grid position or the actual nudged one — not yet decided.
-- `HexIndexOf_test_1.dsc` (`tests/data/`) predates the pseudocode revision above — it implements
+- `HexIndexOf_test_1.dcs` (`tests/data/`) predates the pseudocode revision above — it implements
   the original flat region-gate cascade (with `d`, the 4-instruction coordinate split, and the
   dead `ry` branch all still present), not the `for_number`/`jump`/`label` restructuring. The
   in-game/test validation below applies to that earlier design; the revised pseudocode is
   design-only until it's rebuilt and re-exported through the same loop.
-- `HexIndexOf` now has a `.dsc` (`HexIndexOf_test_1.dsc`, `tests/data/`, round-tripping through
+- `HexIndexOf` now has a `.dcs` (`HexIndexOf_test_1.dcs`, `tests/data/`, round-tripping through
   `HexAt`) and is validated by `desynced-toolkit`'s `tests/test_hex_expansion.py`, which runs both
   routines through the real `data/instructions.lua` via `Interpreter` (217 `(R, T)` cases up to
   `R=8`) — a much stronger check than the original hand-rolled Python re-implementation this was
@@ -287,8 +287,8 @@ Done:                                          # reached via `last` (match found
   cluttering the view, everything clumped together with no grouping/separation (comments helped,
   structure didn't). **Planned follow-up (not yet done):** user will hand-rewrite/reorganize
   `HexIndexOf` in the in-game editor for clarity, then export it back here for a diff against the
-  current `HexIndexOf_test_1.dsc` — same build → load → observe → fix → export → diff loop as
-  `hexat.dsc` → `hexat2.dsc` earlier in this project. Whatever changes shake out should inform how
+  current `HexIndexOf_test_1.dcs` — same build → load → observe → fix → export → diff loop as
+  `hexat.dcs` → `hexat2.dcs` earlier in this project. Whatever changes shake out should inform how
   future hand-authored/generated instruction sequences in this project get structured (fewer
   single-use temps, deliberate grouping) — see `combat_squad_spec.md`'s pattern of separating
   design spec from implementation for how that doc records this kind of thing.

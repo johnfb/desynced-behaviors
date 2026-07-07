@@ -1,4 +1,4 @@
-"""Scrape a Steam Community discussion thread for shared .dsc behavior/blueprint
+"""Scrape a Steam Community discussion thread for shared .dcs behavior/blueprint
 strings, pairing each with the comment text (author + description) it came
 from. Steam discussion pages are plain server-rendered HTML (no login, no JS
 needed) and paginate via a `?ctp=N` query param.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import lupa.lua54 as lupa
 
-from desynced_toolkit import dsc_wire
+from desynced_toolkit import dcs_wire
 
 CORPUS_DIR = Path(__file__).resolve().parent.parent / "corpus" / "steam_behaviors"
 CONTEXT_DIR = CORPUS_DIR / "context"
@@ -116,7 +116,7 @@ def main() -> None:
                 if h in seen_hashes:
                     continue
                 try:
-                    type_char, table = dsc_wire.decode_dsc(lua, cand)
+                    type_char, table = dcs_wire.decode_dcs(lua, cand)
                 except Exception as e:
                     print(f"  [skip] undecodable ({len(cand)} chars) from {author}: {e}")
                     continue
@@ -132,7 +132,7 @@ def main() -> None:
 
                 seen_hashes.add(h)
                 page_new += 1
-                fname = f"{h}_{type_char}_{safe_name(name or 'unnamed')}.dsc"
+                fname = f"{h}_{type_char}_{safe_name(name or 'unnamed')}.dcs"
                 (CORPUS_DIR / fname).write_text(cand)
 
                 record = {

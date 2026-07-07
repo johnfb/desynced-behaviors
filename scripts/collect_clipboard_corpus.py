@@ -1,4 +1,4 @@
-"""Watch the (shared VirtualBox) clipboard and harvest every decodable .dsc
+"""Watch the (shared VirtualBox) clipboard and harvest every decodable .dcs
 string that appears, for building a real-world behavior/blueprint corpus from
 manually copy-pasted Discord forum threads.
 
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import lupa.lua54 as lupa
 
-from desynced_toolkit import dsc_wire
+from desynced_toolkit import dcs_wire
 
 CORPUS_DIR = Path(__file__).resolve().parent.parent / "corpus" / "discord_behaviors"
 CONTEXT_DIR = CORPUS_DIR / "context"
@@ -89,7 +89,7 @@ def main() -> None:
             if h in seen_hashes:
                 continue
             try:
-                type_char, table = dsc_wire.decode_dsc(lua, cand)
+                type_char, table = dcs_wire.decode_dcs(lua, cand)
             except Exception as e:
                 print(f"  [skip] undecodable candidate ({len(cand)} chars): {e}")
                 continue
@@ -101,14 +101,14 @@ def main() -> None:
         if new_items:
             # One context file per paste (not per behavior) -- the raw clipboard
             # text (thread title, author, description, iteration notes, etc.)
-            # surrounding whichever .dsc string(s) it contained. This is the
+            # surrounding whichever .dcs string(s) it contained. This is the
             # closest thing to a README/commit-message this corpus has, and
             # costs nothing extra to keep since it's already in the paste.
             context_fname = f"{batch_id}.txt"
             (CONTEXT_DIR / context_fname).write_text(clip)
 
         for h, cand, type_char, info in new_items:
-            fname = f"{h}_{type_char}_{safe_name(info['name'] or 'unnamed')}.dsc"
+            fname = f"{h}_{type_char}_{safe_name(info['name'] or 'unnamed')}.dcs"
             (CORPUS_DIR / fname).write_text(cand)
 
             record = {
