@@ -235,6 +235,39 @@ to real seconds, not for the relative comparisons.
   sensibly either way, but only `mine` tells *you* about it. It also applies
   to every `c_miner` component on the entity at once and avoids redundant
   register writes via its own before/after comparison.
+- **`mine`'s `Num` argument is checked against total current inventory
+  (`owner:CountItem`), not "amount extracted from a specific target"**
+  (`instructions.lua:5601-5610`). This makes it a poor fit for enforcing a
+  per-node floor: the store-register auto-deliver cycle above resets
+  `CountItem` every time cargo is delivered, so a `Num` threshold sized to
+  "stop once this node hits the floor" can fire early (leftover cargo of the
+  same item from elsewhere already counts toward it) or effectively never
+  fire from a single node's depletion (a mid-mining delivery resets the
+  counter before the threshold is reached). Considered and rejected as the
+  stopping mechanism for the floor design below — see the register-link
+  bullet immediately after this one.
+- **Components explicitly defer to a register link rather than fighting
+  it.** The guard `if not comp:RegisterIsLink(1) then ... end` (or
+  equivalent) recurs roughly 15 times across `components.lua`, always
+  gating a component's own convenience writes/clears to register 1 — e.g.
+  `c_miner`'s own entity-to-id conversion (`components.lua:2432`, `:2442`).
+  When the register is link-driven, the component either leaves it alone
+  entirely or, in a couple of cases (`components.lua:9323`), flags a
+  register error instead of clearing it itself. Practically: wiring a
+  behavior's declared output parameter directly to a component's register
+  via the Link Editor (one-to-many — a single linked parameter can drive
+  every `c_miner`/`c_adv_miner` on an entity at once, confirmed working by
+  the user from prior hands-on use) gives a Program more reliable control
+  over register 1 than going through `mine`. Writing to the link is
+  indistinguishable, from `c_miner`'s side, from a player manually editing
+  the register; clearing it (writing `nil`) hits the same plain `if not
+  reg1_num then ... return comp:SetStateSleep() end` shutdown path
+  (`components.lua:2259-2263`) as any other empty-register case — with none
+  of `mine`'s `Num`/`CountItem` coupling above, and none of its per-call
+  entity-equality dedup-on-write behavior (`instructions.lua:5615-5635`,
+  which silently drops a `Num` change on a call that keeps the same target
+  entity/id — a real trap for a "detect the stop, bump the limit, keep
+  going" design built directly on top of `mine`).
 - **"Loop Nearby Resources" (`for_count_resources`) aggregates by resource
   *type*** (total amount summed across all matching nodes in range), **not
   per individual node** — the wrong instruction for candidate-by-candidate
@@ -246,16 +279,49 @@ to real seconds, not for the relative comparisons.
 
 ### The MinerDrone behavior (graph source format)
 
-Final, corrected form, per `behavior_source_format.md`'s grammar. Algorithm:
-loop nearby resource nodes via reservoir sampling (candidates must be >100
-remaining and not oversubscribed per `Loop Signal`), commit to the winner via
-Signal broadcast, call `mine` once, then just wait-and-recheck (relying on
-native auto-store/auto-resume) until the node drops to the 100 floor, then
-release the claim and restart.
+**Revision note (this session):** the original draft below called the
+`mine` instruction once to establish the target and relied entirely on the
+confirmed native auto-store/auto-resume cycle from there. Indexing `data/`
+into a code knowledge graph and tracing `c_miner:on_update`'s actual stop
+conditions (`components.lua:2254-2536`) found a real bug: none of its four
+real stop conditions (register 1 cleared, requested amount reached,
+inventory full, node destroyed) cover "the Program decided to abandon this
+node" — the old instructions 19-21 cleared the Signal broadcast but never
+touched the miner's actual register, so the native auto-resume cycle kept
+mining the abandoned node, unsupervised, straight through the 100-unit
+floor and potentially to permanent depletion (`AddResourceHarvestItemAmount`'s
+`num > 0` guard, cited above). A `mine(Resource=nil)`-style explicit clear
+was investigated and rejected: `mine`'s only real "stop" path requires the
+raw compiled argument to be entirely *absent* (`instructions.lua:126-133`'s
+`GetStack`), which an unconnected-but-never-wired pin in the visual editor
+is not confirmed to produce; a `mine`-`Num`-threshold alternative was also
+considered and rejected (see the `Num`/`CountItem` bullet in "Native
+mechanics confirmed" above). The fix used below instead: drive `c_miner`'s
+register 1 through a genuine register link — a declared output parameter,
+`$MineTarget`, wired via the Link Editor directly to register 1 of every
+`c_miner`/`c_adv_miner` on the drone — rather than through `mine` at all, a
+technique the user confirmed using successfully before this session. This
+also caught and fixed a second, independent bug in the old draft: its
+fastest exit path (old `21 -> 2`) skipped resetting `$BestRoll`, silently
+corrupting the next round's reservoir sampling with a stale roll value
+carried over from the node just abandoned.
+
+Algorithm: loop nearby resource nodes via reservoir sampling (candidates
+must be >100 remaining and not oversubscribed per `Loop Signal`), commit to
+the winner via Signal broadcast, drive the register-linked `$MineTarget`
+directly to start mining (still relying on native auto-store/auto-resume —
+just without going through `mine`), wait-and-recheck the node's own
+remaining stock until it drops to the 100 floor, then explicitly clear the
+link to actually stop the miner, release the claim, and restart.
 
 ```
-behavior MinerDrone():
-  desc: "Reservoir-sample a resource node above the 100-unit floor, avoid oversubscribed nodes via Signal broadcast, mine down to the floor, repeat"
+behavior MinerDrone($MineTarget):
+  desc: "Reservoir-sample a resource node above the 100-unit floor, avoid oversubscribed nodes via Signal broadcast, mine down to the floor by driving a register-linked output parameter directly, repeat"
+
+  # Setup, done once outside the instruction graph via the Link Editor:
+  # register-link $MineTarget to register 1 of every c_miner / c_adv_miner
+  # component on this drone. One-to-many, same effect as mine's own internal
+  # `for _, m in ipairs(miners) do ... end` loop, without calling mine at all.
 
 1: set_reg(Value=0, Target=$BestRoll)
 2: for_entities_in_range(Range=5, Filter=v_resource, Unit=$Node) >13 (Done)
@@ -269,15 +335,15 @@ behavior MinerDrone():
 10: check_number(Value=$Roll, Compare=$BestRoll) >11 (If Larger) >STOP (If Smaller) >STOP (next)
 11: set_reg(Value=$Node, Target=$Best)
 12: set_reg(Value=$Roll, Target=$BestRoll) >STOP (next)
-13: check_number(Value=$BestRoll, Compare=0) >14 (If Larger) >STOP (If Smaller) >20 (next)
+13: check_number(Value=$BestRoll, Compare=0) >14 (If Larger) >STOP (If Smaller) >19 (next)
 14: set_reg(Value=$Best, Target=@signal)
-15: mine(Resource=$Best) >19 (Cannot Mine) >19 (Full)
+15: set_reg(Value=$Best, Target=$MineTarget)
 16: wait(Time=5)
 17: get_resource_num(Resource=$Best, Result=$Amt2)
-18: check_number(Value=$Amt2, Compare=100) >16 (If Larger) >19 (If Smaller) >19 (next)
-19: set_reg(Value=nil, Target=@signal) >21 (next)
-20: wait(Time=20) >1 (next)
-21: set_reg(Value=nil, Target=@signal) >2 (next)
+18: check_number(Value=$Amt2, Compare=100) >16 (If Larger) >20 (If Smaller) >20 (next)
+19: wait(Time=20) >1 (next)
+20: set_reg(Value=nil, Target=$MineTarget)
+21: set_reg(Value=nil, Target=@signal) >1 (next)
 ```
 
 Notes on the wiring:
@@ -290,16 +356,36 @@ Notes on the wiring:
   design choice, not a derived constant.
 - **9-12**: the actual reservoir-sampling step.
 - **13**: `$BestRoll` starts at 0 and a real roll is always ≥1, so `==0`
-  unambiguously means "nothing survived the loop."
-- **15-18**: relies on the confirmed native auto-store/auto-resume behavior
-  — `mine` is called exactly once to set the target; the loop from 16
-  onward only monitors the live amount and never re-touches the miner's
-  register while the target is unchanged.
-- **19, 20, 21** are three separate entry points into the same
-  reset-and-restart logic, left unmerged in this draft — a real, minor,
-  acknowledged inefficiency (see "Known gaps" below), and exactly the kind
-  of bookkeeping a real parser/renderer should handle mechanically rather
-  than by hand.
+  unambiguously means "nothing survived the loop." Its `next` branch now
+  goes to **19** (renumbered from the original draft's **20**).
+- **14-15**: **14** broadcasts the claim via Signal, unchanged from the
+  original draft. **15** replaces the old `mine(Resource=$Best)` call
+  entirely — it writes `$Best` (a bare entity value, `num` untouched/0)
+  straight to the register-linked `$MineTarget`, propagating directly to
+  register 1 on every linked `c_miner`. `num=0` still reads as "unlimited"
+  (`REG_INFINITE`), the same as `mine` itself would have written. There are
+  no `Cannot Mine`/`Full` exec branches here — those belong to the `mine`
+  wrapper instruction specifically; a direct register write has no such
+  layer, and this design never depended on them.
+- **16-18**: unchanged in intent — still polling the node's own remaining
+  stock directly via `get_resource_num`, the only signal actually monotonic
+  with respect to *this node's* depletion (see the `mine`'s `Num` bullet in
+  "Native mechanics confirmed" for why a `CountItem`/`Num`-based
+  alternative was rejected). On hitting the floor, both `If Smaller` and the
+  `Equal` fallthrough now converge on **20** instead of the original
+  draft's three separate stubs.
+- **19**: the "no candidate found this round" backoff — renumbered from the
+  original draft's **20**, otherwise unchanged.
+- **20-21**: **the actual fix.** **20** explicitly clears the linked
+  `$MineTarget` — since it's a real register link, this hits the same plain
+  `if not reg1_num then ... return comp:SetStateSleep() end` shutdown path
+  (`components.lua:2259-2263`) any other register-empty case does, genuinely
+  halting the native auto-resume cycle instead of just abandoning it. **21**
+  then releases the Signal claim. Both exit paths (**19** and **21**) now
+  converge on **1** — the original draft's fastest path (`21 -> 2`) skipped
+  resetting `$BestRoll`, a real bug independent of the register-clearing
+  issue (see the revision note above), fixed here by routing every restart
+  through **1**.
 
 Rendered as Mermaid (STOP edges omitted, matching
 `scripts/render_examples.py`'s actual `to_mermaid` convention — real,
@@ -322,12 +408,12 @@ flowchart TD
   n12["12: Copy (Roll -> BestRoll)"]
   n13["13: Compare Number (BestRoll vs 0)"]
   n14["14: Copy (Best -> @signal)"]
-  n15["15: Mine (Best)"]
+  n15["15: Copy (Best -> $MineTarget) [register-linked to c_miner reg1]"]
   n16["16: Wait Ticks (5)"]
   n17["17: Get Resource Num (Best)"]
   n18["18: Compare Number (Amt2 vs 100)"]
-  n19["19: Copy (nil -> @signal)"]
-  n20["20: Wait Ticks (20)"]
+  n19["19: Wait Ticks (20)"]
+  n20["20: Copy (nil -> $MineTarget)"]
   n21["21: Copy (nil -> @signal)"]
 
   n1 --> n2
@@ -343,17 +429,16 @@ flowchart TD
   n10 -->|If Larger| n11
   n11 --> n12
   n13 -->|If Larger| n14
-  n13 -->|next| n20
+  n13 -->|next| n19
   n14 --> n15
-  n15 -->|Cannot Mine / Full| n19
   n15 --> n16
   n16 --> n17
   n17 --> n18
   n18 -->|If Larger| n16
-  n18 -->|If Smaller/Equal| n19
-  n19 -->|next| n2
-  n20 -->|next| n1
-  n21 -->|next| n2
+  n18 -->|If Smaller/Equal| n20
+  n19 -->|next| n1
+  n20 --> n21
+  n21 -->|next| n1
 ```
 
 ### Known gaps / not yet done
@@ -366,11 +451,19 @@ flowchart TD
   `behavior_source_format.md`'s own "Status" section — this doc predates
   that tooling being built, and should be one of its first real test cases
   once it exists.
-- **Instructions 19-21 are redundant** (three separate reset-and-restart
-  entry points that could collapse to one or two) — caught by direct user
-  review, not fixed in this draft. Left as-is deliberately, as a concrete
-  example of the kind of bookkeeping error that's easy to make by hand and
-  should be mechanically checked by real tooling.
+- **Fixed this session (previously: "Instructions 19-21 are redundant")**:
+  the original draft had three separate reset-and-restart entry points, one
+  of which (the fastest exit path) silently skipped resetting `$BestRoll`,
+  corrupting the next round's reservoir sampling — caught while tracing
+  `c_miner:on_update`'s stop conditions for the register-link fix (see the
+  revision note above). The current graph collapses this to two shared exit
+  instructions (20-21), both routed through step 1. Left in this list as a
+  record of what was wrong, not because it still needs doing. The deeper
+  issue this same tracing surfaced — the old draft never actually stopped
+  the native miner on abandonment at all, since it only ever cleared the
+  Signal broadcast, not register 1 — is also fixed, by driving register 1
+  through a genuine register link instead of through `mine` (see "Native
+  mechanics confirmed" above for the full trace).
 - **Not yet integrated with an outer building-selection/travel routine.**
   This behavior handles "given you're already in a good area, pick and mine
   nodes there" — it does not yet handle *which* area to travel to in the
@@ -378,7 +471,7 @@ flowchart TD
   discussion): a building-side Signal broadcast ("I have nodes >100 nearby"),
   drones randomly pick among currently-signaling buildings, travel there,
   and only then run this procedure — with instruction 13's "no candidate"
-  path and the reset-and-restart tail (19/21) re-routed to that outer
+  path (19) and the reset-and-restart tail (20-21) re-routed to that outer
   loop's "check inventory / wait for store delivery / pick a building /
   travel" logic instead of just looping locally. Not built yet.
 - **The oversubscription cap (2) and floor (100) are both hardcoded design
