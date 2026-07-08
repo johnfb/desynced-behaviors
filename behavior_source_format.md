@@ -39,11 +39,16 @@ header := "behavior" NAME "(" param_list? ")" ":"
           ("desc:" STRING)?
 
 param_list := param ("," param)*
-param := NAME                      -- from pnames[i], or "param<i>" if absent
+param := NAME "*"?                 -- from pnames[i], or "param<i>" if absent; trailing "*"
+                                    -- marks an output parameter (parameters[i] truthy) --
+                                    -- see "Parameter direction" below, a real gap the base
+                                    -- grammar left unaddressed, closed during implementation
 
 instruction := NODE_ID ":" OP "(" arg_list? ")" branch_note*
 arg_list := arg ("," arg)*
 arg := ARGNAME "=" value
+     | HIDDEN_FIELD_NAME "=" (NUMBER | BOOL | STRING)  -- make_asm hidden literal field, see
+                                                        -- "Hidden literal fields" below
 
 value := NUMBER
        | "coord" "(" NUMBER "," NUMBER ")" ("[" "num" "=" NUMBER "]")?
@@ -63,6 +68,44 @@ sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
 `NODE_ID` is an arbitrary, stable identifier — not a number, not required to
 be sequential, not tied to the node's position in the listing. See "Node
 identity vs. wire position" below for why, and for how it's assigned.
+
+## Two real gaps closed during implementation
+
+The grammar above as originally specified left two things genuinely
+unaddressed — not stylistic choices, but information the compiler needs to
+correctly regenerate the real wire table. Both were found and closed while
+building `desynced_toolkit.bsf` (see the implementation plan referenced in
+"Status" below); documented here rather than left implicit in the code.
+
+**Parameter direction.** The base grammar's `param := NAME` has no way to
+express a parameter's in/out direction (`parameters[i]`'s truthy/falsy bit —
+see `behavior_format.md`'s "Top-level envelope"), even though it's essential,
+not decorative: a sub-behavior with output parameters (e.g. `hexat_test.dcs`'s
+`HexAt(R, T, Result, Origin, d_half)`, where `Result` is an output) cannot
+round-trip through text without it. Resolved with the trailing `*` shown in
+the grammar above — a plain `NAME` (unchanged from the original grammar for
+the common all-input case) is an input, `NAME*` is an output.
+
+**Hidden literal fields.** `behavior_format.md`'s "Hidden literal fields
+(`make_asm`)" table (`call`'s `sub`, `domove`'s `c`, `notify`'s `txt`, the
+universal `cmt` free-text node comment, etc.) — plain named keys on the
+instruction table that are *not* part of `data.instructions[op].args` — had
+no BSF surface syntax at all. Two of the six real fixtures this pipeline is
+validated against (`hexat_test.dcs`, `HexIndexOf_test_1.dcs`) use `call`,
+making this a required-for-round-tripping gap, not an edge case. Resolved by
+treating a hidden field as an ordinary `ARGNAME=value` pair in the same arg
+list, using the field's real lowercase name (`sub`, `c`, `txt`, `cmt`) as
+`ARGNAME`, with a quoted-string literal form (`"..."`, backslash-escaped
+internal quotes) added *only* for a hidden field's value — general `value`
+syntax elsewhere in the grammar still has no string-literal form, since no
+real in/out arg needs one. A rejected alternative, closer to this doc's own
+one worked `call` example (`call(ScanRuins, $A, $B, framereg_result=$C)`,
+which shows the resolved target name as a bare first token rather than
+`sub=N`): resolving `call`'s target to a name this way requires the parser to
+already know every sibling `sub` block's own name, which a single top-to-
+bottom text pass doesn't have yet when it reaches the `call` site — deferred,
+not implemented, in favor of the simpler and immediately-round-trippable
+`sub=N`/`sub="external_id"` form.
 
 ## Node identity vs. wire position
 
@@ -172,10 +215,20 @@ to one of three cases, per `behavior_format.md`'s documented semantics:
    a slot arg, or `(next)` for the top-level field. This is an intentional
    wire the original author made — always shown.
 2. **Explicit `false`** → rendered as `>STOP (PinName)`. This is a real,
-   meaningful authorial choice (terminate this path / pop to the enclosing
-   block) and must stay visually distinct from omission — collapsing this
-   into "no annotation" was a real bug caught while building the corpus
-   analysis tooling (see project memory) and must not be repeated here.
+   meaningful authorial choice and must stay visually distinct from omission
+   — collapsing this into "no annotation" was a real bug caught while
+   building the corpus analysis tooling (see project memory) and must not be
+   repeated here. **Not "terminate this path"** (an earlier, imprecise
+   description this section carried) — a behavior never truly halts except
+   via the explicit `exit` instruction or an outside/external action. What a
+   `STOP`/dead end actually does at runtime is: pop to and continue the
+   innermost still-active loop, or return to a `call`er, or — only if both
+   are empty — restart from Program Start (the same effect as the `restart`
+   instruction, itself distinct from `exit`; see `behavior_format.md`'s
+   "Stopping a behavior" section). This is deliberately **not** something
+   BSF tooling tries to resolve or label further (see "Loop-type
+   instructions" below) — `STOP` is rendered exactly as the wire format has
+   it and left at that.
 3. **Omitted entirely (nil)** → no annotation at all; implicitly falls
    through to the physically next instruction. This is the common case for a
    straight-line instruction sequence and would be pure noise if annotated.
@@ -311,22 +364,32 @@ of this** — it's a normal implicit fallthrough to the physically next
 instruction regardless of loop context, confirmed by the same dispatcher
 code (only a real dead end triggers the block-stack check at all).
 
-This means a `false` pin's real meaning ("stop the behavior" vs. "continue
-the innermost enclosing loop" vs. "return to caller") is a **path-dependent
-runtime property** (which loops are active on `state.blocks`, which `call`
-frames are on `state.returns`, at the moment that specific `false` executes)
-— not a fixed property of the instruction's position in the flat array. In
-the overwhelming majority of real behaviors this is still staticly
-resolvable with a reachability heuristic: for each loop instruction, follow
-every edge reachable from its per-iteration pin that doesn't pass through an
-explicit `break`/`last` or a nested loop's own `Done` pin, and any `false`
-found in that reachable set means "continue this loop," not "stop." This is
-not a mathematical guarantee — computed `jump`/`label` dispatch could in
-principle make the same instruction reachable both inside and outside a
-loop's dynamic scope, which this heuristic can't disambiguate — but it will
-be correct for realistic behaviors and is a real, buildable next step, not
-an open research problem the way the original (incorrect) "extent
-detection" framing suggested. Not yet implemented.
+This means a `false` pin's real meaning (continue the innermost enclosing
+loop / return to a caller / restart from Program Start — never a bare
+"halt," see "Control edges" above) is a **path-dependent runtime property**
+(which loops are active on `state.blocks`, which `call` frames are on
+`state.returns`, at the moment that specific `false` executes) — not a fixed
+property of the instruction's position in the flat array.
+
+**Decided against building any static resolution of this, even as an
+optional nicety — not merely deferred.** An earlier pass floated the
+reachability-heuristic idea sketched above (follow every edge reachable from
+a loop's per-iteration pin, not crossing an explicit `break`/`last` or a
+nested loop's own `Done`; any `false` found there means "continue this
+loop"). On reflection this isn't something to build: determining which
+outcome a dead end produces is equivalent to the halting problem in general
+— whether/when a dead end is even reached, for a graph with computed
+`jump`/`label` dispatch, is undecidable — and the actual outcome can differ
+per input/per run even where reachable in principle. A static label would be
+actively misleading in exactly the non-obvious cases where it would matter
+most, and adds nothing in the obvious cases (a reader who knows the plain
+rule above already gets the right answer straight from the graph topology,
+the same way a human author already relies on it when wiring a `STOP` inside
+a loop on purpose — see `blight_magnifier_mining.md`'s `MinerDrone` for a
+real example of exactly this idiom). `STOP` is rendered exactly as the wire
+format has it — visually distinct from omission, nothing more — and left at
+that; this is the complete, correct representation, not a partial one
+waiting on a "next step."
 
 ## Document envelope (round-tripping beyond a bare behavior)
 
@@ -362,52 +425,80 @@ shape:
 ## Visualization (secondary, generated on demand)
 
 The same node/edge graph this format describes can be rendered as a Mermaid
-flowchart for at-a-glance structural review (see
-`scripts/render_examples.py`'s `to_mermaid` for the current prototype) —
-useful when reviewing a behavior's overall shape matters more than editing a
-specific instruction, or to sanity-check that an edit didn't change the
-shape unexpectedly. This is not an alternate source-of-truth format; it's
-generated from the same underlying graph as the primary listing above, never
-edited directly, and carries no information the listing doesn't already have.
+flowchart for at-a-glance structural review (`desynced_toolkit.bsf.render_mermaid`,
+see "Status" below) — useful when reviewing a behavior's overall shape
+matters more than editing a specific instruction, or to sanity-check that an
+edit didn't change the shape unexpectedly. This is not an alternate
+source-of-truth format; it's generated from the same underlying graph as the
+primary listing above, never edited directly, and carries no information the
+listing doesn't already have. Unlike the text listing, an *implicit*
+fallthrough still gets a real (unlabeled) edge drawn in the diagram, since a
+Mermaid layout has no "physically next line" for the reader to infer flow
+from the way the text form does; an explicit `STOP` (and a true-end omission,
+which is the same thing per "Control edges" above) gets a real edge into a
+single synthetic terminal node per diagram, rather than being silently
+dropped.
 
 ## Status
 
-This is a specification, not yet a shipped decompiler. `scripts/render_examples.py`
-is a working prototype of the underlying *graph extraction and edge-resolution
-logic*, exercised for real on a live end-to-end edit (2026-07-06: a user
-selected/copied a real 28-instruction fragment from the in-game editor, Claude
-read/decoded/rebuilt it — extending it to cover all real `c_turret`-descendant
-components with a `[num=charge_time]` composite value on each, per the user's
-ask — and the user confirmed the pasted-back result was correct in-game; see
-project memory for the full trail). That real test caught and fixed two bugs
-in the prototype, both now implemented, not just planned: the `STOP` vs.
-plain-omission distinction (see "Control edges" above — an earlier version
-silently rendered a real `next: false` termination identically to implicit
-fallthrough) and the `[num=N]` composite-value suffix (existed only in this
-doc, not in `resolve_value`, until that same session — the underlying data
-was always correct, only the display silently dropped a coexisting `num`).
-Remaining real gap in the prototype's literal syntax: it still prints
-`num:5`/`var:A`/`id:x`-style prefixes instead of this doc's bare-value
-surface syntax (`5`/`$A`/`x`) — cosmetic, not a correctness issue, but worth
-closing before relying on the prototype for anything beyond ad hoc rendering.
-A second, non-cosmetic gap found while documenting faction registers
-(2026-07-07) and now fixed: `resolve_value` in `scripts/render_examples.py`
-had no case at all for `{"fr": "name"}` — it fell through to the generic
-composite-value branch (no `num`/`coord`/`id` key matches) and mislabeled it
-`literal:{'fr': 'name'}`, which reads as a fixed value rather than a register
-reference. It now renders `fr:name`, matching this prototype's existing
-prefixed style (`id:x`, `coord:(x,y)`) rather than this doc's final bare
-`fr(name)` surface syntax — still subject to the same not-yet-closed
-prefix-vs-bare-syntax gap noted just above.
-Not yet built: the reverse direction (parsing this format back into a real Lua instruction
-table for `dcs_wire.py` to encode — the live edit above was still constructed
-by hand-building Lua tables directly in Python, not by parsing this format's
-text), integration replacing `ast_compiler.py`,
-and the `sequence`/`for_number` block-extent problem above.
+**As of 2026-07-08, this is a real, working, bidirectional pipeline, not just
+a specification** — `desynced_toolkit.bsf` (`src/desynced_toolkit/bsf/`)
+implements decode → decompile → BSF text (`decompile.py`/`render_text.py`),
+BSF text → parse → compile → encode (`parse_text.py`/`compile.py`), and
+Mermaid rendering (`render_mermaid.py`), built per the implementation plan at
+the time (`/home/johnfb/.claude/plans/moonlit-nibbling-sonnet.md` in that
+session's environment — reference kept here since the plan predates this
+doc update). `scripts/render_examples.py`, the original one-way prototype
+this replaces, is now a thin CLI wrapper over the real package.
 
-The node-ID/wire-position split and the envelope/sidecar layering (both
-above, settled 2026-07-07) are design decisions only — `scripts/render_examples.py`
-still prints raw wire positions as node identity and has no envelope or
-position-sidecar layer at all. Reconciling the prototype with these
-decisions, and designing the envelope layer in enough detail to implement,
-are both real next steps, not done.
+Validated against all 6 real `.dcs` fixtures in `tests/data/`
+(`observer.dcs`, `beacon.dcs`, `beacon2.dcs`, `formation-hold.dcs`,
+`hexat_test.dcs`, `HexIndexOf_test_1.dcs`, covering embedded
+`dependencies`/multi-level sub-behaviors, declared `parameters`/`pnames`
+including output parameters, and real `call` usage) two ways:
+`tests/test_bsf_ir_roundtrip.py` (decode → decompile → compile, table-level
+equality against the original, modulo the still-deferred `nx`/`ny`/`cmt`
+sidecar fields) and `tests/test_bsf_text_roundtrip.py` (the same, with the
+BSF text layer in between: decompile → render → parse → compile). A genuine
+end-to-end exercise (`tests/test_bsf_end_to_end.py`) decodes `hexat_test.dcs`,
+renders it to BSF text, makes a deliberate hand-edit exercising node
+reordering specifically (not just a literal-value tweak), reparses,
+recompiles, re-encodes, re-decodes, and confirms both that the edit's exact
+intended effect landed and that nothing else changed — including that the
+untouched embedded `HexAt` sub-behavior still executes correctly through the
+real interpreter against closed-form reference math.
+
+This closed every gap this section used to list here: the bare-value surface
+syntax (`5`/`$A`/`x`, not `num:5`/`var:A`/`id:x`), the `fr(name)` bare
+syntax, the node-ID/wire-position split (`decompile.py` assigns stable
+`n<idx>` ids and never re-derives a branch target from a cached position —
+see "Node identity vs. wire position" above), and the reverse (text → table)
+direction, which didn't exist in any form before this.
+
+**Two real grammar gaps were found and closed while implementing this, not
+anticipated by the original spec text** — both are now part of the grammar
+itself (see "Two real gaps closed during implementation" above, right after
+the grammar block): parameter direction (`NAME*` for an output parameter)
+and hidden `make_asm` literal fields (`sub`/`c`/`txt`/`cmt` as ordinary
+`name=value` pairs, with a quoted-string literal form added for their
+string-valued cases). Both are required for round-tripping real behaviors,
+not optional polish — 2 of the 6 real fixtures need the hidden-field syntax
+for their `call` nodes, and several need parameter direction for declared
+output parameters.
+
+**Still not done, deliberately or genuinely deferred (see "Deferred" in the
+implementation plan referenced above for the fuller reasoning):**
+- The envelope/sidecar layer — `nx`/`ny` node positions and full
+  blueprint/component wrapping beyond a bare behavior plus its
+  `dependencies`. The pipeline round-trips the instruction graph itself;
+  position/comment-adjacent fields outside that (`nx`/`ny` specifically —
+  `cmt` *is* handled, via the hidden-field mechanism above) aren't modeled
+  yet.
+- **Not planned at all, not merely postponed:** any static resolution of
+  what a `STOP`/dead-end resolves to inside a loop's dynamic scope (see
+  "Loop-type instructions" above for why — genuinely undecidable in
+  general, and actively misleading in exactly the cases where it would
+  matter).
+- Migrating `ast_compiler.py`'s role and rewriting `hex_expansion_math.md`'s
+  compiled `HexIndexOf` example directly in BSF — explicitly separate,
+  later follow-on work, not part of the pipeline build above.
