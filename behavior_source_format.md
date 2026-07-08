@@ -1,9 +1,13 @@
-# Behavior Source Format
+# Behavior Source Format (BSF)
 
 A textual, human/LLM-readable representation for Desynced behaviors, designed
 to be decompiled *from* and compiled back *to* the real instruction-table
 shape `dcs_wire.py` already decodes/encodes (see `behavior_format.md` for
 that underlying wire format — this document is the layer above it).
+
+This format's name is **BSF** (Behavior Source Format) — settled on
+2026-07-07, formalizing this doc's own working title rather than inventing
+new vocabulary. Referred to as "this format" or "BSF" interchangeably below.
 
 ## Why this format, not tree-structured pseudocode
 
@@ -16,7 +20,7 @@ control flow at all, and a further meaningful fraction have control-flow
 merge points that don't correspond to simple `if`/`else` reconvergence (a
 proper reducibility check would be needed to give an exact number — not yet
 done). This format is graph-native instead: every instruction is a node with
-an explicit index, and every real control edge — however it converges or
+a stable identity, and every real control edge — however it converges or
 loops — is either explicit or a well-defined implicit default, never forced
 into a shape it doesn't have.
 
@@ -37,7 +41,7 @@ header := "behavior" NAME "(" param_list? ")" ":"
 param_list := param ("," param)*
 param := NAME                      -- from pnames[i], or "param<i>" if absent
 
-instruction := INDEX ":" OP "(" arg_list? ")" branch_note*
+instruction := NODE_ID ":" OP "(" arg_list? ")" branch_note*
 arg_list := arg ("," arg)*
 arg := ARGNAME "=" value
 
@@ -49,12 +53,78 @@ value := NUMBER
        | "@" ("goto" | "store" | "visual" | "signal" | NUMBER)  -- frame register; symbolic name when N is 1-4, else bare @N
        | "fr" "(" NAME ")" ("[" "num" "=" NUMBER "]")?  -- faction (shared) register, resolved by name at runtime
 
-branch_note := ">" (INDEX | "STOP") "(" PINNAME ")"
+branch_note := ">" (NODE_ID | "STOP") "(" PINNAME ")"
              -- omitted entirely for a plain implicit fallthrough (see below)
 
 sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
               -- one per bundled dependencies[]/subs[] entry
 ```
+
+`NODE_ID` is an arbitrary, stable identifier — not a number, not required to
+be sequential, not tied to the node's position in the listing. See "Node
+identity vs. wire position" below for why, and for how it's assigned.
+
+## Node identity vs. wire position
+
+**The real wire format's instruction key *is* the flat array position**
+(`behavior_format.md`'s top-level envelope — a dict/array keyed by 1-based
+Lua position, which is exactly what `next`/exec-arg branch targets number).
+An earlier draft of this doc reused that same raw position as source-level
+`INDEX`, which silently inherits the wire format's worst editing property:
+inserting one node shifts every index after it, and every branch target that
+pointed past the insertion has to be rewritten by hand. Confirmed as a real
+problem, not a hypothetical one — this is the same "royal pain" a flat
+numbered array is in *any* language, and this format doesn't need to import
+that pain just because the wire format has it.
+
+The fix is to decouple two things that were previously conflated:
+
+- **Node ID** (`NODE_ID` in the grammar) — an arbitrary, stable, freely
+  user-renameable symbol. Assigned once when a node is created (by the
+  decompiler, e.g. `n` + a counter, or a friendlier op-derived name) and
+  never reused or renumbered afterward. This is what every reference to a
+  node uses: `branch_note` targets, a resolved `jump→label` annotation, a
+  `call` target's node within its own sub-behavior graph.
+- **Wire position** — purely a compiler-output detail, recomputed from
+  scratch every time BSF is compiled back to the real instruction table.
+  Never hand-maintained, never shown as something the user needs to keep
+  consistent.
+
+This generalizes something BSF already does in one narrow spot: `jump`/
+`label` dispatch (see below) already resolves a *name* dynamically instead of
+a fixed address. The proposal here is to make every node's identity work
+that way, not just the ones reached via explicit `jump`/`label`.
+
+This isn't a novel idea for this format specifically — it's the standard
+answer wherever a stable identity needs to survive edits that a flat position
+can't:
+
+- **Assemblers/linkers** — symbolic labels resolved to addresses in a
+  separate pass; inserting an instruction never requires renumbering source.
+- **SSA-form compiler IRs** (LLVM IR, MLIR) — a value's name (`%7`) is
+  independent of its print position; the printed number is a display
+  convenience the printer recomputes, never the value's real identity.
+- **Sea-of-Nodes IR** (Cliff Click, HotSpot C2) — control and data modeled
+  as one explicit graph for the same reason BSF is graph-native: tree/CFG
+  structure is a poor fit for real control flow.
+- **DOT/Graphviz** — node names are arbitrary identifiers; position (`pos=`)
+  is an optional attribute, not topology.
+- **Node-graph visual tools** (Blender shader/geometry nodes, Unreal
+  Blueprint/Material Editor, Houdini) — GUID-per-node, referenced by id
+  everywhere, position stored as a separate sidecar attribute. The closest
+  real-world analog to Desynced's own visual editor, and further validation
+  for the position policy in "Document envelope" below.
+- **Binary Ninja's IL layers** — explicitly separates an instruction's real
+  address from its IL instruction index, for exactly this renumbering-pain
+  reason, in a decompiler context directly analogous to this one.
+
+One thing source order (top-to-bottom in the listing) still legitimately
+controls: implicit-fallthrough adjacency (see "Control edges" below) is
+genuinely about "the physically next instruction," and that's still a real,
+load-bearing property. Reordering a node in BSF is just moving a line in the
+text — same as reordering statements in any textual language — never a
+renumbering exercise, because nothing else references a node by its line
+position.
 
 ## Values
 
@@ -95,10 +165,12 @@ Every exec-typed argument slot (the top-level `next`, plus per-instruction
 slots like `check_number`'s "If Larger"/"If Smaller") independently resolves
 to one of three cases, per `behavior_format.md`'s documented semantics:
 
-1. **Explicit integer target** → rendered as `>N (PinName)`, using the
-   instruction's real pin name from `data.instructions[op].args` (e.g. `If
-   Larger`, `Done`) for a slot arg, or `(next)` for the top-level field. This
-   is an intentional wire the original author made — always shown.
+1. **Explicit target** (a raw wire position in the decoded table, resolved to
+   the destination node's `NODE_ID` — see "Node identity vs. wire position"
+   above) → rendered as `>NODE_ID (PinName)`, using the instruction's real
+   pin name from `data.instructions[op].args` (e.g. `If Larger`, `Done`) for
+   a slot arg, or `(next)` for the top-level field. This is an intentional
+   wire the original author made — always shown.
 2. **Explicit `false`** → rendered as `>STOP (PinName)`. This is a real,
    meaningful authorial choice (terminate this path / pop to the enclosing
    block) and must stay visually distinct from omission — collapsing this
@@ -132,8 +204,8 @@ rendered with the normal value rules above — so a `Label=` can be a literal
 register, with no special grammar needed:
 
 ```
-12: jump(Label=$State)
-13: label(Label=$State)     -- unrelated code here does NOT get a resolved edge
+n12: jump(Label=$State)
+n13: label(Label=$State)     -- unrelated code here does NOT get a resolved edge
 ```
 
 **Static resolution at decompile time is only ever an opportunistic, best-effort
@@ -143,7 +215,7 @@ depends on runtime program state this decompiler has no visibility into).
 When it succeeds, both the raw value and the resolved edge are shown:
 
 ```
-12: jump(Label=v_transport_route)  >3 (jump→label)
+n12: jump(Label=v_transport_route)  >n3 (jump→label)
 ```
 
 The raw `Label=` value is kept even when resolution succeeds (needed to
@@ -178,7 +250,7 @@ Rendered call syntax names the target directly instead of a raw numeric
 index, e.g.:
 
 ```
-7: call(ScanRuins, $A, $B, framereg_result=$C)
+n7: call(ScanRuins, $A, $B, framereg_result=$C)
 ```
 
 where `ScanRuins` is the bundled sub-behavior's own declared name (from its
@@ -193,11 +265,10 @@ component `extra_data` (see project memory, 2026-07-06). Whether this is a
 live-editor-vs-wire-format distinction or a real inconsistency has **not
 been reconciled** — treat both as the same concept (an array of embedded
 sub-behavior tables) until checked directly. Each bundled sub-behavior
-renders as its own `sub NAME(...):` block using its own real `name`, with
-instruction indices restarting at 1 (independent numbering per behavior,
-matching how the real table addresses them — a `call` target's instruction
-indices are only ever meaningful within that specific sub-behavior's own
-array).
+renders as its own `sub NAME(...):` block using its own real `name`, with its
+own independent `NODE_ID` namespace (matching how the real table addresses
+it as a separate array — a `call` target's node IDs are only ever meaningful
+within that specific sub-behavior's own graph, never the caller's).
 
 ## Loop-type instructions (`for_number`, `for_component`, `for_signal_match`, etc.)
 
@@ -215,7 +286,7 @@ is the instruction's ordinary top-level `next`, exactly like `check_number`'s
 rules, no changes needed:
 
 ```
-4: for_component(Filter=c_radar, Component=$C)  >9 (Done)
+n4: for_component(Filter=c_radar, Component=$C)  >n9 (Done)
 ```
 
 **The real subtlety is elsewhere: what an unconnected pin means once you're
@@ -257,14 +328,36 @@ be correct for realistic behaviors and is a real, buildable next step, not
 an open research problem the way the original (incorrect) "extent
 detection" framing suggested. Not yet implemented.
 
-## Known open items
+## Document envelope (round-tripping beyond a bare behavior)
 
-- **Free-floating node position (`nx`/`ny`).** Deliberately excluded from
-  this source format — it's a visual-editor layout affordance, not
-  behavioral semantics. A future write-back tool will need its own policy
-  (e.g. preserve original positions for untouched instructions, only
-  auto-layout newly-added ones) — that's a separate concern from this
-  format's grammar and not addressed here.
+The grammar above covers one thing: a single behavior's instruction graph.
+A real Desynced clipboard payload can be more than that — a unit/frame with
+a `c_behavior` component, a full blueprint bundling several components,
+register bandings (`bands`/`conns`, `behavior_format.md` ~line 223), embedded
+sub-behaviors under `dependencies`/`subs`. Round-tripping *any* valid
+encoding, not just a bare behavior, means adding a layer above this grammar
+rather than growing the grammar itself to cover every possible container
+shape:
+
+- **Envelope layer.** A thin wrapper mirroring the real clipboard payload
+  1:1 — type tag (`B`/`C`), frame/component data, register bandings,
+  embedded sub-behaviors — sitting around the BSF instruction graph(s) it
+  contains. Any field not currently being edited round-trips as an **opaque
+  pass-through blob**, keyed by field name and not reinterpreted — this is
+  what makes "round-trip any valid encoding" tractable without first
+  modeling every field the game might ever put in a blueprint. Not yet
+  designed in detail; a real next step, not started.
+- **Node position (`nx`/`ny`).** Resolved: stored as a **sidecar table**
+  (`node_id -> (x, y)`) attached to the envelope, not part of instruction
+  syntax — the same move DOT/Graphviz makes with `pos=`, and every visual
+  node-graph tool (Blender, Houdini, Unreal Blueprint) makes with view-state
+  vs. graph topology. This only works cleanly because node identity is
+  stable across edits (see "Node identity vs. wire position" above) — a
+  positional index couldn't anchor a sidecar table this way, since it
+  shifts on every insertion. Write-back policy: untouched nodes keep their
+  stored position verbatim; newly-added nodes have no entry, and the editor
+  auto-lays those out — same as it already does today for any node with no
+  `nx`/`ny` at all.
 
 ## Visualization (secondary, generated on demand)
 
@@ -311,3 +404,10 @@ table for `dcs_wire.py` to encode — the live edit above was still constructed
 by hand-building Lua tables directly in Python, not by parsing this format's
 text), integration replacing `ast_compiler.py`,
 and the `sequence`/`for_number` block-extent problem above.
+
+The node-ID/wire-position split and the envelope/sidecar layering (both
+above, settled 2026-07-07) are design decisions only — `scripts/render_examples.py`
+still prints raw wire positions as node identity and has no envelope or
+position-sidecar layer at all. Reconciling the prototype with these
+decisions, and designing the envelope layer in enough detail to implement,
+are both real next steps, not done.
