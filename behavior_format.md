@@ -360,6 +360,40 @@ field or the value in an `exec`-typed argument slot — resolves the same way:
   There is no real-data case of "nothing was wired, but the next slot
   happens to be filled anyway" — that case is always `false`, never
   omission.
+
+  **Real exception to "omission is always a deliberate wire," confirmed
+  in-game 2026-07-09:** that guarantee only holds for a pin that existed in
+  the instruction's own schema (`data.instructions[op].args`) *at the time
+  the behavior was compiled*. `domove`/`dodrop`'s "Path Blocked" exec pin
+  did not exist when an old behavior predating it was authored — it was
+  added to the instruction in a later game update. Confirmed directly: the
+  in-game editor, opening that old behavior today, shows "Path Blocked"
+  visually wired to the same destination as the plain fallthrough — i.e.
+  the *current* editor cannot tell "this pin was deliberately left
+  unconnected" apart from "this pin didn't exist yet when the behavior was
+  last saved," and doesn't try to. The compiled *effect* is identical
+  either way (both resolve to plain fallthrough — see above), so this
+  doesn't change any runtime-semantics claim already made here, but it does
+  mean **the causal story "the original author chose not to wire this" is
+  not a safe inference from an old behavior's own omission** — instruction
+  schemas gain new pins over time, and old saved data simply never had the
+  argument slot to omit deliberately in the first place. There is no way to
+  distinguish the two cases from the wire alone without independently
+  knowing which game version the behavior was last compiled under.
+
+  A follow-up real test (same day) sharpens this further: deliberately
+  wiring "Path Blocked" to the physically-next instruction in the *current*
+  editor **also** compiles to an omitted key — the exact same
+  representation as the schema-absence case above. So two genuinely
+  different, real authorial situations — "this pin didn't exist when the
+  behavior was authored" and "this pin existed and was deliberately wired
+  to whatever already follows by default" — are indistinguishable from the
+  wire alone; only "left genuinely untouched" is ruled out as a source of
+  omission (that's always `false`, per the rule above). Practically:
+  deliberately wiring a pin to whatever already follows by default is a
+  no-op, both in compiled effect and in the wire's own encoding — there was
+  never a reason to do it other than making the pin visibly "look" wired
+  in the editor.
 - **an integer** → jump to the instruction whose rendered dict key is
   **that integer minus 1** (see off-by-one warning below)
 - **`false`** (or a value whose `-1` target is beyond the end of the

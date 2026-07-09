@@ -74,11 +74,11 @@ sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
 be sequential, not tied to the node's position in the listing. See "Node
 identity vs. wire position" below for why, and for how it's assigned.
 
-## Four real gaps closed during implementation
+## Six real gaps closed during implementation
 
 The grammar above as originally specified left things genuinely unaddressed
 — not stylistic choices, but information the compiler needs to correctly
-regenerate the real wire table. All four were found and closed while
+regenerate the real wire table. All six were found and closed while
 building `desynced_toolkit.bsf` (see the implementation plan referenced in
 "Status" below); documented here rather than left implicit in the code.
 
@@ -173,7 +173,35 @@ present). A new fixture exercising this (one of the two behaviors from the
 finding above) was added to the round-trip test suite so this class of gap
 can't reopen silently again.
 
-## Node identity vs. wire position
+**A bare bool at a non-exec value arg slot isn't a real value — it's
+compiler-equivalent to that slot being absent.** Found 2026-07-09 via a
+different real-world test: the user hand-rebuilt a small real behavior
+(`tests/data/deprecated_haul_to_signal.dcs`, which uses the deprecated
+`for_signal` instruction) in the current in-game editor, specifically to
+compare how this pipeline sees the two versions. `have_item`'s optional
+`Unit` arg is explicitly written as `false` on the wire rather than omitted
+— the grammar's `value` production has no case for a bare bool at all, so
+this fell into the `Unknown` escape hatch, which has no surface syntax and
+silently broke a full text round trip. Confirmed against the real
+compiler (`GetFactionBehaviorAsm`, `data/library.lua`): its arg-resolution
+loop only recognizes `table`/`number`/`string` `val_type`s for a non-exec
+arg — a `nil` (omitted) and a bare bool (`true` *or* `false`) both fall
+through to the identical `else` branch ("unused argument"). So, unlike the
+exec-arg case (where omission and explicit `false` are genuinely different,
+see "Control edges" below), a bare bool at a value-typed slot is not a
+distinct authorial state at all — `decompile.py` now treats it exactly like
+an absent key, which is both correct (per the compiler equivalence just
+cited) and round-trippable, at the cost of not literally reproducing
+whichever of the two byte-identical-in-effect encodings the original wire
+happened to use.
+
+**The top-level `desc` field is real — the original 6 fixtures just never
+set it.** `render_text.py`/`parse_text.py` already fully supported a
+`desc:` line under the header from the very start (built directly off this
+doc's own grammar, which always had one) — only `decompile.py`'s read of it
+was ever missing, hardcoded to `None` with a comment claiming no real
+fixture had it. `deprecated_haul_to_signal.dcs` has a real top-level `desc`
+sibling to `name` and was the first fixture to prove that comment wrong.
 
 **The real wire format's instruction key *is* the flat array position**
 (`behavior_format.md`'s top-level envelope — a dict/array keyed by 1-based
@@ -596,13 +624,16 @@ session's environment — reference kept here since the plan predates this
 doc update). `scripts/render_examples.py`, the original one-way prototype
 this replaces, is now a thin CLI wrapper over the real package.
 
-Validated against all 8 real `.dcs` fixtures in `tests/data/`
+Validated against all 9 real `.dcs` fixtures in `tests/data/`
 (`observer.dcs`, `beacon.dcs`, `beacon2.dcs`, `formation-hold.dcs`,
 `hexat_test.dcs`, `HexIndexOf_test_1.dcs`, covering embedded
 `dependencies`/multi-level sub-behaviors, declared `parameters`/`pnames`
 including output parameters, and real `call` usage; plus `keepvars_clear.dcs`/
 `keepvars_keep.dcs`, added 2026-07-09, covering `keepvars`/`keeparrays` and a
-declared parameter with no custom `pnames` entry at all) two ways:
+declared parameter with no custom `pnames` entry at all; plus
+`deprecated_haul_to_signal.dcs`, added 2026-07-09, covering a deprecated
+instruction (`for_signal`), a bare-bool value arg, and a real top-level
+`desc` field) two ways:
 `tests/test_bsf_ir_roundtrip.py` (decode → decompile → compile, table-level
 equality against the original, modulo the still-deferred `nx`/`ny`/`cmt`
 sidecar fields) and `tests/test_bsf_text_roundtrip.py` (the same, with the
@@ -622,9 +653,9 @@ syntax, the node-ID/wire-position split (`decompile.py` assigns stable
 see "Node identity vs. wire position" above), and the reverse (text → table)
 direction, which didn't exist in any form before this.
 
-**Four real grammar gaps were found and closed while implementing this, not
+**Six real grammar gaps were found and closed while implementing this, not
 anticipated by the original spec text** — all are now part of the grammar
-itself (see "Four real gaps closed during implementation" above, right after
+itself (see "Six real gaps closed during implementation" above, right after
 the grammar block): parameter direction (a display-only `NAME*` computed
 fresh from real usage — including transitively through `call` — never
 trusted from the wire's own `parameters[i]` bit, which turned out to be a
@@ -637,16 +668,24 @@ whether this pipeline could distinguish two behaviors differing only in
 these fields — it initially couldn't: `render_text.py`/`parse_text.py` had
 silently dropped `keepvars` despite the table layer handling it correctly,
 and `keeparrays` was unhandled at every layer, found only as a side effect
-of chasing the first gap down). All are required for round-tripping real
-behaviors, not optional polish — 2 of the 6 real fixtures need the
-hidden-field syntax for their `call` nodes, several need parameter direction
-for declared output parameters, and `keepvars`/`keeparrays` are exactly the
-kind of behavior-changing-but-textually-invisible field a fixture-based test
-suite structurally cannot catch unless a fixture happens to set them — true
-of the original 6 (none do), which is exactly why the gap went unnoticed
-until a user hand-constructed two real behaviors specifically to set them;
-two such fixtures (`keepvars_clear.dcs`/`keepvars_keep.dcs`) are now
-permanently in the suite so this class of gap can't reopen silently again.
+of chasing the first gap down), a bare bool at a non-exec value arg slot
+(compiler-equivalent to that slot being absent, not a distinct value —
+found via `have_item`'s optional `Unit` arg in a real deprecated-instruction
+behavior the user hand-rebuilt in the current editor specifically to
+compare against this pipeline), and the top-level `desc` field (fully
+supported by the text layer from the start, only `decompile.py`'s read of
+it was ever missing — the original 6 fixtures just never set it). All are
+required for round-tripping real behaviors, not optional polish — 2 of the
+original 6 fixtures need the hidden-field syntax for their `call` nodes,
+several need parameter direction for declared output parameters, and
+`keepvars`/`keeparrays`/`desc` are exactly the kind of
+behavior-changing-but-textually-invisible field a fixture-based test suite
+structurally cannot catch unless a fixture happens to set them — true of
+the original 6 (none do), which is exactly why these gaps went unnoticed
+until the user hand-constructed real behaviors specifically to exercise
+them; three such fixtures (`keepvars_clear.dcs`/`keepvars_keep.dcs`/
+`deprecated_haul_to_signal.dcs`) are now permanently in the suite so this
+class of gap can't reopen silently again.
 
 **Still not done, deliberately or genuinely deferred (see "Deferred" in the
 implementation plan referenced above for the fuller reasoning):**
