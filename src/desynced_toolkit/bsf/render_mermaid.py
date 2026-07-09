@@ -256,12 +256,12 @@ def _render_component(
         if node_id in jump_targets:
             jt = jump_targets[node_id]
             if jt in member_set:
-                edge_lines.append(f"  n{node_id} -.->|jump→label| n{jt}")
+                edge_lines.append(f"  n{node_id} -.->|resolved jump| n{jt}")
             else:
                 ref_count += 1
                 ref_id = f"ref{ref_count}"
                 marker_lines.append(f'  {ref_id}(["↗ {jt}"]):::refMarker')
-                edge_lines.append(f"  n{node_id} -.->|jump→label| {ref_id}")
+                edge_lines.append(f"  n{node_id} -.->|resolved jump| {ref_id}")
 
     lines.extend(node_lines)
     lines.extend(marker_lines)

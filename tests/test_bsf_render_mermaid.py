@@ -143,7 +143,7 @@ def test_static_jump_to_label_connects_components_that_share_it(engine):
     argcache = ArgCache(engine)
     diagrams = render_mermaid(behavior, argcache)
     assert len(diagrams) == 1  # not 2 -- the static jump->label edge unions them
-    assert "jump→label" in diagrams[0]
+    assert "resolved jump" in diagrams[0]
 
 
 def test_components_are_disjoint_and_cover_every_node(engine):
