@@ -8,7 +8,7 @@ is not literally the text "next"). Everything else here still only builds the ab
 named-arg IR: knowing an op's real argument *positions* remains exclusively a bsf/compile.py
 concern.
 
-Three real gaps in the base grammar (behavior_source_format.md as written) are worth flagging
+Five real gaps in the base grammar (behavior_source_format.md as written) are worth flagging
 up front, all resolved with minimal, explicitly-flagged extensions rather than blocking on a
 grammar change -- see render_text.py's `render_hidden_value`/`render_node`/`_render_into`
 docstrings for the symmetric render-side notes:
@@ -26,6 +26,21 @@ docstrings for the symmetric render-side notes:
     something the grammar's generic `(next)` fallback captures -- resolved by resolving a
     parsed pin name against `argcache.next_pin_name(op)` and mapping it back to the structural
     "next" key when it matches, rather than storing it under the display name verbatim.
+  - `keepvars` (a behavior-level wire field controlling whether local-variable memory persists
+    across runs -- a genuine, first-order semantic difference, not cosmetic) had no surface
+    syntax at all and was silently dropped by both this module and render_text.py until a
+    real user-constructed test (two behaviors, identical instructions/params/vars, differing
+    only in this field) caught it 2026-07-09 -- none of the six real fixtures this pipeline is
+    validated against happen to set it, so no prior round-trip test exercised the path.
+    Resolved with an optional `keepvars: true` line directly under the header, symmetric with
+    `desc:`, parsed only for the literal `true` case since `false` is never rendered.
+  - `keeparrays` is a sibling wire field to `keepvars` (same missed-until-the-same-fix history)
+    controlling a *separate* real editor toggle ("Memory Arrays", independent of the
+    "Variables" one `keepvars` covers -- confirmed against `ui/Program.lua`'s options popup, two
+    distinct dropdowns). Unlike `keepvars` it's a 3-state string, not a bool: absent (default),
+    `"startup"`, or `"store"` -- see `ir.py`'s `BsfBehavior.keeparrays` docstring for what each
+    means in-game. Resolved the same way, one more optional `keeparrays: "startup"` /
+    `keeparrays: "store"` line under the header.
 """
 
 from __future__ import annotations
@@ -41,6 +56,8 @@ _NUM_RE = re.compile(r"^-?\d+(\.\d+)?$")
 _SLOT_UNDECLARED_RE = re.compile(r"^slot(\d+)\(undeclared\)$")
 _HEADER_RE = re.compile(r"^(behavior|sub)\s+(.+)\((.*)\):\s*$")
 _DESC_RE = re.compile(r'^desc:\s*"(.*)"\s*$')
+_KEEPVARS_RE = re.compile(r"^keepvars:\s*true\s*$")
+_KEEPARRAYS_RE = re.compile(r'^keeparrays:\s*"(startup|store)"\s*$')
 _BRANCH_RE = re.compile(r">\s*(\S+?)\s*\(([^)]*)\)")
 _SYMBOLIC_FRAME_REGS = {"goto": -1, "store": -2, "visual": -3, "signal": -4}
 
@@ -238,6 +255,18 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
             desc = dm.group(1)
             i += 1
 
+    keepvars = False
+    if i < len(lines) and _KEEPVARS_RE.match(lines[i].strip()):
+        keepvars = True
+        i += 1
+
+    keeparrays = None
+    if i < len(lines):
+        km = _KEEPARRAYS_RE.match(lines[i].strip())
+        if km:
+            keeparrays = km.group(1)
+            i += 1
+
     while i < len(lines) and lines[i].strip() == "":
         i += 1
 
@@ -249,7 +278,9 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
         order.append(node.id)
         i += 1
 
-    return BsfBehavior(name=name, params=params, desc=desc, nodes=nodes, order=order), i
+    return BsfBehavior(
+        name=name, params=params, desc=desc, keepvars=keepvars, keeparrays=keeparrays, nodes=nodes, order=order
+    ), i
 
 
 def parse_behavior(text: str, argcache: ArgCache) -> BsfBehavior:

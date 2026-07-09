@@ -50,8 +50,74 @@ few sibling metadata keys:
   an output parameter, falsy/`false` marks it as input. See "Parameters"
   below.
 - `pnames` (optional) — parallel array of display names for `parameters`.
-- `keepvars` (optional) — if set, local-variable memory slots persist
-  across calls instead of being reset. Rarely needed for a fresh behavior.
+- `keepvars` (optional bool) — if set, local-variable memory slots persist
+  across a behavior *restart* instead of resetting to their initial values
+  (`data/library.lua:32`: `fill_lvs = not code.keepvars`). Corresponds to
+  the in-game Program editor's "Variables" options-popup toggle
+  ("Clear variables when behavior restarts" vs. "Keep variable values
+  across restarts", `ui/Program.lua:781`) — genuinely output-changing, not
+  cosmetic: e.g. a counter that increments on every restart vs. one that
+  resets to the same value every time. Found completely unhandled by this
+  project's BSF text layer (`render_text.py`/`parse_text.py` silently
+  dropped it despite `decompile.py`/`compile.py` handling it correctly) via
+  a user-constructed test 2026-07-09 — see `behavior_source_format.md`'s
+  "Three real gaps closed during implementation" for the fix.
+- `keeparrays` (optional string) — a **separate** field controlling a
+  **separate** in-game toggle, "Memory Arrays" (`ui/Program.lua:783`, its
+  own dropdown, independent of `keepvars`'s "Variables" one — easy to
+  conflate the two, don't). Genuinely 3-state, not boolean — confirmed both
+  from the real editor's own dropdown (three mutually-exclusive radio-style
+  options, not a checkbox) and from two distinct engine code paths (see
+  below), and user-confirmed 2026-07-09 after being asked directly whether
+  it should be modeled as a bool instead. The key to the naming: "restart"
+  here means the `restart`/POP *instruction* (an in-behavior control-flow
+  event), while "start"/"startup" means the *component's* behavior actually
+  (re)starting via `SetBehavior` — an explicit stop-then-start, triggered by
+  editing/saving the behavior's code, swapping which behavior a component
+  runs, or the component being freshly placed/loaded. These are two
+  different events both colloquially called "restart"; the three states are:
+  - absent/nil (default) = "Clear memory arrays when behavior restarts" —
+    cleared on every ordinary in-behavior `restart`/POP.
+  - `"startup"` = "Clear memory arrays on behavior start (including code
+    changes)" — an ordinary in-behavior `restart`/POP does *not* clear
+    arrays in this state (the non-obvious part, given the string's own
+    name), only a genuine `SetBehavior`-level start does.
+  - `"store"` = "Keep memory arrays until behavior is switched" — survives
+    both an ordinary restart and a `SetBehavior`-level start, only clearing
+    when the component is loaded with a genuinely different behavior/library.
+
+  Confirmed by two distinct engine code paths, not just the popup's own
+  three option strings: `c_behavior_on_end` (ordinary in-behavior restart,
+  `data/components.lua:4019`) does a plain truthy check
+  (`if not asm.code.keeparrays then state.arrays = nil end`) — so
+  `"startup"` and `"store"` are indistinguishable *here*, both skip the
+  clear; `SetBehavior` (a genuine component-level start,
+  `data/library.lua:153`) checks specifically `== "store"` — so `"startup"`
+  does *not* hit this branch and loses its arrays here even though it
+  survived the earlier ordinary restart, while `"store"` does. Also found
+  completely unhandled anywhere in this project (not just the BSF text
+  layer — no code, no doc) in the same pass that found `keepvars`'s gap.
+- **Both fields are consulted only for the outermost behavior actually
+  assigned to the component — never for a `call`ed sub-behavior**, traced
+  end-to-end through the real runtime (not inferred): `call`'s own `func`
+  (~line 402) allocates a brand-new memory region via
+  `Tool.NewRegisterObject(...)` on *every single invocation*, seeded from
+  the callee's static compiled template, and unconditionally discards it on
+  return (`c_behavior_on_end`'s `returns`-stack branch, `data/components.lua`
+  ~line 4006) — `keepvars` is never read anywhere in this path, so a
+  subroutine's own locals are always fresh per-call regardless of what its
+  own `keepvars` says. `keepvars`/`keeparrays` are read in exactly one
+  runtime location, `c_behavior_on_end`'s third branch (`data/components.lua`
+  ~line 4013), reached only when *both* the block stack and the call-return
+  stack are completely empty — i.e. only at the true outermost Program
+  Start. `restart`, even fired from deep inside a nested `call`, always
+  unwinds the *entire* call stack first (`InstUnrollReturns`,
+  `data/instructions.lua` ~line 190, resets `state.revid` to the bottommost/
+  outermost return record) before that branch runs, and `exit` falls back to
+  `state.main_id` (the component's top-level assigned behavior id) if
+  needed — so it's always the outer program's own flags in play, never a
+  sub's. A sub-behavior's own `keepvars`/`keeparrays`, even if set on its own
+  saved definition, are therefore dead data at runtime.
 - `dependencies` (optional) — present when this behavior `call`s a
   sub-behavior that is *embedded* rather than referenced by saved-library
   id (see `call`'s `sub` field under "Hidden literal fields" below). A

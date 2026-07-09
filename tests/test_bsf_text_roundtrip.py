@@ -24,6 +24,9 @@ REAL_DCS_FILES = [
     "formation-hold.dcs",
     "hexat_test.dcs",
     "HexIndexOf_test_1.dcs",
+    "keepvars_clear.dcs",
+    "keepvars_keep.dcs",
+    "deprecated_haul_to_signal.dcs",
 ]
 
 
@@ -173,3 +176,51 @@ def test_pop_vs_omission_distinct_through_text_roundtrip(engine):
     assert to_py(c1) == to_py(c2)
     assert c1[1]["next"] is False  # A: explicit False (mid-array pop)
     assert "next" not in set(c1[2].keys())  # B: omitted (true-end pop)
+
+
+def test_keepvars_and_keeparrays_survive_text_roundtrip(engine):
+    """Regression test for a real bug found 2026-07-09: two real behaviors
+    (keepvars_clear.dcs/keepvars_keep.dcs), identical instructions/params/vars and differing
+    ONLY in `keepvars`, decompiled to byte-for-byte identical BSF text -- render_text.py silently
+    never emitted `keepvars`/`keeparrays` and parse_text.py silently never parsed them, even
+    though decompile.py/compile.py (the table-level IR layer) already handled `keepvars`
+    correctly, and despite `keeparrays` being a real, separate, previously entirely-undocumented
+    field (found chasing this same bug down). None of the other 6 fixtures set either field, so
+    the existing parametrized round-trip tests never exercised this path."""
+    argcache = ArgCache(engine)
+    raw_clear = (DATA_DIR / "keepvars_clear.dcs").read_text().strip()
+    raw_keep = (DATA_DIR / "keepvars_keep.dcs").read_text().strip()
+
+    b_clear = decompile_dcs(engine, raw_clear)
+    b_keep = decompile_dcs(engine, raw_keep)
+    assert b_clear.keepvars is False
+    assert b_keep.keepvars is True
+
+    text_clear = render_behavior(b_clear, argcache)
+    text_keep = render_behavior(b_keep, argcache)
+    assert text_clear != text_keep  # the actual bug: these used to render identically
+    assert "keepvars" not in text_clear
+    assert "keepvars: true" in text_keep
+
+    # full text round trip must preserve the flag, not just the initial render
+    reparsed_keep = parse_behavior(text_keep, argcache)
+    assert reparsed_keep.keepvars is True
+    assert to_py(compile_behavior(engine, b_keep, argcache)) == to_py(compile_behavior(engine, reparsed_keep, argcache))
+
+    reparsed_clear = parse_behavior(text_clear, argcache)
+    assert reparsed_clear.keepvars is False
+
+
+def test_keeparrays_three_states_render_and_parse(engine):
+    argcache = ArgCache(engine)
+    node = BsfNode(id="n1", op="set_reg", args={"Value": Num(1), "Target": Var("x")})
+
+    b_absent = BsfBehavior(name="Arr", nodes={"n1": node}, order=["n1"])
+    assert "keeparrays" not in render_behavior(b_absent, argcache)
+
+    for mode in ("startup", "store"):
+        b = BsfBehavior(name="Arr", nodes={"n1": node}, order=["n1"], keeparrays=mode)
+        text = render_behavior(b, argcache)
+        assert f'keeparrays: "{mode}"' in text
+        reparsed = parse_behavior(text, argcache)
+        assert reparsed.keeparrays == mode

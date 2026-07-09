@@ -145,6 +145,10 @@ def _render_into(b: BsfBehavior, lines: list[str], keyword: str, argcache: ArgCa
     lines.append(f"{keyword} {b.name}({params_str}):")
     if b.desc:
         lines.append(f'  desc: "{b.desc}"')
+    if b.keepvars:
+        lines.append("  keepvars: true")
+    if b.keeparrays:
+        lines.append(f'  keeparrays: "{b.keeparrays}"')
     lines.append("")
     jump_targets = _jump_label_targets(b.nodes)
     for node_id in b.order:

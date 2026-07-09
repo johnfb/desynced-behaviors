@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from desynced_toolkit.bsf.argcache import ArgCache
+from desynced_toolkit.bsf.argcache import DYNAMIC_ARG_OPS, ArgCache, arg_pin_names
 from desynced_toolkit.bsf.compile import compile_behavior
 from desynced_toolkit.bsf.decompile import decompile_behavior, decompile_dcs
 from desynced_toolkit.bsf.ir import BsfBehavior, BsfNode, BsfParam
@@ -23,6 +23,9 @@ REAL_DCS_FILES = [
     "formation-hold.dcs",
     "hexat_test.dcs",
     "HexIndexOf_test_1.dcs",
+    "keepvars_clear.dcs",
+    "keepvars_keep.dcs",
+    "deprecated_haul_to_signal.dcs",
 ]
 
 
@@ -38,13 +41,45 @@ def _strip_layout(v):
     return v
 
 
+def _strip_unused_bool_args(v, argcache: ArgCache):
+    """A bare bool (true or false) at a non-exec arg slot is compiler-equivalent to that key
+    being omitted entirely -- confirmed against GetFactionBehaviorAsm (data/library.lua): its
+    arg-resolution loop only recognizes table/number/string val_types for a non-exec arg,
+    everything else (nil OR a bare bool) falls through to the identical "unused argument" case.
+    decompile.py normalizes an explicit bool at such a slot to "absent" on read (see its own
+    comment, found via `deprecated_haul_to_signal.dcs`'s `have_item` node, which has the real
+    game's editor writing an explicit `false` for its unwired optional "Unit" arg rather than
+    omitting the key) -- so a recompile legitimately drops it even when the original wire had it
+    explicitly. This mirrors that same normalization here so the round-trip check compares the
+    two encodings as the compiler-equivalent forms they are, not byte-for-byte structural copies."""
+    if isinstance(v, dict):
+        if "op" in v:
+            op = v["op"]
+            if op in DYNAMIC_ARG_OPS:
+                exec_positions = set()
+            else:
+                exec_positions = {i for i, atype, _ in arg_pin_names(op, argcache) if atype == "exec"}
+            v = {
+                k: x
+                for k, x in v.items()
+                if not (isinstance(k, int) and k not in exec_positions and isinstance(x, bool))
+            }
+        return {k: _strip_unused_bool_args(x, argcache) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_strip_unused_bool_args(x, argcache) for x in v]
+    return v
+
+
 @pytest.mark.parametrize("fname", REAL_DCS_FILES)
 def test_fixture_roundtrips_through_ir(engine, fname):
+    argcache = ArgCache(engine)
     raw = (DATA_DIR / fname).read_text().strip()
     _, orig_table = engine.decode_dcs(raw)
     b = decompile_dcs(engine, raw)
     recompiled = compile_behavior(engine, b)
-    assert _strip_layout(to_py(recompiled)) == _strip_layout(to_py(orig_table))
+    got = _strip_unused_bool_args(_strip_layout(to_py(recompiled)), argcache)
+    want = _strip_unused_bool_args(_strip_layout(to_py(orig_table)), argcache)
+    assert got == want
 
 
 def test_reorder_moves_implicit_fallthrough_but_not_explicit_target(engine):

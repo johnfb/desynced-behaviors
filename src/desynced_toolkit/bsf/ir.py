@@ -57,6 +57,16 @@ class BsfBehavior:
     params: list[BsfParam] = field(default_factory=list)
     desc: str | None = None
     keepvars: bool = False
+    # Sibling wire field to `keepvars`, and just as semantic (not cosmetic) -- confirmed against
+    # `ui/Program.lua`'s own options popup, which presents these as two independent toggles
+    # ("Variables" and "Memory Arrays"). Unlike `keepvars` (plain bool), this is a 3-state
+    # string: `None` (default, wire-absent) = "Clear memory arrays when behavior restarts";
+    # `"startup"` = "Clear memory arrays on startup (including code change)" -- i.e. arrays DO
+    # persist across an ordinary restart, they only clear on a fresh game load/code edit, the
+    # opposite of what the string alone suggests; `"store"` = "Keep memory arrays until behavior
+    # is switched" (survives even a restart or code change, only clears when a different
+    # behavior/library is loaded in). No other string values are ever written by the real editor.
+    keeparrays: str | None = None
     nodes: dict[str, BsfNode] = field(default_factory=dict)
     order: list[str] = field(default_factory=list)  # node ids in source/emission order
     subs: list["BsfBehavior"] = field(default_factory=list)

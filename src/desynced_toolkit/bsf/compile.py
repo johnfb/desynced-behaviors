@@ -73,18 +73,33 @@ def _compile_one(engine, b: BsfBehavior, argcache: ArgCache, lua) -> "lupa._LuaT
 
     prog["name"] = b.name
 
+    if b.desc:
+        prog["desc"] = b.desc
+
     if b.params:
         written = written_param_slots(b, argcache)
         parameters = lua.table()
-        pnames = lua.table()
         for i, p in enumerate(b.params, start=1):
             parameters[i] = i in written
-            pnames[i] = p.name
         prog["parameters"] = parameters
-        prog["pnames"] = pnames
+        # pnames is only written back if some name is a genuine custom display name -- a slot
+        # whose name is exactly decompile.py's own `param{i}` fallback format round-trips as
+        # "wire never had pnames at all" instead of manufacturing one, matching real fixtures
+        # (many real behaviors declare `parameters` with no `pnames` at all). An inherent, small
+        # ambiguity: a param a user genuinely named literally "param1" is indistinguishable from
+        # the fallback and won't round-trip its pnames entry either -- accepted, not fixable
+        # without storing "was pnames present" on the IR, which the IR deliberately doesn't do.
+        if any(p.name != f"param{i}" for i, p in enumerate(b.params, start=1)):
+            pnames = lua.table()
+            for i, p in enumerate(b.params, start=1):
+                pnames[i] = p.name
+            prog["pnames"] = pnames
 
     if b.keepvars:
         prog["keepvars"] = True
+
+    if b.keeparrays:
+        prog["keeparrays"] = b.keeparrays
 
     if b.subs:
         deps = lua.table()

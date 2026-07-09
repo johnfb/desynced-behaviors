@@ -37,6 +37,10 @@ behavior := header instruction+ sub_behavior*
 
 header := "behavior" NAME "(" param_list? ")" ":"
           ("desc:" STRING)?
+          ("keepvars:" "true")?              -- see "keepvars/keeparrays" below; omitted
+                                              -- entirely when false (the common case), never
+                                              -- rendered as "keepvars: false"
+          ("keeparrays:" ("\"startup\"" | "\"store\""))?  -- see below; omitted when absent
 
 param_list := param ("," param)*
 param := NAME "*"?                 -- from pnames[i], or "param<i>" if absent; trailing "*" is
@@ -70,11 +74,11 @@ sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
 be sequential, not tied to the node's position in the listing. See "Node
 identity vs. wire position" below for why, and for how it's assigned.
 
-## Two real gaps closed during implementation
+## Four real gaps closed during implementation
 
-The grammar above as originally specified left two things genuinely
-unaddressed — not stylistic choices, but information the compiler needs to
-correctly regenerate the real wire table. Both were found and closed while
+The grammar above as originally specified left things genuinely unaddressed
+— not stylistic choices, but information the compiler needs to correctly
+regenerate the real wire table. All four were found and closed while
 building `desynced_toolkit.bsf` (see the implementation plan referenced in
 "Status" below); documented here rather than left implicit in the code.
 
@@ -131,6 +135,43 @@ already know every sibling `sub` block's own name, which a single top-to-
 bottom text pass doesn't have yet when it reaches the `call` site — deferred,
 not implemented, in favor of the simpler and immediately-round-trippable
 `sub=N`/`sub="external_id"` form.
+
+**`keepvars`/`keeparrays`.** Two behavior-level (not per-node) wire fields —
+`behavior_format.md`'s "Top-level envelope" documents both. `keepvars`
+(bool): when set, this behavior's local-variable memory slots persist
+across a restart instead of resetting. `keeparrays` (a *separate*,
+3-state string field, corresponding to a *separate* in-game "Memory
+Arrays" toggle independent of `keepvars`'s "Variables" one — see
+`behavior_format.md` for the full 3-state meaning): controls whether
+memory-array contents persist across a restart, a code change, or neither.
+Both are genuine, first-order semantic differences (an accumulating
+counter vs. one that resets to the same value every run) — not cosmetic or
+structural, so both belong in the primary text representation, not only
+the envelope layer. Both were missed completely in the original grammar
+and, worse, in the original implementation: `decompile.py`/`compile.py`
+(the table-level IR layer) handled `keepvars` correctly from the start,
+but `render_text.py` silently never printed it and `parse_text.py`
+silently never parsed it — so two real behaviors differing *only* in
+`keepvars` decompiled to byte-for-byte identical BSF text, and a
+decompile → render → parse → compile round trip through the text layer
+silently dropped it. `keeparrays` was worse still: found completely
+unhandled anywhere in this project at any layer, not just the text one —
+first noticed and documented here at all as a side effect of chasing down
+the `keepvars` gap. Found 2026-07-09 by a user-constructed test built for
+exactly this purpose (two hand-authored behaviors, same
+instructions/params/vars, differing only in `keepvars`, specifically to
+check whether this pipeline could see the difference) — not caught earlier
+because none of the six real fixtures this pipeline is validated against
+happen to set either field, so no round-trip test exercised either path at
+all. Fixed by adding both to the header production (see "Grammar
+overview" above): optional `keepvars: true` / `keeparrays: "startup"` /
+`keeparrays: "store"` lines directly under the `behavior`/`sub` header
+line, symmetric with the existing `desc:` line, emitted only when set
+(never `keepvars: false` — false is the overwhelming
+common case and stays silent, matching how `desc` is only printed when
+present). A new fixture exercising this (one of the two behaviors from the
+finding above) was added to the round-trip test suite so this class of gap
+can't reopen silently again.
 
 ## Node identity vs. wire position
 
@@ -555,11 +596,13 @@ session's environment — reference kept here since the plan predates this
 doc update). `scripts/render_examples.py`, the original one-way prototype
 this replaces, is now a thin CLI wrapper over the real package.
 
-Validated against all 6 real `.dcs` fixtures in `tests/data/`
+Validated against all 8 real `.dcs` fixtures in `tests/data/`
 (`observer.dcs`, `beacon.dcs`, `beacon2.dcs`, `formation-hold.dcs`,
 `hexat_test.dcs`, `HexIndexOf_test_1.dcs`, covering embedded
 `dependencies`/multi-level sub-behaviors, declared `parameters`/`pnames`
-including output parameters, and real `call` usage) two ways:
+including output parameters, and real `call` usage; plus `keepvars_clear.dcs`/
+`keepvars_keep.dcs`, added 2026-07-09, covering `keepvars`/`keeparrays` and a
+declared parameter with no custom `pnames` entry at all) two ways:
 `tests/test_bsf_ir_roundtrip.py` (decode → decompile → compile, table-level
 equality against the original, modulo the still-deferred `nx`/`ny`/`cmt`
 sidecar fields) and `tests/test_bsf_text_roundtrip.py` (the same, with the
@@ -579,19 +622,31 @@ syntax, the node-ID/wire-position split (`decompile.py` assigns stable
 see "Node identity vs. wire position" above), and the reverse (text → table)
 direction, which didn't exist in any form before this.
 
-**Two real grammar gaps were found and closed while implementing this, not
-anticipated by the original spec text** — both are now part of the grammar
-itself (see "Two real gaps closed during implementation" above, right after
+**Four real grammar gaps were found and closed while implementing this, not
+anticipated by the original spec text** — all are now part of the grammar
+itself (see "Four real gaps closed during implementation" above, right after
 the grammar block): parameter direction (a display-only `NAME*` computed
 fresh from real usage — including transitively through `call` — never
 trusted from the wire's own `parameters[i]` bit, which turned out to be a
-UI-drawing hint rather than a runtime distinction) and hidden `make_asm`
+UI-drawing hint rather than a runtime distinction), hidden `make_asm`
 literal fields (`sub`/`c`/`txt`/`cmt` as ordinary `name=value` pairs, with a
-quoted-string literal form added for their string-valued cases). Both are
-required for round-tripping real behaviors,
-not optional polish — 2 of the 6 real fixtures need the hidden-field syntax
-for their `call` nodes, and several need parameter direction for declared
-output parameters.
+quoted-string literal form added for their string-valued cases), and
+`keepvars`/`keeparrays` (two independent behavior-level persistence flags,
+found 2026-07-09 via a user-constructed test specifically designed to check
+whether this pipeline could distinguish two behaviors differing only in
+these fields — it initially couldn't: `render_text.py`/`parse_text.py` had
+silently dropped `keepvars` despite the table layer handling it correctly,
+and `keeparrays` was unhandled at every layer, found only as a side effect
+of chasing the first gap down). All are required for round-tripping real
+behaviors, not optional polish — 2 of the 6 real fixtures need the
+hidden-field syntax for their `call` nodes, several need parameter direction
+for declared output parameters, and `keepvars`/`keeparrays` are exactly the
+kind of behavior-changing-but-textually-invisible field a fixture-based test
+suite structurally cannot catch unless a fixture happens to set them — true
+of the original 6 (none do), which is exactly why the gap went unnoticed
+until a user hand-constructed two real behaviors specifically to set them;
+two such fixtures (`keepvars_clear.dcs`/`keepvars_keep.dcs`) are now
+permanently in the suite so this class of gap can't reopen silently again.
 
 **Still not done, deliberately or genuinely deferred (see "Deferred" in the
 implementation plan referenced above for the fuller reasoning):**

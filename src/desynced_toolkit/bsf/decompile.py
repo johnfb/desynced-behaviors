@@ -121,7 +121,8 @@ def decompile_behavior(engine, table, argcache: ArgCache | None = None) -> BsfBe
         if op in DYNAMIC_ARG_OPS:
             names = _call_arg_names(table, inst, argcache)
             for i in _int_keys(inst):
-                node.args[names[i]] = from_lua(inst[i])
+                if not isinstance(inst[i], bool):  # see the bool-is-really-absent note below
+                    node.args[names[i]] = from_lua(inst[i])
         else:
             for i, atype, pin in arg_pin_names(op, argcache):
                 if atype == "exec":
@@ -131,7 +132,20 @@ def decompile_behavior(engine, table, argcache: ArgCache | None = None) -> BsfBe
                     # record, but an exec pin's *absence* is itself meaningful).
                     target = resolve_branch(inst[i] if i in inst_keys else None, idx, insts)
                     node.branches[pin] = idx_to_id[target] if isinstance(target, int) else target
-                elif i in inst_keys:
+                elif i in inst_keys and not isinstance(inst[i], bool):
+                    # A bare bool (true or false) at a non-exec arg slot is NOT a real value --
+                    # confirmed against GetFactionBehaviorAsm (data/library.lua ~line 75): its
+                    # arg-resolution loop only recognizes table/number/string val_types for a
+                    # non-exec arg; anything else (nil OR a bare bool) falls through to the same
+                    # `else: asmarg = false` ("unused argument") branch. So an omitted key and an
+                    # explicit `false` (or, for that matter, `true`) compile to byte-identical
+                    # results here -- unlike the exec-arg case just above, where omission and
+                    # explicit `false` are NOT interchangeable (see resolve_branch). Found via a
+                    # real fixture (`have_item`'s optional "Unit" arg, explicitly `false` rather
+                    # than omitted) that the BSF text layer couldn't round-trip: rendered via the
+                    # generic `Unknown` escape hatch (no text syntax, so reparsing failed) before
+                    # this fix -- treating it as absent instead is both round-trippable and, per
+                    # the compiler equivalence just cited, the more correct classification anyway.
                     node.args[pin] = from_lua(inst[i])
 
         next_target = resolve_branch(inst["next"] if "next" in inst_keys else None, idx, insts)
@@ -155,8 +169,14 @@ def decompile_behavior(engine, table, argcache: ArgCache | None = None) -> BsfBe
     return BsfBehavior(
         name=table["name"] if "name" in keys else "",
         params=_params_from_table(table),
-        desc=None,  # no wire-level field found on any real fixture -- see plan's "Deferred"
+        # Real wire-level field after all -- the original 6 fixtures just never happened to set
+        # it (same story as keepvars/keeparrays); found via `deprecated_haul_to_signal.dcs`,
+        # which has a real top-level `desc` sibling to `name`. render_text.py/parse_text.py
+        # already fully supported `desc` from the start (built directly off the spec's grammar,
+        # which always had a `desc:` line) -- only this read was ever missing.
+        desc=table["desc"] if "desc" in keys else None,
         keepvars=bool(table["keepvars"]) if "keepvars" in keys else False,
+        keeparrays=table["keeparrays"] if "keeparrays" in keys else None,
         nodes=nodes,
         order=order,
         subs=subs,
