@@ -12,17 +12,29 @@ from typing import Literal
 
 from .values import BsfValue
 
-# A branch target: an explicit destination node id, "STOP" (explicit `false` or falling off the
+# A branch target: an explicit destination node id, "POP" (explicit `false` or falling off the
 # true end of the instruction array -- both are real dead ends, rendered identically per the
-# spec), or None for a plain implicit fallthrough (no branch_note at all in BSF text). Recomputed
-# fresh at compile time from the current `order` every time -- never cached/baked in anywhere.
-Branch = str | Literal["STOP"] | None
+# spec), or None for a plain implicit fallthrough (no branch_note at all in BSF text). "POP" is
+# named for what it actually does -- pop the current context frame (the innermost active loop
+# iteration or call invocation), never a bare "halt" -- not "STOP", which this format used
+# until user correction: the auto-restart-from-Program-Start behavior when the frame stack is
+# completely empty isn't a separate third case either, just the unremarkable, automatic
+# consequence of popping with nothing left. Recomputed fresh at compile time from the current
+# `order` every time -- never cached/baked in anywhere.
+Branch = str | Literal["POP"] | None
 
 
 @dataclass
 class BsfParam:
     name: str  # pnames[i] if present, else "param{i}"
-    is_output: bool  # parameters[i] truthiness -- the direction bit, not just a name
+    # No direction field here on purpose. The wire format's own `parameters[i]` bit turned out
+    # (user-confirmed, not guessed) to be a UI-drawing hint for the visual editor -- which side
+    # of a `call` node's box a pin is drawn on -- not a distinction the runtime evaluation
+    # itself makes. For a format meant for editing and refactoring, trusting a stored bit that
+    # can silently go stale after an edit is the wrong call; `argcache.written_param_slots`
+    # computes "is this slot ever written to" fresh from the actual node bodies every time it's
+    # needed (render_text.py's `*` display, compile.py's regenerated `parameters[i]`), the same
+    # never-cache policy already used for the `jump->label` annotation.
 
 
 @dataclass

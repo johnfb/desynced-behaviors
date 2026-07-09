@@ -300,6 +300,30 @@ fall through, or set `false`) for each, and only the one that actually
 matches fires. Instructions with zero `exec` args just use the top-level
 `next` field (or its default) unconditionally.
 
+### The top-level `next` field's real display name/existence: `exec_arg`
+
+`data.instructions[op]` carries a field sibling to `args`, `exec_arg`, that
+this doc had not documented until a user caught the visual editor showing
+something other than a generic "next" pin for `check_number` specifically.
+Confirmed directly from `data/instructions.lua`, three real shapes:
+
+- **absent** (the common case) — the top-level `next` field is the generic
+  "next" pin every reader already assumes.
+- **a `{1, "Name", desc}` table** — names the top-level pin for real, e.g.
+  `check_number`'s `exec_arg = { 1, "If Equal", "Where to continue if the
+  numerical values are the same" }`. This is the exact mechanism behind the
+  documented "check_number's Equal outcome isn't a numbered arg slot" gotcha
+  elsewhere in this doc — now with its real display name sourced from live
+  data instead of a generic placeholder. A handful of other comparison-style
+  instructions declare the same `{1, "If Equal", ...}` shape.
+- **`false`** — this op has **no top-level `next` pin at all**, and the real
+  visual editor draws none: `exit`, `restart`, and `last` (Break) all
+  declare `exec_arg = false`, matching that it's genuinely nonsensical to
+  wire a continuation after any of them (`exit`'s own `func` never even
+  consults `next`; see "Stopping a behavior" below). A `next` value sitting
+  in the wire data for one of these ops regardless is inert, never read —
+  tooling should not display it as if it were a real, meaningful wire.
+
 ### ⚠️ Off-by-one: jump values are raw 1-based Lua positions, not dict keys
 
 `dsc_codec.py` renumbers the *instruction list itself* from Lua's native

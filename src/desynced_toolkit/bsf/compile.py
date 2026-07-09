@@ -2,47 +2,20 @@
 
 from __future__ import annotations
 
-from .argcache import ArgCache, arg_pin_names
-from .decompile import DYNAMIC_ARG_OPS
+from .argcache import DYNAMIC_ARG_OPS, ArgCache, arg_pin_names, call_arg_positions, written_param_slots
 from .ir import BsfBehavior, BsfNode
 from .values import to_lua
 
 
-def _call_positions(b: BsfBehavior, node: BsfNode) -> dict[str, int]:
-    """Mirror of decompile.py's `_call_arg_names`, run in reverse: resolve each of a
-    call/load_behavior node's arg names back to its real wire position, by re-deriving the
-    same target-pnames lookup decompile.py used (never cached -- recomputed fresh here from
-    the current `b`, same "always recompute" policy as everything else in this module)."""
-    sub = node.hidden.get("sub")
-    target_params = None
-    if isinstance(sub, (int, float)) and not isinstance(sub, bool):
-        if sub == -1:
-            target_params = b.params
-        elif sub > 0 and int(sub) - 1 < len(b.subs):
-            target_params = b.subs[int(sub) - 1].params
-
-    positions: dict[str, int] = {}
-    if target_params:
-        for i, p in enumerate(target_params, start=1):
-            positions[p.name] = i
-    for name in node.args:
-        if name not in positions and name.startswith("arg"):
-            try:
-                positions[name] = int(name[3:])
-            except ValueError:
-                pass
-    return positions
-
-
 def _resolve_branch_target(target, positions: dict[str, int], is_last: bool):
-    """`target` is what BsfNode.branches[pin] holds: a NODE_ID, "STOP", or None. Returns the
+    """`target` is what BsfNode.branches[pin] holds: a NODE_ID, "POP", or None. Returns the
     raw wire value to write (an int position, or False), or the sentinel `_OMIT` meaning "don't
     set this key at all".
 
     The implicit-fallthrough case (`None`) never needs an explicit value -- the engine's own
     dispatcher advances to the physically next instruction on its own when a key is simply
-    absent. `"STOP"` is ambiguous by construction (behavior_source_format.md's decompiler
-    collapses an explicit `false` and "fell off the true end of the array" into the same `STOP`
+    absent. `"POP"` is ambiguous by construction (behavior_source_format.md's decompiler
+    collapses an explicit `false` and "fell off the true end of the array" into the same `POP`
     representation, since the real dispatcher treats them identically -- see `resolve_branch`)
     -- when this node is genuinely the last one in the compiled order, omitting the key
     reproduces that same "fell off the end" case exactly (and matches how real .dcs files are
@@ -51,7 +24,7 @@ def _resolve_branch_target(target, positions: dict[str, int], is_last: bool):
     the meaning to "fall through to it"."""
     if target is None:
         return _OMIT
-    if target == "STOP":
+    if target == "POP":
         return _OMIT if is_last else False
     return positions[target]
 
@@ -74,7 +47,7 @@ def _compile_one(engine, b: BsfBehavior, argcache: ArgCache, lua) -> "lupa._LuaT
         t["op"] = node.op
 
         if node.op in DYNAMIC_ARG_OPS:
-            arg_positions = _call_positions(b, node)
+            arg_positions = call_arg_positions(b, node)
             for name, value in node.args.items():
                 t[arg_positions[name]] = to_lua(value, lua)
         else:
@@ -101,10 +74,11 @@ def _compile_one(engine, b: BsfBehavior, argcache: ArgCache, lua) -> "lupa._LuaT
     prog["name"] = b.name
 
     if b.params:
+        written = written_param_slots(b, argcache)
         parameters = lua.table()
         pnames = lua.table()
         for i, p in enumerate(b.params, start=1):
-            parameters[i] = p.is_output
+            parameters[i] = i in written
             pnames[i] = p.name
         prog["parameters"] = parameters
         prog["pnames"] = pnames

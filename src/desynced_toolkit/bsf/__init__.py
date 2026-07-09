@@ -4,6 +4,7 @@ straight back to a .dcs string."""
 
 from __future__ import annotations
 
+from .argcache import ArgCache
 from .compile import compile_behavior, compile_dcs
 from .decompile import decompile_behavior, decompile_dcs
 from .ir import BsfBehavior, BsfNode, BsfParam
@@ -29,9 +30,9 @@ __all__ = [
 
 def dcs_to_bsf(engine, dcs_str: str) -> str:
     """Real .dcs clipboard string -> BSF text, in one call."""
-    return render_behavior(decompile_dcs(engine, dcs_str))
+    return render_behavior(decompile_dcs(engine, dcs_str), ArgCache(engine))
 
 
 def bsf_to_dcs(engine, bsf_text: str, type_char: str = "C") -> str:
     """BSF text -> a real .dcs clipboard string, in one call."""
-    return compile_dcs(engine, parse_behavior(bsf_text), type_char)
+    return compile_dcs(engine, parse_behavior(bsf_text, ArgCache(engine)), type_char)

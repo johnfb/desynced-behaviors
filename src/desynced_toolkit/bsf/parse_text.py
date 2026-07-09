@@ -1,25 +1,38 @@
 """BSF text -> BsfBehavior. The reverse of bsf/render_text.py -- the genuinely new direction
 (behavior_source_format.md's own "Status" section: this never existed before this pipeline).
 
-Needs no `engine`/`ArgCache` at all: parsing only builds the abstract, named-arg IR: knowing
-each op's *real* argument positions is exclusively a bsf/compile.py concern.
+Needs `ArgCache` (unlike an earlier draft, which needed none at all): resolving a branch note's
+top-level "next" pin back to the structural `branches["next"]` key requires knowing the op's
+real per-op display name for it (`argcache.next_pin_name` -- e.g. `check_number`'s "If Equal"
+is not literally the text "next"). Everything else here still only builds the abstract,
+named-arg IR: knowing an op's real argument *positions* remains exclusively a bsf/compile.py
+concern.
 
-Two real gaps in the base grammar (behavior_source_format.md as written) are worth flagging up
-front, both resolved with minimal, explicitly-flagged extensions rather than blocking on a
-grammar change -- see render_text.py's `render_hidden_value` and `_render_into` docstrings for
-the symmetric render-side notes:
-  - parameter direction (in/out) has no surface syntax at all -- resolved with a trailing `*`
-    marking an output parameter.
+Three real gaps in the base grammar (behavior_source_format.md as written) are worth flagging
+up front, all resolved with minimal, explicitly-flagged extensions rather than blocking on a
+grammar change -- see render_text.py's `render_hidden_value`/`render_node`/`_render_into`
+docstrings for the symmetric render-side notes:
+  - parameter direction has no surface syntax at all -- resolved with a trailing `*` marking a
+    parameter written to somewhere in the behavior's own body (computed fresh from usage by
+    `argcache.written_param_slots` whenever it's needed, not stored anywhere -- the wire
+    format's own `parameters[i]` bit is a UI-drawing hint, not a runtime distinction, user-
+    confirmed). This module only ever strips a trailing `*` on read, never stores or trusts it.
   - make_asm "hidden literal fields" (call's `sub`, domove's `c`, notify's `txt`, the universal
     `cmt`) have no surface syntax at all -- resolved by treating them as ordinary lowercase-
     named `name=value` pairs in the same arg list, with a quoted-string literal form (also not
     in the base grammar) for their string-valued cases.
+  - the top-level "next" pin's real per-op name/existence (`data.instructions[op].exec_arg`,
+    e.g. `check_number`'s "If Equal", or no pin at all for `exit`/`restart`/`last`) isn't
+    something the grammar's generic `(next)` fallback captures -- resolved by resolving a
+    parsed pin name against `argcache.next_pin_name(op)` and mapping it back to the structural
+    "next" key when it matches, rather than storing it under the display name verbatim.
 """
 
 from __future__ import annotations
 
 import re
 
+from .argcache import ArgCache
 from .decompile import HIDDEN_FIELD_TABLE
 from .ir import BsfBehavior, BsfNode, BsfParam
 from .values import BsfValue, Coord, Fr, FrameReg, IdLit, Num, Param, Var
@@ -158,17 +171,22 @@ def _parse_hidden_value(s: str) -> object:
     return s
 
 
-def _parse_branch_notes(s: str) -> dict[str, str]:
+def _parse_branch_notes(s: str, op: str, argcache: ArgCache) -> dict[str, str]:
+    next_pin = argcache.next_pin_name(op)
     branches = {}
     for target, pin in _BRANCH_RE.findall(s):
         pin = pin.strip()
         if pin == "jump→label":
             continue  # display-only annotation, recomputed fresh on every render, not real data
-        branches[pin] = "STOP" if target == "STOP" else target
+        # A pin whose rendered name matches this op's real "next"-pin display name (e.g.
+        # check_number's "If Equal") maps back to the structural "next" key -- everything else
+        # (a real declared exec arg's own name, e.g. "If Larger") is already its own key.
+        key = "next" if (next_pin is not None and pin == next_pin) else pin
+        branches[key] = "POP" if target == "POP" else target
     return branches
 
 
-def parse_node(line: str, params: list[BsfParam]) -> BsfNode:
+def parse_node(line: str, params: list[BsfParam], argcache: ArgCache) -> BsfNode:
     node_id, rest = line.split(":", 1)
     node_id = node_id.strip()
     rest = rest.strip()
@@ -187,24 +205,25 @@ def parse_node(line: str, params: list[BsfParam]) -> BsfNode:
             node.hidden[name] = _parse_hidden_value(value_str)
         else:
             node.args[name] = parse_value(value_str, params)
-    node.branches.update(_parse_branch_notes(branch_notes_str))
+    node.branches.update(_parse_branch_notes(branch_notes_str, op, argcache))
     return node
 
 
 def _parse_params(params_str: str) -> list[BsfParam]:
+    """The trailing `*` (see render_text.py's `_render_into`) is display-only, recomputed fresh
+    from actual usage on every render -- accepted and stripped here, not stored on `BsfParam`,
+    so a hand-edit that adds/removes a write to a parameter without remembering to update `*`
+    still compiles to the correct `parameters[i]` bit rather than a stale hand-typed one."""
     result = []
     for p in _split_top_level(params_str, ","):
         p = p.strip()
         if not p:
             continue
-        if p.endswith("*"):
-            result.append(BsfParam(name=p[:-1], is_output=True))
-        else:
-            result.append(BsfParam(name=p, is_output=False))
+        result.append(BsfParam(name=p[:-1] if p.endswith("*") else p))
     return result
 
 
-def _parse_one(lines: list[str], i: int, keyword: str) -> tuple[BsfBehavior, int]:
+def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tuple[BsfBehavior, int]:
     m = _HEADER_RE.match(lines[i])
     if not m or m.group(1) != keyword:
         raise SyntaxError(f"expected {keyword!r} header, got: {lines[i]!r}")
@@ -225,7 +244,7 @@ def _parse_one(lines: list[str], i: int, keyword: str) -> tuple[BsfBehavior, int
     nodes: dict[str, BsfNode] = {}
     order: list[str] = []
     while i < len(lines) and lines[i].strip() != "" and not lines[i].lstrip().startswith(("sub ", "behavior ")):
-        node = parse_node(lines[i], params)
+        node = parse_node(lines[i], params, argcache)
         nodes[node.id] = node
         order.append(node.id)
         i += 1
@@ -233,12 +252,12 @@ def _parse_one(lines: list[str], i: int, keyword: str) -> tuple[BsfBehavior, int
     return BsfBehavior(name=name, params=params, desc=desc, nodes=nodes, order=order), i
 
 
-def parse_behavior(text: str) -> BsfBehavior:
+def parse_behavior(text: str, argcache: ArgCache) -> BsfBehavior:
     lines = text.split("\n")
     i = 0
     while i < len(lines) and lines[i].strip() == "":
         i += 1
-    behavior, i = _parse_one(lines, i, keyword="behavior")
+    behavior, i = _parse_one(lines, i, keyword="behavior", argcache=argcache)
 
     subs = []
     while i < len(lines):
@@ -246,7 +265,7 @@ def parse_behavior(text: str) -> BsfBehavior:
             i += 1
         if i >= len(lines):
             break
-        sub, i = _parse_one(lines, i, keyword="sub")
+        sub, i = _parse_one(lines, i, keyword="sub", argcache=argcache)
         subs.append(sub)
     behavior.subs = subs
     return behavior

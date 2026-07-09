@@ -6,6 +6,7 @@ a stale annotation surviving a label rename or a `Label=` edit)."""
 
 from __future__ import annotations
 
+from .argcache import ArgCache, written_param_slots
 from .ir import BsfBehavior, BsfNode, BsfParam
 from .values import BsfValue, Coord, Fr, FrameReg, IdLit, Num, Param, Unknown, Var
 
@@ -104,11 +105,25 @@ def render_hidden_value(v: object) -> str:
     return repr(v)
 
 
-def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, str]) -> str:
+def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, str], argcache: ArgCache) -> str:
     parts = [f"{name}={render_value(v, params)}" for name, v in node.args.items()]
     parts += [f"{name}={render_hidden_value(v)}" for name, v in node.hidden.items()]
     args_str = ", ".join(parts)
-    notes = [f">{target} ({pin})" for pin, target in node.branches.items() if target is not None]
+    notes = []
+    for pin, target in node.branches.items():
+        if target is None:
+            continue
+        display_pin = pin
+        if pin == "next":
+            # data.instructions[op].exec_arg: `false` means this op has no top-level "next"
+            # pin at all (exit/restart/last -- the real editor draws no pin, wiring anything
+            # after them is nonsensical), a table names it for real (check_number's "If
+            # Equal"), absent keeps the generic "next". Never guessed -- read straight from
+            # live data.
+            display_pin = argcache.next_pin_name(node.op)
+            if display_pin is None:
+                continue
+        notes.append(f">{target} ({display_pin})")
     if node.id in jump_targets:
         notes.append(f">{jump_targets[node.id]} (jump→label)")
     line = f"{node.id}: {node.op}({args_str})"
@@ -117,26 +132,29 @@ def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, s
     return line
 
 
-def _render_into(b: BsfBehavior, lines: list[str], keyword: str) -> None:
-    # behavior_source_format.md's `param := NAME` has no room for a parameter's in/out
-    # direction at all -- another real gap (see render_hidden_value's docstring for the
-    # sibling one). Minimal extension: a trailing `*` marks an output parameter; a plain NAME
-    # (unchanged from the spec) is an input, so this is backward-compatible with the grammar
-    # as written for the common all-input case.
-    params_str = ", ".join(p.name + ("*" if p.is_output else "") for p in b.params)
+def _render_into(b: BsfBehavior, lines: list[str], keyword: str, argcache: ArgCache) -> None:
+    # behavior_source_format.md's `param := NAME` has no room for a parameter's direction at
+    # all -- another real gap (see render_hidden_value's docstring for the sibling one).
+    # Minimal extension: a trailing `*` marks a parameter written to somewhere in this
+    # behavior's own body. Computed fresh here from `written_param_slots`, never stored on
+    # `BsfParam` -- the wire's own `parameters[i]` bit turned out to be a UI-drawing hint (which
+    # side of a `call` node a pin is drawn on), not a runtime distinction, so trusting a stored
+    # bit here would let it silently go stale after an edit that adds or removes a write.
+    written = written_param_slots(b, argcache)
+    params_str = ", ".join(p.name + ("*" if (i + 1) in written else "") for i, p in enumerate(b.params))
     lines.append(f"{keyword} {b.name}({params_str}):")
     if b.desc:
         lines.append(f'  desc: "{b.desc}"')
     lines.append("")
     jump_targets = _jump_label_targets(b.nodes)
     for node_id in b.order:
-        lines.append(render_node(b.nodes[node_id], b.params, jump_targets))
+        lines.append(render_node(b.nodes[node_id], b.params, jump_targets, argcache))
     for sub in b.subs:
         lines.append("")
-        _render_into(sub, lines, keyword="sub")
+        _render_into(sub, lines, keyword="sub", argcache=argcache)
 
 
-def render_behavior(b: BsfBehavior) -> str:
+def render_behavior(b: BsfBehavior, argcache: ArgCache) -> str:
     lines: list[str] = []
-    _render_into(b, lines, keyword="behavior")
+    _render_into(b, lines, keyword="behavior", argcache=argcache)
     return "\n".join(lines)

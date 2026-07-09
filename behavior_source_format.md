@@ -39,10 +39,11 @@ header := "behavior" NAME "(" param_list? ")" ":"
           ("desc:" STRING)?
 
 param_list := param ("," param)*
-param := NAME "*"?                 -- from pnames[i], or "param<i>" if absent; trailing "*"
-                                    -- marks an output parameter (parameters[i] truthy) --
-                                    -- see "Parameter direction" below, a real gap the base
-                                    -- grammar left unaddressed, closed during implementation
+param := NAME "*"?                 -- from pnames[i], or "param<i>" if absent; trailing "*" is
+                                    -- a DISPLAY-ONLY marker for "written to somewhere in this
+                                    -- behavior's own body", recomputed fresh on every render
+                                    -- and ignored (stripped, not stored) on parse -- see
+                                    -- "Parameter direction" below
 
 instruction := NODE_ID ":" OP "(" arg_list? ")" branch_note*
 arg_list := arg ("," arg)*
@@ -58,7 +59,7 @@ value := NUMBER
        | "@" ("goto" | "store" | "visual" | "signal" | NUMBER)  -- frame register; symbolic name when N is 1-4, else bare @N
        | "fr" "(" NAME ")" ("[" "num" "=" NUMBER "]")?  -- faction (shared) register, resolved by name at runtime
 
-branch_note := ">" (NODE_ID | "STOP") "(" PINNAME ")"
+branch_note := ">" (NODE_ID | "POP") "(" PINNAME ")"
              -- omitted entirely for a plain implicit fallthrough (see below)
 
 sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
@@ -78,13 +79,37 @@ building `desynced_toolkit.bsf` (see the implementation plan referenced in
 "Status" below); documented here rather than left implicit in the code.
 
 **Parameter direction.** The base grammar's `param := NAME` has no way to
-express a parameter's in/out direction (`parameters[i]`'s truthy/falsy bit —
-see `behavior_format.md`'s "Top-level envelope"), even though it's essential,
-not decorative: a sub-behavior with output parameters (e.g. `hexat_test.dcs`'s
-`HexAt(R, T, Result, Origin, d_half)`, where `Result` is an output) cannot
-round-trip through text without it. Resolved with the trailing `*` shown in
-the grammar above — a plain `NAME` (unchanged from the original grammar for
-the common all-input case) is an input, `NAME*` is an output.
+express a parameter's direction at all, and — corrected mid-implementation,
+user-confirmed rather than assumed — the obvious fix (surface the wire's own
+`parameters[i]` truthy/falsy bit as `NAME`/`NAME*`) is the wrong model to
+begin with. Passing a parameter into a sub-behavior is pass-by-reference: it
+can be read-only, written-only, both, or left untouched, and `parameters[i]`
+doesn't capture that — it's a UI hint for which side of a `call` node's box
+the visual editor draws the pin on, not a distinction the runtime evaluation
+itself makes. For a format meant for *editing and refactoring* behaviors,
+trusting a stored bit that can silently go stale the moment someone adds or
+removes a write during an edit is exactly the wrong call.
+
+So direction isn't stored on the IR at all (`BsfParam` is just a name).
+`argcache.written_param_slots` computes, fresh every time it's needed,
+whether a parameter slot is ever used as an "out"-typed argument anywhere in
+the behavior's own body — including *transitively*, by being passed into a
+`call`/`load_behavior` node at a position the target sub-behavior itself
+writes (resolved by fixpoint iteration, so it doesn't matter whether the
+target is defined before or after the call site, and a `sub=-1` recursive
+self-call resolves against its own in-progress result rather than
+recursing forever). `render_text.py` uses this to decide the trailing `*`
+purely for display; `compile.py` uses the same fresh computation to
+regenerate `parameters[i]` — never the value a user did or didn't type in
+the text. Concretely: if you edit BSF text to add a write to a
+previously-read-only parameter but don't bother updating its `*`, the
+compiled `.dcs` still gets the correct bit; the `*` itself is just telling
+you what's already true, not asking you to keep it in sync by hand. A
+parameter only ever passed through to an *external* (string saved-library
+id) call's own parameter can't be resolved this way — genuinely unknowable
+without that library's own definition, the same unresolvable-ness `call`'s
+own arg *naming* already accepts in that case (see "`call`/sub-behaviors"
+below).
 
 **Hidden literal fields.** `behavior_format.md`'s "Hidden literal fields
 (`make_asm`)" table (`call`'s `sub`, `domove`'s `c`, `notify`'s `txt`, the
@@ -212,23 +237,41 @@ to one of three cases, per `behavior_format.md`'s documented semantics:
    the destination node's `NODE_ID` — see "Node identity vs. wire position"
    above) → rendered as `>NODE_ID (PinName)`, using the instruction's real
    pin name from `data.instructions[op].args` (e.g. `If Larger`, `Done`) for
-   a slot arg, or `(next)` for the top-level field. This is an intentional
-   wire the original author made — always shown.
-2. **Explicit `false`** → rendered as `>STOP (PinName)`. This is a real,
+   a slot arg. The top-level field's own `PinName` is **not always the
+   literal text "next"** — `data.instructions[op].exec_arg` (see
+   `behavior_format.md`'s "The top-level `next` field's real display
+   name/existence" section) names it for real when present (e.g.
+   `check_number`'s "If Equal"), and its being explicitly `false` means the
+   op has **no top-level pin at all** (`exit`/`restart`/`last`) — the real
+   visual editor draws none, and BSF now doesn't either, rather than
+   rendering an annotation for a pin that doesn't exist and explaining it
+   away after the fact (an earlier draft did exactly that for `exit`,
+   caught by direct user feedback). `argcache.next_pin_name(op)` is the
+   single source of truth both `render_text.py`/`render_mermaid.py` (render
+   side) and `parse_text.py` (mapping a parsed pin name back to the
+   structural `branches["next"]` key) use for this — this is an intentional
+   wire the original author made — always shown, when the pin exists.
+2. **Explicit `false`** → rendered as `>POP (PinName)`. This is a real,
    meaningful authorial choice and must stay visually distinct from omission
    — collapsing this into "no annotation" was a real bug caught while
    building the corpus analysis tooling (see project memory) and must not be
-   repeated here. **Not "terminate this path"** (an earlier, imprecise
-   description this section carried) — a behavior never truly halts except
-   via the explicit `exit` instruction or an outside/external action. What a
-   `STOP`/dead end actually does at runtime is: pop to and continue the
-   innermost still-active loop, or return to a `call`er, or — only if both
-   are empty — restart from Program Start (the same effect as the `restart`
-   instruction, itself distinct from `exit`; see `behavior_format.md`'s
-   "Stopping a behavior" section). This is deliberately **not** something
-   BSF tooling tries to resolve or label further (see "Loop-type
-   instructions" below) — `STOP` is rendered exactly as the wire format has
-   it and left at that.
+   repeated here. Named `POP`, not "STOP" (an earlier, misleading name this
+   section carried, corrected by direct user feedback) — a behavior never
+   truly halts except via the explicit `exit` instruction or an
+   outside/external action, and what actually happens here is one single
+   mechanism, not three: **pop the current context frame** (the innermost
+   active loop iteration or `call` invocation). Whatever remains on the
+   frame stack after that pop decides what happens next on its own — an
+   enclosing loop continues iterating, an enclosing `call` returns to its
+   caller — and if popping empties the stack entirely, the engine
+   automatically pushes a fresh frame and restarts from Program Start (the
+   same effect as the `restart` instruction, itself distinct from `exit`;
+   see `behavior_format.md`'s "Stopping a behavior" section). That's not a
+   separate third case to remember, just the unremarkable consequence of
+   popping with nothing left. This is deliberately **not** something BSF
+   tooling tries to resolve or label further (see "Loop-type instructions"
+   below) — `POP` is rendered exactly as the wire format has it and left at
+   that.
 3. **Omitted entirely (nil)** → no annotation at all; implicitly falls
    through to the physically next instruction. This is the common case for a
    straight-line instruction sequence and would be pure noise if annotated.
@@ -371,25 +414,30 @@ loop / return to a caller / restart from Program Start — never a bare
 `state.returns`, at the moment that specific `false` executes) — not a fixed
 property of the instruction's position in the flat array.
 
-**Decided against building any static resolution of this, even as an
-optional nicety — not merely deferred.** An earlier pass floated the
-reachability-heuristic idea sketched above (follow every edge reachable from
-a loop's per-iteration pin, not crossing an explicit `break`/`last` or a
-nested loop's own `Done`; any `false` found there means "continue this
-loop"). On reflection this isn't something to build: determining which
-outcome a dead end produces is equivalent to the halting problem in general
-— whether/when a dead end is even reached, for a graph with computed
-`jump`/`label` dispatch, is undecidable — and the actual outcome can differ
-per input/per run even where reachable in principle. A static label would be
-actively misleading in exactly the non-obvious cases where it would matter
-most, and adds nothing in the obvious cases (a reader who knows the plain
-rule above already gets the right answer straight from the graph topology,
-the same way a human author already relies on it when wiring a `STOP` inside
-a loop on purpose — see `blight_magnifier_mining.md`'s `MinerDrone` for a
-real example of exactly this idiom). `STOP` is rendered exactly as the wire
-format has it — visually distinct from omission, nothing more — and left at
-that; this is the complete, correct representation, not a partial one
-waiting on a "next step."
+**Decided against building any static resolution of what a pop's
+destination actually is, even as an optional nicety — not merely
+deferred.** An earlier pass floated the reachability-heuristic idea sketched
+above (follow every edge reachable from a loop's per-iteration pin, not
+crossing an explicit `break`/`last` or a nested loop's own `Done`; any
+`false` found there means "continue this loop"). On reflection this isn't
+something to build: determining which outcome a dead end produces is
+equivalent to the halting problem in general — whether/when a dead end is
+even reached, for a graph with computed `jump`/`label` dispatch, is
+undecidable — and the actual outcome can differ per input/per run even
+where reachable in principle. A static label would be actively misleading
+in exactly the non-obvious cases where it would matter most, and adds
+nothing in the obvious cases (a reader who knows the plain rule above
+already gets the right answer straight from the graph topology, the same
+way a human author already relies on it when wiring a `POP` inside a loop
+on purpose — see `blight_magnifier_mining.md`'s `MinerDrone` for a real
+example of exactly this idiom). `POP` is rendered exactly as the wire
+format has it — visually distinct from omission, nothing more, and never
+labeled with a guess at where it leads — and left at that; this is the
+complete, correct representation, not a partial one waiting on a "next
+step." (This is about the *destination* specifically — whether a pop is
+even visually present as an edge at all is a separate question, answered
+differently for the text listing vs. the Mermaid diagram; see
+"Visualization" below.)
 
 ## Document envelope (round-tripping beyond a bare behavior)
 
@@ -431,13 +479,37 @@ matters more than editing a specific instruction, or to sanity-check that an
 edit didn't change the shape unexpectedly. This is not an alternate
 source-of-truth format; it's generated from the same underlying graph as the
 primary listing above, never edited directly, and carries no information the
-listing doesn't already have. Unlike the text listing, an *implicit*
-fallthrough still gets a real (unlabeled) edge drawn in the diagram, since a
-Mermaid layout has no "physically next line" for the reader to infer flow
-from the way the text form does; an explicit `STOP` (and a true-end omission,
-which is the same thing per "Control edges" above) gets a real edge into a
-single synthetic terminal node per diagram, rather than being silently
-dropped.
+listing doesn't already have.
+
+Mermaid's flowchart syntax has no record/port concept the way Graphviz's
+`record` shape does (a node with several named sub-points, wired
+individually via `node:portname`) — every Mermaid node is one box, and every
+edge attaches to the box as a whole. Showing "this node has N distinct
+declared outputs" therefore means drawing N separate edges out of the node
+rather than one node with N labeled ports, which changes what's worth
+drawing compared to the text listing:
+
+- **Every declared exec pin gets a real, labeled edge — wired or not.**
+  Walked from the op's real `data.instructions[op].args` (the same source
+  `ArgCache` uses elsewhere), not just whatever happens to be present in a
+  node's own branch data, so a node's full pin set is always visible even
+  when a pin isn't wired to anything. A node with an unwired pin and a node
+  that simply doesn't have that pin at all must not look identical.
+- **An unwired pin's edge goes to its own small, local marker node — never
+  one shared terminal.** An earlier draft sent every `POP` edge in a
+  diagram into a single shared node; on a real graph with several such
+  pins this produced long edges converging from all over the diagram onto
+  one point, pure noise unrelated to any real structure. A dedicated small
+  marker per (node, pin) keeps each such edge short and local, with no
+  implied relationship between otherwise-unrelated dead ends.
+- **The marker never tries to say what the pop resolves to** — same
+  restraint as the text listing (see "Loop-type instructions" above): it
+  means "this pin pops," nothing more.
+- **A plain implicit fallthrough still gets a real (unlabeled) edge to the
+  physically-next node**, since a Mermaid layout has no "physically next
+  line" for the reader to infer flow from the way the text form does — this
+  is the one case genuinely unique to text, where adjacency itself carries
+  the information Mermaid has no equivalent for.
 
 ## Status
 
@@ -478,10 +550,13 @@ direction, which didn't exist in any form before this.
 **Two real grammar gaps were found and closed while implementing this, not
 anticipated by the original spec text** — both are now part of the grammar
 itself (see "Two real gaps closed during implementation" above, right after
-the grammar block): parameter direction (`NAME*` for an output parameter)
-and hidden `make_asm` literal fields (`sub`/`c`/`txt`/`cmt` as ordinary
-`name=value` pairs, with a quoted-string literal form added for their
-string-valued cases). Both are required for round-tripping real behaviors,
+the grammar block): parameter direction (a display-only `NAME*` computed
+fresh from real usage — including transitively through `call` — never
+trusted from the wire's own `parameters[i]` bit, which turned out to be a
+UI-drawing hint rather than a runtime distinction) and hidden `make_asm`
+literal fields (`sub`/`c`/`txt`/`cmt` as ordinary `name=value` pairs, with a
+quoted-string literal form added for their string-valued cases). Both are
+required for round-tripping real behaviors,
 not optional polish — 2 of the 6 real fixtures need the hidden-field syntax
 for their `call` nodes, and several need parameter direction for declared
 output parameters.
@@ -495,10 +570,11 @@ implementation plan referenced above for the fuller reasoning):**
   `cmt` *is* handled, via the hidden-field mechanism above) aren't modeled
   yet.
 - **Not planned at all, not merely postponed:** any static resolution of
-  what a `STOP`/dead-end resolves to inside a loop's dynamic scope (see
-  "Loop-type instructions" above for why — genuinely undecidable in
-  general, and actively misleading in exactly the cases where it would
-  matter).
+  what a `POP`/dead-end's destination actually is inside a loop's dynamic
+  scope (see "Loop-type instructions" above for why — genuinely undecidable
+  in general, and actively misleading in exactly the cases where it would
+  matter). This is separate from whether a pop is visually present at all,
+  which the pipeline does handle — see "Visualization" above.
 - Migrating `ast_compiler.py`'s role and rewriting `hex_expansion_math.md`'s
   compiled `HexIndexOf` example directly in BSF — explicitly separate,
   later follow-on work, not part of the pipeline build above.

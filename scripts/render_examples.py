@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from desynced_toolkit import assets
+from desynced_toolkit.bsf.argcache import ArgCache
 from desynced_toolkit.bsf.decompile import decompile_behavior
 from desynced_toolkit.bsf.render_mermaid import render_mermaid
 from desynced_toolkit.bsf.render_text import render_behavior
@@ -43,10 +44,11 @@ def main():
     _, table = engine.decode_dcs(raw)
     behavior_table = navigate(table, behavior_path) if behavior_path != "root" else table
 
-    b = decompile_behavior(engine, behavior_table)
+    argcache = ArgCache(engine)
+    b = decompile_behavior(engine, behavior_table, argcache)
 
-    bsf_text = render_behavior(b)
-    mmd_src = render_mermaid(b)
+    bsf_text = render_behavior(b, argcache)
+    mmd_src = render_mermaid(b, argcache)
 
     Path(f"{out_prefix}.bsf.txt").write_text(bsf_text)
     Path(f"{out_prefix}.mmd").write_text(mmd_src)

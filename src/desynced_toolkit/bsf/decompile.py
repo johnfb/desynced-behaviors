@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import lupa.lua54 as lupa
 
-from .argcache import ArgCache, arg_pin_names, resolve_branch
+from .argcache import DYNAMIC_ARG_OPS, ArgCache, arg_pin_names, resolve_branch
 from .ir import BsfBehavior, BsfNode, BsfParam
 from .values import from_lua
 
@@ -34,12 +34,6 @@ HIDDEN_FIELD_TABLE = {
     "set_signpost": "txt",
 }
 
-# ops whose argument count/shape is dynamic (depends on the *target* sub-behavior's own
-# declared parameters, not a fixed data.instructions[op].args list -- confirmed
-# `data.instructions.call.args` is simply absent) and therefore need bespoke handling.
-DYNAMIC_ARG_OPS = {"call", "load_behavior"}
-
-
 def _int_keys(table) -> list[int]:
     return sorted(k for k in table.keys() if isinstance(k, int))
 
@@ -57,6 +51,11 @@ def _sub_behaviors_table(table):
 
 
 def _params_from_table(table) -> list[BsfParam]:
+    """Slot count and names are trusted straight from the wire declaration (`parameters`'s own
+    length, `pnames` for display names) -- but NOT `parameters[i]`'s truthy/falsy bit itself,
+    which is only a UI-drawing hint (see `argcache.written_param_slots`'s docstring), not
+    something this IR stores at all. Direction is computed fresh from usage wherever it's
+    actually needed (rendering, compiling), never here."""
     keys = set(table.keys())
     if "parameters" not in keys:
         return []
@@ -65,7 +64,7 @@ def _params_from_table(table) -> list[BsfParam]:
     result = []
     for i in _int_keys(parameters):
         name = pnames[i] if pnames is not None and i in set(pnames.keys()) else f"param{i}"
-        result.append(BsfParam(name=name, is_output=bool(parameters[i])))
+        result.append(BsfParam(name=name))
     return result
 
 

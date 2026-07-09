@@ -119,7 +119,7 @@ def test_call_hidden_sub_field_roundtrips(engine, sub_value):
     if sub_value == -1:
         # Self-recursive: arg name resolves against this behavior's own declared params.
         call_node.args["X"] = Num(5)
-        params = [BsfParam(name="X", is_output=False)]
+        params = [BsfParam(name="X")]
     else:
         # External string id: no pnames visible anywhere, generic arg1 fallback.
         call_node.args["arg1"] = Num(7)
@@ -157,3 +157,51 @@ def test_undeclared_parameter_slot_bare_int(engine):
     recompiled = compile_behavior(engine, b)
     assert recompiled[1][1] == 5
     assert set(recompiled.keys()) == {1, "name"}  # no parameters/pnames emitted
+
+
+def test_written_param_slots_propagates_through_call(engine):
+    """A parameter only ever passed *through* a `call` to a callee's own written slot must
+    still count as written by the caller -- this is exactly the real case `hexat_test.dcs`'s
+    top-level harness hits (its own `Result` param is never directly used as an "out" arg
+    anywhere in the harness itself, only passed to HexAt's own `Result`), which is what first
+    caught this needing fixpoint propagation rather than a single direct-usage scan."""
+    argcache = ArgCache(engine)
+
+    # Callee: Out is genuinely written (set_reg's Target is an "out" arg); In is only read.
+    callee = BsfBehavior(
+        name="Callee",
+        params=[BsfParam(name="In"), BsfParam(name="Out")],
+        nodes={"n1": BsfNode(id="n1", op="set_reg", args={"Value": Param(1), "Target": Param(2)})},
+        order=["n1"],
+    )
+    call_node = BsfNode(id="n1", op="call")
+    call_node.hidden["sub"] = 1
+    call_node.args = {"In": Num(1), "Out": Param(1)}
+    caller = BsfBehavior(
+        name="Caller",
+        params=[BsfParam(name="Result")],
+        nodes={"n1": call_node},
+        order=["n1"],
+        subs=[callee],
+    )
+
+    compiled = compile_behavior(engine, caller, argcache)
+    assert list(compiled["parameters"].values()) == [True]  # Result -- written only via passthrough
+
+
+def test_written_param_slots_self_recursive_call_does_not_infinite_loop(engine):
+    """`sub=-1` (recursive self-call) must resolve against the in-progress computation of the
+    behavior's own written set, not recurse forever."""
+    argcache = ArgCache(engine)
+    call_node = BsfNode(id="n2", op="call")
+    call_node.hidden["sub"] = -1
+    call_node.args = {"Out": Param(1)}
+    writer = BsfNode(id="n1", op="set_reg", args={"Value": Num(1), "Target": Param(2)})
+    behavior = BsfBehavior(
+        name="SelfRecursive",
+        params=[BsfParam(name="A"), BsfParam(name="Out")],
+        nodes={"n1": writer, "n2": call_node},
+        order=["n1", "n2"],
+    )
+    compiled = compile_behavior(engine, behavior, argcache)
+    assert list(compiled["parameters"].values()) == [True, True]
