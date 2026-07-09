@@ -199,10 +199,24 @@ def resolve_branch(val, idx, insts):
       automatically pushes a fresh one and restarts from Program Start, not a separate case,
       just the unremarkable consequence of popping with nothing left. Never a bare "halt" --
       that's `exit`, a genuinely distinct, always-explicit instruction).
-    - omitted entirely (val is None) -> `None` if the physically-next instruction exists (a
-      plain implicit fallthrough -- BSF renders no annotation for this at all), else "POP"
-      (falling off the true end of the array is a real dead end too, handled identically to an
-      explicit `False` by the real dispatcher).
+    - omitted entirely (val is None) -> `None` if the physically-next instruction exists.
+      **This is not "no decision was made, defaulting arbitrarily" -- it's a real, explicit
+      wire the real editor's compiler just didn't need to spell out as an int, because it's
+      redundant with position** (user-confirmed, not assumed): the compiler only ever omits
+      `next` when there genuinely is a connection to the node it placed immediately after this
+      one; a pin left truly unconnected in the editor gets explicit `false` written
+      unconditionally, regardless of what happens to physically follow. So this branch is
+      never reached for a "nothing was wired, but something happens to follow anyway" case --
+      that case doesn't exist in real data, because it would have `false` written, which the
+      check above already caught. If the physically-next instruction does *not* exist (true
+      end of the array), falls through to "POP" below -- falling off the true end is a real
+      dead end too, handled identically to an explicit `False` by the real dispatcher.
+      BSF renders no annotation for the omitted case (see behavior_source_format.md's "Control
+      edges"), and -- a deliberate choice for BSF's own text editability, not a claim about
+      what the original wire was -- treats it as following physical order on a reorder, the
+      same way any sequential-code language would treat an unannotated fallthrough; it does
+      not try to preserve "this specific wire went to this specific node" across a reorder.
+      See behavior_source_format.md's "Node identity vs. wire position" for that trade-off.
 
     `insts` is the raw idx->instruction-dict mapping for the *current* behavior/sub being
     decompiled, used only to check whether idx+1 exists."""

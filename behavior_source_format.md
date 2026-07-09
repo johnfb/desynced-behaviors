@@ -194,6 +194,28 @@ text — same as reordering statements in any textual language — never a
 renumbering exercise, because nothing else references a node by its line
 position.
 
+**A deliberate trade-off, worth being explicit about now that it's been
+raised directly:** in real decoded data, an omitted `next`/exec-arg value is
+always a genuine, specific wire (see "Control edges" above) — the visual
+editor's compiler only omits it when there's a real connection to whatever
+it placed next, never for "nothing was wired." BSF does not attempt to
+preserve *which specific node* that original wire pointed to across a
+reorder — an unannotated pin's target is recomputed fresh from whatever is
+currently physically next, exactly like `jump`/`label` resolves a name
+fresh rather than a fixed address, and exactly like moving a line in any
+ordinary sequential-code language changes what runs after it. This was a
+live design question (project memory, 2026-07-09) — the alternative (make
+every real connection an explicit, stable node reference regardless of
+whether it happens to compile compactly, so reordering can never silently
+change what an unannotated line flows into) was considered and rejected:
+it would touch decompile/compile/render behavior for comparatively little
+practical benefit, since the same information is already lost the moment
+BSF text is rendered (an adjacency-redundant connection renders with no
+annotation either way) and re-parsed. Treating an unannotated pin as
+"follows physical order, recomputed on every compile" is the simpler,
+already-tested model, consistent with how every other unannotated
+fallthrough in this format already works.
+
 ## Values
 
 | Real value shape | Source syntax | Notes |
@@ -273,8 +295,18 @@ to one of three cases, per `behavior_format.md`'s documented semantics:
    below) — `POP` is rendered exactly as the wire format has it and left at
    that.
 3. **Omitted entirely (nil)** → no annotation at all; implicitly falls
-   through to the physically next instruction. This is the common case for a
-   straight-line instruction sequence and would be pure noise if annotated.
+   through to the physically next instruction. **Not "no decision was made"**
+   — in real decoded data this always represents a genuine wire the visual
+   editor's own compiler chose not to spell out as an integer, since doing
+   so would be redundant with position (user-confirmed real-editor
+   behavior; see `behavior_format.md`'s "Branch and fall-through resolution"
+   for the full detail, including that a truly unconnected pin always
+   compiles to explicit `false`/`POP`, unconditionally, never to omission).
+   BSF still renders no annotation for this case — would be pure noise for
+   the common straight-line sequence — and, deliberately, does **not** try
+   to preserve "this specific wire went to this specific node" across a
+   reorder the way an explicit target does; see "Node identity vs. wire
+   position" below for that trade-off and why it's intentional.
 
 ## Dynamic `jump`/`label` dispatch
 

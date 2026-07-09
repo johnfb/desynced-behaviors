@@ -282,7 +282,18 @@ Every "what happens next" value — whether it's the instruction-level `next`
 field or the value in an `exec`-typed argument slot — resolves the same way:
 
 - **omitted / not present** → fall through to the next instruction in
-  sequence (dict key + 1)
+  sequence (dict key + 1). **This is not "nothing was decided, so it
+  defaults arbitrarily" — it's a real, explicit wire the visual editor's
+  compiler simply doesn't spell out as an integer, because doing so would
+  be redundant with position** (user-confirmed from how the real editor
+  behaves, not inferred from the wire bytes alone): the compiler only
+  omits `next`/an `exec` arg when there genuinely is a connection to
+  whatever instruction it placed immediately next; a pin left truly
+  unconnected in the editor gets `false` written explicitly and
+  unconditionally, **regardless of what happens to physically follow it**.
+  There is no real-data case of "nothing was wired, but the next slot
+  happens to be filled anyway" — that case is always `false`, never
+  omission.
 - **an integer** → jump to the instruction whose rendered dict key is
   **that integer minus 1** (see off-by-one warning below)
 - **`false`** (or a value whose `-1` target is beyond the end of the
@@ -291,7 +302,8 @@ field or the value in an `exec`-typed argument slot — resolves the same way:
   that block (next iteration/next pin, see "Block-type instructions"
   below); only at the true outermost level does it fall back to Program
   Start, and even then without yielding the tick (see "Stopping a
-  behavior" below, which covers a real crash mode this causes)
+  behavior" below, which covers a real crash mode this causes). This is
+  what a genuinely unconnected pin always compiles to — not omission.
 
 Instructions with more than one `exec` argument (e.g. `check_number`'s
 "If Larger" / "If Smaller") branch based on which condition the instruction's
