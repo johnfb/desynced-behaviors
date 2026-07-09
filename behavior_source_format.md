@@ -622,33 +622,72 @@ drawing compared to the text listing:
   line" for the reader to infer flow from the way the text form does — this
   is the one case genuinely unique to text, where adjacency itself carries
   the information Mermaid has no equivalent for.
-- **Layout direction is `flowchart LR`, left-to-right, matching the real
-  in-game editor** (user-confirmed 2026-07-10) — the real tool always lays a
-  behavior out left-to-right, with every node's input pins drawn on its left
-  edge and output/exec pins on its right, never top-to-bottom. Mermaid's
-  plain-box nodes can't replicate the *per-node* left-input/right-output
-  pin placement (no named-port concept, unlike Graphviz's `record` shape),
-  but matching the overall flow direction keeps the diagram oriented the
-  way a player already reads the real tool.
-- **A synthetic "Program Start" node always feeds the first instruction.**
-  The real editor always draws this node, even though it's never part of
-  the serialized wire data — there's nothing to encode, since "the first
+- **Layout direction is `flowchart TD`, top-to-bottom — despite the real
+  in-game editor always laying a behavior out left-to-right** (every node's
+  input pins on its left edge, output/exec pins on its right — user-confirmed
+  2026-07-10). This was tried the other way first: `flowchart LR`, matching
+  the real editor exactly, rendered against a real 39-node behavior (see
+  project memory for the artifact from that session) — and the result was
+  worse for this medium. The real editor's own layout algorithm looks at
+  each disconnected subgraph's bounding box and pushes every *other*
+  subgraph's nodes outside it — genuine 2D collision avoidance Mermaid's
+  automatic (dagre) layout has no equivalent of — so an LR render of
+  anything with real branching sprawls very wide. A Mermaid diagram is
+  normally read by scrolling a browser page, where vertical scrolling is
+  comfortable and horizontal scrolling is not, unlike the real editor's own
+  pan/zoom canvas. So TD is a deliberate mismatch with the source tool's own
+  convention, not an oversight — right call for the real editor, wrong call
+  for a diagram meant to be read top-to-bottom in a browser.
+- **A synthetic "Program Start" node feeds the first instruction, in the
+  primary component only** (see below for what "primary" means here). The
+  real editor always draws this node, even though it's never part of the
+  serialized wire data — there's nothing to encode, since "the first
   instruction" is implicit in wire position (see "Node identity vs. wire
-  position" above). `render_mermaid.py` reconstructs it as a real diagram
-  node (`b.order[0]`'s predecessor) purely for display, matching what a
-  player actually sees, rather than leaving the true entry point to be
-  inferred from which node happens to be listed first.
-- **Not yet implemented:** the real editor stacks disconnected segments (a
-  `label` reached only via `jump`, with no physically-preceding node)
-  top-to-bottom relative to *each other* and left-justified with "Program
-  Start" (i.e. every separate chain starts at the same left edge), while
-  each individual connected chain still flows left-to-right internally —
-  LR within a chain, TD *and* left-aligned between separate chains.
-  Mermaid's automatic (dagre) layout engine doesn't expose control over how
-  disconnected subgraphs are arranged or aligned relative to each other
-  within one `flowchart`, so matching this precisely would likely need a
-  custom-positioned SVG renderer rather than Mermaid, if it's ever worth
-  building.
+  position" above). This part of the real editor's convention carries over
+  regardless of overall direction.
+- **One diagram per component, found by *forward reachability from Program
+  Start*, not undirected connectivity — a real, built feature, not just a
+  proposal.** First tried as plain undirected connected-components (any
+  edge unions two nodes, direction ignored) — rendered against a real
+  behavior (Mining Leader V3.2, project memory) and it came back as a
+  *single* component covering the whole graph, uselessly. The reason: every
+  one of its labeled state-machine sections (Search/Emergency/Travel-to-
+  target/Monitor-mine) is reachable from the main loop only via an
+  unresolvable *dynamic* `jump(Label=$State)`, but each one *also* has its
+  own *static* `jump` back to the main loop's own label when it finishes —
+  and undirected connectivity treats that return edge as sufficient to weld
+  the entire graph into one piece. User-confirmed correction that fixed
+  this: "physically next" (an implicit fallthrough) is an artifact of the
+  *wire encoding* — a compact way of writing a real, deliberate edge — not
+  a different or lesser kind of connection than an explicit target; the
+  actual fix needed was computing reachability in the right *direction*,
+  not changing how any individual edge is weighted. Forward reachability
+  from `b.order[0]` (following every statically-known edge — ordinary
+  branch targets, explicit or implicit-fallthrough, treated identically per
+  the point just made) finds the true primary component; the first
+  not-yet-visited node encountered continuing through `b.order` after that
+  starts a new component, which — per user-confirmed design — will be a
+  `label` unless it's genuinely dead code (nothing reaches it at all,
+  static or dynamic), rendered as its own small, honest component rather
+  than silently dropped.
+- **An edge whose target lands outside the current component renders as a
+  small local "external reference" marker** (e.g. `↗ n11`), never a broken
+  edge into a node the diagram doesn't define and never a false merge back
+  into the component it left. This is exactly how a section's own
+  return-to-Begin jump is drawn once components stopped being merged by it.
+- **`connect_resolved_jumps` (default `True`) is a real parameter, not a
+  fixed internal choice** — user-requested 2026-07-10 alongside `direction`
+  ("parameterize the render so different behaviors can be rendered slightly
+  different depending on how they come out"). It controls whether a
+  *resolved* `jump→label` edge pulls its target into the same component
+  (default — e.g. Search merges with Emergency in Mining Leader V3.2, since
+  Search's own enemy-detection path statically jumps straight into it) or
+  is always treated as a component boundary regardless of resolvability
+  (maximal splitting — one section per diagram, more external-reference
+  markers where sections used to merge). `direction` similarly exposes the
+  Mermaid flowchart direction (`"TD"`/`"LR"`/etc.) as a real parameter
+  rather than hardcoding the TD-vs-LR call from above — which reads better
+  can depend on the specific behavior's shape.
 
 ## Status
 

@@ -10,7 +10,10 @@ Example: uv run python3 scripts/render_examples.py \
     corpus/discord_behaviors/83c5f19f875b2575_C_Hedgehog_s_Upgrader.dcs \
     root.dependencies.0 /tmp/small
 
-Writes <out_prefix>.bsf.txt (the real BSF listing) and <out_prefix>.mmd (Mermaid flowchart).
+Writes <out_prefix>.bsf.txt (the real BSF listing) and one <out_prefix>.<i>.mmd per connected
+component (see render_mermaid.py's module docstring for why it's one diagram per component
+rather than a single combined one -- Mermaid's own auto-layout has no equivalent of the real
+editor's bounding-box collision avoidance between disconnected chains).
 """
 
 import sys
@@ -48,12 +51,14 @@ def main():
     b = decompile_behavior(engine, behavior_table, argcache)
 
     bsf_text = render_behavior(b, argcache)
-    mmd_src = render_mermaid(b, argcache)
+    diagrams = render_mermaid(b, argcache)
 
     Path(f"{out_prefix}.bsf.txt").write_text(bsf_text)
-    Path(f"{out_prefix}.mmd").write_text(mmd_src)
+    for i, mmd_src in enumerate(diagrams):
+        Path(f"{out_prefix}.{i}.mmd").write_text(mmd_src)
 
-    print(f"{len(b.nodes)} nodes, {len(b.subs)} sub-behaviors -> wrote {out_prefix}.{{bsf.txt,mmd}}")
+    mmd_names = ", ".join(f"{out_prefix}.{i}.mmd" for i in range(len(diagrams)))
+    print(f"{len(b.nodes)} nodes, {len(b.subs)} sub-behaviors, {len(diagrams)} diagram(s) -> wrote {out_prefix}.bsf.txt, {mmd_names}")
 
 
 if __name__ == "__main__":
