@@ -39,13 +39,27 @@ not just described in prose):
   silently unlabeled whenever it was left as a plain fallthrough -- wrong, since "If Equal" is
   one of three real pins on that node and needed disambiguating regardless of how it's wired.
   The edge itself is still always drawn either way -- an unlabeled pin isn't an invisible one,
-  it just doesn't need a name next to it."""
+  it just doesn't need a name next to it.
+- **Left-to-right layout, and a synthetic "Program Start" node feeding the first instruction.**
+  User-confirmed (2026-07-10): the real in-game editor always lays a behavior out left-to-right
+  (every node's input pins on its left edge, output/exec pins on its right), never top-to-bottom,
+  and always draws a "Program Start" node with the first instruction wired to it -- a real,
+  always-present part of the visual editor's own display, even though it's never part of the
+  serialized wire data at all (implicit: "the first instruction" needs no explicit marker to
+  encode). `flowchart LR` matches the real tool's own layout direction; the synthetic start node
+  makes the true entry point visually explicit instead of leaving a reader to infer "the first
+  node listed is presumably where this starts." Mermaid's flowchart nodes are plain boxes with no
+  named-port concept (unlike Graphviz's `record` shape), so the *per-node* left-input/
+  right-output pin convention can't be replicated exactly within a single node's box here --
+  worth remembering for any future hand-built SVG renderer, where it could be."""
 
 from __future__ import annotations
 
 from .argcache import ArgCache, arg_pin_names
 from .ir import BsfBehavior
 from .render_text import _jump_label_targets, render_value
+
+_PROGRAM_START_ID = "__program_start__"
 
 
 def _next_in_order(node_id: str, order: list[str]) -> str | None:
@@ -55,12 +69,16 @@ def _next_in_order(node_id: str, order: list[str]) -> str | None:
 
 def render_mermaid(b: BsfBehavior, argcache: ArgCache, title: str | None = None) -> str:
     jump_targets = _jump_label_targets(b.nodes)
-    lines = [f"%% {title or b.name}", "flowchart TD"]
+    lines = [f"%% {title or b.name}", "flowchart LR"]
 
     node_lines = []
     edge_lines = []
     marker_lines = []
     pop_count = 0
+
+    if b.order:
+        node_lines.append(f'  {_PROGRAM_START_ID}(["Program Start"])')
+        edge_lines.append(f"  {_PROGRAM_START_ID} --> n{b.order[0]}")
 
     for node_id in b.order:
         node = b.nodes[node_id]

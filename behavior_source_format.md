@@ -622,6 +622,33 @@ drawing compared to the text listing:
   line" for the reader to infer flow from the way the text form does — this
   is the one case genuinely unique to text, where adjacency itself carries
   the information Mermaid has no equivalent for.
+- **Layout direction is `flowchart LR`, left-to-right, matching the real
+  in-game editor** (user-confirmed 2026-07-10) — the real tool always lays a
+  behavior out left-to-right, with every node's input pins drawn on its left
+  edge and output/exec pins on its right, never top-to-bottom. Mermaid's
+  plain-box nodes can't replicate the *per-node* left-input/right-output
+  pin placement (no named-port concept, unlike Graphviz's `record` shape),
+  but matching the overall flow direction keeps the diagram oriented the
+  way a player already reads the real tool.
+- **A synthetic "Program Start" node always feeds the first instruction.**
+  The real editor always draws this node, even though it's never part of
+  the serialized wire data — there's nothing to encode, since "the first
+  instruction" is implicit in wire position (see "Node identity vs. wire
+  position" above). `render_mermaid.py` reconstructs it as a real diagram
+  node (`b.order[0]`'s predecessor) purely for display, matching what a
+  player actually sees, rather than leaving the true entry point to be
+  inferred from which node happens to be listed first.
+- **Not yet implemented:** the real editor stacks disconnected segments (a
+  `label` reached only via `jump`, with no physically-preceding node)
+  top-to-bottom relative to *each other* and left-justified with "Program
+  Start" (i.e. every separate chain starts at the same left edge), while
+  each individual connected chain still flows left-to-right internally —
+  LR within a chain, TD *and* left-aligned between separate chains.
+  Mermaid's automatic (dagre) layout engine doesn't expose control over how
+  disconnected subgraphs are arranged or aligned relative to each other
+  within one `flowchart`, so matching this precisely would likely need a
+  custom-positioned SVG renderer rather than Mermaid, if it's ever worth
+  building.
 
 ## Status
 

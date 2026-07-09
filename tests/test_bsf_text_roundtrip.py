@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from desynced_toolkit.bsf.argcache import ArgCache
+from desynced_toolkit.bsf.argcache import ArgCache, arg_pin_names
 from desynced_toolkit.bsf.compile import compile_behavior
 from desynced_toolkit.bsf.decompile import decompile_dcs
 from desynced_toolkit.bsf.ir import BsfBehavior, BsfNode, BsfParam
@@ -94,6 +94,22 @@ def test_jump_label_annotation_distinguishes_by_num(engine):
     assert reparsed.nodes["n4"].args["Label"] == IdLit("v_broken")
     assert reparsed.nodes["n5"].args["Label"] == IdLit("v_broken", 1)
     assert reparsed.nodes["n6"].args["Label"] == IdLit("v_broken", 10)
+
+
+def test_duplicate_pin_names_disambiguated_by_occurrence_not_position(engine):
+    """Regression test for a real misreading this caused 2026-07-10: `for_entities_in_range`
+    declares three args all literally named "Filter" (data.instructions.for_entities_in_range's
+    own args table: "Filter to check" / "Second Filter" / "Third Filter", at wire positions 2/3/4
+    respectively, since position 1 is Range). The old disambiguation suffixed a duplicate name
+    with its raw wire position, so the *second* declared Filter (position 3) rendered as
+    `Filter3` -- reading exactly like "the third Filter" to a human, when it's the second. This
+    led directly to concluding a real user behavior's filter chain was broken (Filter2 supposedly
+    empty, so a wired "Filter3" would be silently dropped) when it was actually correct: the
+    behavior's `Filter`+`Filter3`(as rendered) were genuinely the first two filter slots, chained
+    correctly. Fixed by suffixing with occurrence COUNT instead of wire position."""
+    argcache = ArgCache(engine)
+    names = [name for _, _, name in arg_pin_names("for_entities_in_range", argcache)]
+    assert names == ["Range", "Filter", "Filter2", "Filter3", "Unit", "Done"]
 
 
 def test_fr_value_with_and_without_num(engine):

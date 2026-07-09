@@ -180,6 +180,27 @@ to real seconds, not for the relative comparisons.
   nested inside other moving units** — user-confirmed working in-game,
   correcting an earlier guess (based on there being no Lua-visible precedent
   for a mobile anchor point) that this might not function correctly.
+- **The Goto frame register (`@goto`, `FRAMEREG_GOTO`) is a sibling
+  mechanism to the store register above — persistent, native, no `domove`
+  call needed.** User-confirmed (2026-07-10, reviewing two real deployed
+  behaviors — "Mining Leader V3.2" and its follower "Miner V1.3.4," both
+  drive `@goto` directly rather than calling `domove`): writing an
+  entity-or-coordinate-plus-`num` value straight to `@goto` sets a
+  *persistent* move-to intent the native per-tick unit AI keeps re-pursuing
+  on its own — including continuing to track a moving target — until
+  something else overrides it (an explicit `domove` call, or a controlling
+  component like the miner). `num` is the arrival tolerance, exactly
+  matching `domove`'s own "Target" argument semantics (`instructions.lua`'s
+  own arg description: "the number specifies the range in which to be
+  in") — confirmed these are conceptually the same *value* even though
+  they're mechanically separate: `domove`'s own `func`
+  (`instructions.lua:5111-5135`) calls native `ent:MoveTo`/
+  `comp:RequestStateMove` directly with the target and range, and does
+  **not** touch `FRAMEREG_GOTO` at all — writing the register directly is a
+  genuinely different, parallel mechanism, not a documented alias for
+  calling `domove`. User also noted `@goto` has additional semantics when
+  the "transport route" option is enabled — not yet investigated, flagged
+  for later if it becomes relevant.
 - **Drones can be produced by a plain Robotics Factory**, not only by
   drone-port-family components — `c_robotics_factory = 100` is already
   listed as an equally-valid crafting station in both `f_drone_miner_a`'s and

@@ -48,3 +48,20 @@ def test_exit_restart_last_draw_no_next_edge_at_all(engine):
     mmd = render_mermaid(behavior, argcache)
     outgoing = [line for line in mmd.split("\n") if line.strip().startswith("n1 ")]
     assert outgoing == []
+
+
+def test_left_to_right_with_program_start_node(engine):
+    """Matches the real in-game editor (user-confirmed 2026-07-10): behaviors are always laid
+    out left-to-right, and a synthetic "Program Start" node -- never part of the serialized wire
+    data, since it's implicitly "whichever instruction is first" -- is always drawn feeding into
+    the first real instruction."""
+    mmd = render_mermaid(_compare_number_demo(), ArgCache(engine))
+    assert "flowchart LR" in mmd
+    assert '__program_start__(["Program Start"])' in mmd
+    assert "__program_start__ --> nA" in mmd  # A is first in this fixture's `order`
+
+
+def test_program_start_omitted_for_empty_behavior(engine):
+    behavior = BsfBehavior(name="Empty", nodes={}, order=[])
+    mmd = render_mermaid(behavior, ArgCache(engine))
+    assert "Program Start" not in mmd

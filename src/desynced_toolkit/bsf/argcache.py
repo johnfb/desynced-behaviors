@@ -74,20 +74,35 @@ class ArgCache:
 
 def arg_pin_names(op: str, argcache: "ArgCache") -> list[tuple[int, str, str]]:
     """Returns `[(position, atype, pin_name), ...]` for op's declared args, in position order.
-    A few real ops declare two args with the *same* display name at different positions (e.g.
-    `for_signal_match` has an "in" Signal at position 1 and an "out" Signal at position 3) --
-    BSF represents every arg as a unique `Name=value` pair, so the 2nd+ occurrence of a given
-    base name is disambiguated with its own position as a suffix. Both decompile.py and
-    compile.py call this (never duplicate the rule inline), so the same op always gets the same
-    name<->position mapping in both directions without needing to store anything extra in the
-    IR."""
-    seen = set()
+    A few real ops declare two or more args with the *same* display name at different positions
+    (e.g. `for_signal_match` has an "in" Signal at position 1 and an "out" Signal at position 3;
+    `for_entities_in_range` declares THREE args all literally named "Filter" -- positions 2, 3,
+    4, distinguished only by description text "Filter to check"/"Second Filter"/"Third Filter")
+    -- BSF represents every arg as a unique `Name=value` pair, so the 2nd+ occurrence of a given
+    base name is disambiguated with a suffix.
+
+    The suffix is the occurrence COUNT (1st occurrence: bare name; 2nd: `Name2`; 3rd: `Name3`;
+    ...), not the argument's raw wire position -- fixed 2026-07-10 after a real, confusing
+    misreading it caused: `for_entities_in_range`'s *second* declared Filter sits at wire
+    position 3, so suffixing by position rendered it as `Filter3`, which reads exactly like "the
+    third Filter" to a human -- it's the second. This led directly to a wrong "the filter chain
+    is broken, Filter3 is silently dropped" conclusion about a real user behavior that was
+    actually correct as written (see the user's own real-world confirmation, project memory).
+    Occurrence-based counting makes the display name match how a human actually reads "first
+    Filter, second Filter, third Filter" in order, independent of wherever they happen to sit in
+    the op's own positional argument list.
+
+    Both decompile.py and compile.py call this (never duplicate the rule inline), so the same op
+    always gets the same name<->position mapping in both directions without needing to store
+    anything extra in the IR."""
+    seen: dict[str, int] = {}
     result = []
     for i, argdef in enumerate(argcache.get(op), start=1):
         atype, aname, _ = arg_type_name_desc(argdef)
         base = aname or f"arg{i}"
-        name = base if base not in seen else f"{base}{i}"
-        seen.add(base)
+        count = seen.get(base, 0) + 1
+        seen[base] = count
+        name = base if count == 1 else f"{base}{count}"
         result.append((i, atype, name))
     return result
 
