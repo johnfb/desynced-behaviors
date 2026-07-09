@@ -27,6 +27,7 @@ REAL_DCS_FILES = [
     "keepvars_clear.dcs",
     "keepvars_keep.dcs",
     "deprecated_haul_to_signal.dcs",
+    "mining_leader.dcs",
 ]
 
 
@@ -62,6 +63,37 @@ def test_jump_label_annotation_literal_vs_dynamic(engine):
     assert "jump→label" not in reparsed.nodes["n2"].branches
     assert reparsed.nodes["n2"].args["Label"] == IdLit("v_state_a")
     assert reparsed.nodes["n3"].args["Label"] == Var("Dynamic")
+
+
+def test_jump_label_annotation_distinguishes_by_num(engine):
+    """Regression test for a real bug found 2026-07-09 via a real user behavior (Mining Leader
+    V3.2): it reuses one label id (`v_broken`) with three different `num` suffixes (bare,
+    `[num=1]`, `[num=10]`) as three genuinely distinct jump targets -- a real, load-bearing
+    idiom for getting more distinct label destinations than there are visual-editor label icons.
+    `_literal_key` used to key an IdLit purely on `.id`, silently conflating all three into one
+    dict entry, so every jump to any of them resolved to whichever label was inserted last."""
+    label_bare = BsfNode(id="n1", op="label", args={"Label": IdLit("v_broken")})
+    label_num1 = BsfNode(id="n2", op="label", args={"Label": IdLit("v_broken", 1)})
+    label_num10 = BsfNode(id="n3", op="label", args={"Label": IdLit("v_broken", 10)})
+    jump_bare = BsfNode(id="n4", op="jump", args={"Label": IdLit("v_broken")})
+    jump_num1 = BsfNode(id="n5", op="jump", args={"Label": IdLit("v_broken", 1)})
+    jump_num10 = BsfNode(id="n6", op="jump", args={"Label": IdLit("v_broken", 10)})
+    behavior = BsfBehavior(
+        name="NumLabelTest",
+        nodes={"n1": label_bare, "n2": label_num1, "n3": label_num10, "n4": jump_bare, "n5": jump_num1, "n6": jump_num10},
+        order=["n1", "n2", "n3", "n4", "n5", "n6"],
+    )
+    argcache = ArgCache(engine)
+    text = render_behavior(behavior, argcache)
+    lines = text.split("\n")
+    assert ">n1 (jump→label)" in next(line for line in lines if line.startswith("n4:"))
+    assert ">n2 (jump→label)" in next(line for line in lines if line.startswith("n5:"))
+    assert ">n3 (jump→label)" in next(line for line in lines if line.startswith("n6:"))
+
+    reparsed = parse_behavior(text, argcache)
+    assert reparsed.nodes["n4"].args["Label"] == IdLit("v_broken")
+    assert reparsed.nodes["n5"].args["Label"] == IdLit("v_broken", 1)
+    assert reparsed.nodes["n6"].args["Label"] == IdLit("v_broken", 10)
 
 
 def test_fr_value_with_and_without_num(engine):

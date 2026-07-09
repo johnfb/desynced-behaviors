@@ -426,6 +426,17 @@ for any other instruction. A `jump` with a dynamic target and no explicit
 correctly described by its raw `Label=` value plus its ordinary implicit
 fallthrough, the same as everything else in this format.
 
+**A literal `Label`'s `num` is a real, distinguishing part of the target,
+not incidental.** Found via a real user behavior (Mining Leader V3.2, added
+to `tests/data/` 2026-07-09): it reuses one label id (`v_broken`) with three
+different `num` values (bare, `[num=1]`, `[num=10]`) as three genuinely
+distinct jump destinations — a real, load-bearing idiom for getting more
+distinct entry points than there are visual-editor label icons to choose
+from. The static-resolution matching key must be `(id, num)` together;
+keying on `id` alone (an early implementation bug, since fixed) silently
+conflates every same-id-different-`num` label into one, resolving every
+jump among them to whichever label happened to be inserted last.
+
 ## `call` / sub-behaviors
 
 `call`'s argument list is not statically shaped by `data.instructions.call`

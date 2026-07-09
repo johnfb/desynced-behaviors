@@ -57,8 +57,14 @@ def render_value(v: BsfValue, params: list[BsfParam]) -> str:
 
 
 def _literal_key(v: BsfValue):
+    # IdLit's `num` is a real, distinguishing part of the value here, not incidental -- a real
+    # user behavior (Mining Leader V3.2) uses one label id (`v_broken`) with different `num`
+    # suffixes (bare, `[num=1]`, `[num=10]`) as three genuinely different jump targets, reusing
+    # one visual-editor label icon as a "family" of sub-entry-points. Keying on `v.id` alone
+    # (found 2026-07-09) silently conflated all three into one dict entry, so every jump to any
+    # of them resolved to whichever label happened to be inserted last.
     if isinstance(v, IdLit):
-        return ("id", v.id)
+        return ("id", v.id, v.num)
     if isinstance(v, Num):
         return ("num", v.n)
     return None
