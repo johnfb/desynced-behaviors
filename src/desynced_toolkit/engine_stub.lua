@@ -46,8 +46,20 @@ function NewValue(num, coord, id, entity, item)
 	return setmetatable({ num = num or 0, coord = normalize_coord(coord), id = id, entity = entity, item = item }, Value)
 end
 
+-- Always builds a FRESH Value, even when `v` is already one -- confirmed against real callers'
+-- own comments (set_number's func: "Tool.NewRegisterObject(Get(comp, state, val)) -- copy to
+-- avoid changing from"), i.e. `Tool.NewRegisterObject`/`coerce` are relied on elsewhere in
+-- data/instructions.lua specifically to decouple a stored copy from its source register. A first
+-- version of this stub short-circuited `is_value(v) -> return v` (same reference), which is a
+-- real bug: e.g. `memory_insert` pushing a variable's current value onto an array, followed by
+-- that same variable's slot later being overwritten in place via `Value:Init()` (any subsequent
+-- `set_reg`/`add`/`memory_remove` into it), would silently corrupt the already-pushed array
+-- entry too, since it was the same Lua table, not an independent copy. Caught 2026-07-10 building
+-- a Fibonacci-via-memory-array test fixture that reuses a pushed value: the sequence came out as
+-- powers of 2 instead of Fibonacci numbers, because the "old" value got overwritten in place
+-- before the "new" value's own push read it back.
 local function coerce(v)
-	if is_value(v) then return v end
+	if is_value(v) then return NewValue(v.num, v.coord, v.id, v.entity, v.item) end
 	if type(v) == "number" then return NewValue(v) end
 	if type(v) == "table" then
 		-- a raw table (not a Value) built directly by some instruction func, e.g.
@@ -128,16 +140,30 @@ function Owner:GetRegisterCoord(n) local r = self.registers[n] return r and r.co
 function Owner:GetRegisterId(n) local r = self.registers[n] return r and r.id end
 function Owner:GetRegisterEntity(n) local r = self.registers[n] return r and r.entity end
 
+-- `wait`'s func (data/instructions.lua) calls `comp:SetStateSleep(t)` and returns `true` when it
+-- actually slept (t > 0) -- the real per-tick dispatcher reads this to know to stop running this
+-- component for the rest of the current tick. `t` defaults to 1 when omitted (a handful of real
+-- callers in data/components.lua use `comp:SetStateSleep()` with no argument at all).
+local CompMeta = {}
+CompMeta.__index = CompMeta
+function CompMeta:SetStateSleep(t)
+	self.sleep = t or 1
+end
+
 function NewComp()
-	return { owner = setmetatable({ registers = {} }, Owner) }
+	return setmetatable({ owner = setmetatable({ registers = {} }, Owner), sleep = 0 }, CompMeta)
 end
 
 -- `state.stk = 0` (a plain number, not a table) is GetStack's simplest case: a flat, top-level
 -- behavior with no sub-behavior call stack. Under this, GetStack(state, i) resolves any i > 0 to
 -- `(i, true)` i.e. `state.mem[i]` (locals + literal constants, uniformly), and any i <= 0 falls
 -- through unchanged to InstGet/InstSet's own register-address branches.
+--
+-- `limit` defaults to 1 -- data.instructions.unlock/.lock's own `explain` text: "By default,
+-- behaviors will run one instruction per tick" (limit=1); `unlock` raises it to 10000, `lock`
+-- resets it back to 1 (see data/instructions.lua:497-514).
 function NewState()
-	return { counter = nil, stk = 0, mem = {}, revid = 1 }
+	return { counter = nil, stk = 0, mem = {}, revid = 1, limit = 1 }
 end
 
 -- `jump`'s func scans `GetCachedBehaviorAsm(state.revid)` for a matching `label` instruction --

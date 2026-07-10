@@ -81,6 +81,9 @@ class Interpreter:
         for idx, value in (params or {}).items():
             self.state.mem[idx] = self._value_for(value)
         self._build_current_asm()
+        self._i = 0
+        self._blocks: list[dict] = []
+        self._finished = False
 
     def _value_for(self, py_value):
         if isinstance(py_value, tuple):
@@ -193,182 +196,255 @@ class Interpreter:
         blocks.append({"kind": "loop", "advance": advance, "break_": call_last})
         return target  # == body_start
 
-    def run(self, max_steps: int = 20000) -> None:
-        blocks: list[dict] = []
-
-        def dead_end():
-            while blocks:
-                block = blocks[-1]
-                if block["kind"] == "loop":
-                    finished, target = block["advance"]()
-                    if not finished:
-                        return target
-                    blocks.pop()
-                    if target is not None:
-                        return target
-                    continue
-                if block["thunks"]:
-                    return block["thunks"].pop(0)()
+    def _dead_end(self):
+        blocks = self._blocks
+        while blocks:
+            block = blocks[-1]
+            if block["kind"] == "loop":
+                finished, target = block["advance"]()
+                if not finished:
+                    return target
                 blocks.pop()
-                if block["done"] is not None:
-                    return block["done"]
-            return None
+                if target is not None:
+                    return target
+                continue
+            if block["thunks"]:
+                return block["thunks"].pop(0)()
+            blocks.pop()
+            if block["done"] is not None:
+                return block["done"]
+        return None
 
-        i = 0
+    def _step(self) -> str:
+        """Executes exactly one real instruction (matching one `steps += 1` unit from this
+        method's pre-refactor single-shot form) and returns one of `"finished"` / `"waited"` /
+        `"continue"`. Resolving a dead end (an out-of-range `i`, chasing block pops via
+        `_dead_end`) is free -- it never consumes a step itself, only whatever real instruction
+        it eventually lands on does -- matching [[reference_sequence_unconnected_stages_free]].
+        Position (`self._i`) and the block stack (`self._blocks`) persist across calls so a
+        caller (`run`/`run_ticks`) can resume execution rather than restart it."""
+        if self._finished:
+            return "finished"
+        i = self._i
+        while not (0 <= i < self.n):
+            # Falling off the true end of the instruction array without ever hitting an
+            # explicit `next=false` still has to pop any enclosing block (a loop body whose
+            # last instruction is also the program's last instruction, e.g.) -- matching
+            # behavior_format.md's "next: false means... pops back to the enclosing block",
+            # which applies to any dead end, not just an explicit `false`.
+            nxt = self._dead_end()
+            if nxt is None:
+                self._finished = True
+                return "finished"
+            i = nxt
+        instr = self.prog[i + 1]
+        op = instr["op"]
+        nexti = i + 1
+        slept = False
+
+        if op == "unlock":
+            self.engine.call("unlock", self.comp, self.state)
+        elif op == "lock":
+            self.engine.call("lock", self.comp, self.state)
+        elif op in ("label", "nop"):
+            pass
+        elif op == "wait":
+            time_arg = self._translate_arg(instr[1])
+            slept = bool(self.engine.call("wait", self.comp, self.state, time_arg))
+        elif op == "sequence":
+            self._blocks.append({"kind": "sequence", "thunks": _seq_targets(instr, i), "done": None})
+            nxt = self._dead_end()
+            if nxt is None:
+                self._finished = True
+                return "finished"
+            self._i = nxt
+            return "continue"
+        elif op == "exit":
+            self._finished = True
+            return "finished"
+        elif op == "check_number":
+            value_arg = self._translate_arg(instr[3])
+            compare_arg = self._translate_arg(instr[4])
+            # Genuinely delegate the branch decision to the real func (matching `jump`,
+            # below) rather than re-deriving it in Python: resolve If Larger/If Smaller to
+            # raw 1-based asm targets (or `False`) ourselves, pass those straight through as
+            # the func's own `if_larger`/`if_smaller` args, and let its actual logic --
+            # including the real `REG_INFINITE` handling -- decide `state.counter`.
+            larger_target = _resolve_next(instr, 1, i + 1)
+            smaller_target = _resolve_next(instr, 2, i + 1)
+            larger_raw = False if larger_target is None else larger_target + 1
+            smaller_raw = False if smaller_target is None else smaller_target + 1
+            self.state.counter = None
+            self.engine.call(
+                op,
+                self.comp,
+                self.state,
+                larger_raw,
+                smaller_raw,
+                value_arg,
+                compare_arg,
+            )
+            if self.state.counter is False:
+                nxt = self._dead_end()
+                if nxt is None:
+                    self._finished = True
+                    return "finished"
+                self._i = nxt
+                return "continue"
+            if self.state.counter is not None:
+                self._i = int(self.state.counter) - 1
+                return "continue"
+            # neither branch fired (Value == Compare, per the real func's own comparison) --
+            # it leaves state.counter untouched for this case, so resolve the instruction's
+            # own fallthrough/`next` ("Equal") ourselves, same as `jump`'s fallback below
+            nexti = _resolve_next(instr, None, i + 1)
+            if nexti is None:
+                nxt = self._dead_end()
+                if nxt is None:
+                    self._finished = True
+                    return "finished"
+                self._i = nxt
+                return "continue"
+            self._i = nexti
+            return "continue"
+        elif op == "jump":
+            label_arg = self._translate_arg(instr[1])
+            self.state.lastcounter = i + 1
+            self.state.counter = None
+            self.engine.call(op, self.comp, self.state, label_arg)
+            if self.state.counter is not None:
+                self._i = int(self.state.counter) - 1
+                return "continue"
+            nexti = _resolve_next(instr, None, i + 1)
+        elif op == "for_number":
+            target = self._enter_for_number(instr, i, self._blocks)
+            if target is None:
+                nxt = self._dead_end()
+                if nxt is None:
+                    self._finished = True
+                    return "finished"
+                self._i = nxt
+                return "continue"
+            self._i = target
+            return "continue"
+        elif op == "last":
+            if not self._blocks or self._blocks[-1]["kind"] != "loop":
+                raise RuntimeError("last (Break) requires an enclosing for_number loop")
+            block = self._blocks.pop()
+            target = block["break_"]()
+            if target is None:
+                nxt = self._dead_end()
+                if nxt is None:
+                    self._finished = True
+                    return "finished"
+                self._i = nxt
+                return "continue"
+            self._i = target
+            return "continue"
+        elif op in ("add", "sub", "mul", "div"):
+            a = self._translate_arg(instr[1])
+            b = self._translate_arg(instr[2])
+            res_slot = (
+                self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
+            )
+            self.engine.call(op, self.comp, self.state, a, b, res_slot)
+        elif op == "set_reg":
+            a = self._translate_arg(instr[1])
+            target_slot = (
+                self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
+            )
+            self.engine.call("set_reg", self.comp, self.state, a, target_slot)
+        elif op == "memory_insert":
+            idx_arg = self._translate_arg(instr[1])
+            val_arg = self._translate_arg(instr[2])
+            self.engine.call(op, self.comp, self.state, idx_arg, val_arg)
+        elif op == "memory_remove":
+            idx_arg = self._translate_arg(instr[1])
+            out_slot = (
+                self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
+            )
+            self.engine.call(op, self.comp, self.state, idx_arg, out_slot)
+        elif op == "combine_coordinate":
+            a = self._translate_arg(instr[1])
+            b = self._translate_arg(instr[2])
+            res_slot = (
+                self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
+            )
+            self.engine.call(op, self.comp, self.state, a, b, res_slot)
+        elif op == "separate_coordinate":
+            a = self._translate_arg(instr[1])
+            x_slot = (
+                self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
+            )
+            y_slot = (
+                self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
+            )
+            self.engine.call(op, self.comp, self.state, a, x_slot, y_slot)
+        elif op == "debug_print":
+            # No real log to write to here -- just surface it on stdout so a script driving
+            # the Interpreter directly (as opposed to a pytest assertion reading `mem` back)
+            # can observe it, matching what the in-game log would show.
+            val = self.engine.get_value(self.comp, self.state, self._translate_arg(instr[1]))
+            print(f"[debug_print] num={val.num} coord={val.coord} id={val.id}")
+        else:
+            raise RuntimeError(f"unhandled op {op}")
+
+        if instr["next"] is not None:
+            nexti2 = _resolve_next(instr, None, None)
+            if nexti2 is None:
+                nxt = self._dead_end()
+                if nxt is None:
+                    self._finished = True
+                    return "finished"
+                self._i = nxt
+                return "continue"
+            nexti = nexti2
+        self._i = nexti
+        return "waited" if slept else "continue"
+
+    def run(self, max_steps: int = 20000) -> None:
+        """Runs to completion (or `exit`), ignoring tick/lock-state timing entirely -- a `wait`
+        along the way doesn't pause this, it's just one more step. For tick-accurate stepping
+        (respecting `state.limit`/lock/unlock and honoring `wait` as a real per-tick pause), use
+        `run_ticks` instead."""
         steps = 0
         while True:
-            if not (0 <= i < self.n):
-                # Falling off the true end of the instruction array without ever hitting an
-                # explicit `next=false` still has to pop any enclosing block (a loop body whose
-                # last instruction is also the program's last instruction, e.g.) -- matching
-                # behavior_format.md's "next: false means... pops back to the enclosing block",
-                # which applies to any dead end, not just an explicit `false`.
-                nxt = dead_end()
-                if nxt is None:
-                    return
-                i = nxt
-                continue
+            result = self._step()
+            if result == "finished":
+                return
             steps += 1
             if steps > max_steps:
                 raise RuntimeError("runaway")
-            instr = self.prog[i + 1]
-            op = instr["op"]
-            nexti = i + 1
 
-            if op in ("unlock", "lock", "label", "nop"):
-                pass
-            elif op == "sequence":
-                blocks.append({"kind": "sequence", "thunks": _seq_targets(instr, i), "done": None})
-                nxt = dead_end()
-                if nxt is None:
-                    return
-                i = nxt
-                continue
-            elif op == "exit":
+    def run_ticks(self, n: int, max_steps: int = 100000) -> None:
+        """Simulates `n` real game ticks, honoring the actual lock/unlock/wait model (see
+        data.instructions.unlock/.lock/.wait's own `explain` text, confirmed 2026-07-10): by
+        default (no `unlock()` reached yet) `state.limit == 1`, so each tick executes exactly one
+        instruction -- an implicit `wait(1)` after every step. `unlock()` raises the per-tick
+        budget to 10000 (checked fresh after every instruction, so it can take effect within the
+        same tick it runs in); `lock()` resets it to 1. An explicit `wait(t)` stops the current
+        tick immediately (via `comp.sleep`, set by the real `wait` func's `comp:SetStateSleep`),
+        counting down `t` ticks (executing nothing) before instructions resume."""
+        steps = 0
+        for _ in range(n):
+            if self._finished:
                 return
-            elif op == "check_number":
-                value_arg = self._translate_arg(instr[3])
-                compare_arg = self._translate_arg(instr[4])
-                # Genuinely delegate the branch decision to the real func (matching `jump`,
-                # below) rather than re-deriving it in Python: resolve If Larger/If Smaller to
-                # raw 1-based asm targets (or `False`) ourselves, pass those straight through as
-                # the func's own `if_larger`/`if_smaller` args, and let its actual logic --
-                # including the real `REG_INFINITE` handling -- decide `state.counter`.
-                larger_target = _resolve_next(instr, 1, i + 1)
-                smaller_target = _resolve_next(instr, 2, i + 1)
-                larger_raw = False if larger_target is None else larger_target + 1
-                smaller_raw = False if smaller_target is None else smaller_target + 1
-                self.state.counter = None
-                self.engine.call(
-                    op,
-                    self.comp,
-                    self.state,
-                    larger_raw,
-                    smaller_raw,
-                    value_arg,
-                    compare_arg,
-                )
-                if self.state.counter is False:
-                    nxt = dead_end()
-                    if nxt is None:
-                        return
-                    i = nxt
-                    continue
-                if self.state.counter is not None:
-                    i = int(self.state.counter) - 1
-                    continue
-                # neither branch fired (Value == Compare, per the real func's own comparison) --
-                # it leaves state.counter untouched for this case, so resolve the instruction's
-                # own fallthrough/`next` ("Equal") ourselves, same as `jump`'s fallback below
-                nexti = _resolve_next(instr, None, i + 1)
-                if nexti is None:
-                    nxt = dead_end()
-                    if nxt is None:
-                        return
-                    i = nxt
-                    continue
-                i = nexti
+            sleep = self.comp["sleep"] or 0
+            if sleep > 0:
+                self.comp["sleep"] = sleep - 1
                 continue
-            elif op == "jump":
-                label_arg = self._translate_arg(instr[1])
-                self.state.lastcounter = i + 1
-                self.state.counter = None
-                self.engine.call(op, self.comp, self.state, label_arg)
-                if self.state.counter is not None:
-                    i = int(self.state.counter) - 1
-                    continue
-                nexti = _resolve_next(instr, None, i + 1)
-            elif op == "for_number":
-                target = self._enter_for_number(instr, i, blocks)
-                if target is None:
-                    nxt = dead_end()
-                    if nxt is None:
-                        return
-                    i = nxt
-                    continue
-                i = target
-                continue
-            elif op == "last":
-                if not blocks or blocks[-1]["kind"] != "loop":
-                    raise RuntimeError("last (Break) requires an enclosing for_number loop")
-                block = blocks.pop()
-                target = block["break_"]()
-                if target is None:
-                    nxt = dead_end()
-                    if nxt is None:
-                        return
-                    i = nxt
-                    continue
-                i = target
-                continue
-            elif op in ("add", "sub", "mul", "div"):
-                a = self._translate_arg(instr[1])
-                b = self._translate_arg(instr[2])
-                res_slot = (
-                    self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
-                )
-                self.engine.call(op, self.comp, self.state, a, b, res_slot)
-            elif op == "set_reg":
-                a = self._translate_arg(instr[1])
-                target_slot = (
-                    self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
-                )
-                self.engine.call("set_reg", self.comp, self.state, a, target_slot)
-            elif op == "combine_coordinate":
-                a = self._translate_arg(instr[1])
-                b = self._translate_arg(instr[2])
-                res_slot = (
-                    self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
-                )
-                self.engine.call(op, self.comp, self.state, a, b, res_slot)
-            elif op == "separate_coordinate":
-                a = self._translate_arg(instr[1])
-                x_slot = (
-                    self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
-                )
-                y_slot = (
-                    self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
-                )
-                self.engine.call(op, self.comp, self.state, a, x_slot, y_slot)
-            elif op == "debug_print":
-                # No real log to write to here -- just surface it on stdout so a script driving
-                # the Interpreter directly (as opposed to a pytest assertion reading `mem` back)
-                # can observe it, matching what the in-game log would show.
-                val = self.engine.get_value(self.comp, self.state, self._translate_arg(instr[1]))
-                print(f"[debug_print] num={val.num} coord={val.coord} id={val.id}")
-            else:
-                raise RuntimeError(f"unhandled op {op}")
-
-            if instr["next"] is not None:
-                nexti2 = _resolve_next(instr, None, None)
-                if nexti2 is None:
-                    nxt = dead_end()
-                    if nxt is None:
-                        return
-                    i = nxt
-                    continue
-                nexti = nexti2
-            i = nexti
+            executed = 0
+            while True:
+                limit = self.state["limit"] or 1
+                if executed >= limit:
+                    break
+                result = self._step()
+                executed += 1
+                steps += 1
+                if steps > max_steps:
+                    raise RuntimeError("runaway")
+                if result in ("finished", "waited"):
+                    break
 
     def read_param(self, idx: int):
         return self.engine.get_value(self.comp, self.state, idx)
