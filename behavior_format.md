@@ -179,7 +179,7 @@ What you put in a numbered slot depends on what that argument represents:
 | Local variable | any string | `"A"`, `"CNT"`, `"Self"` |
 | Behavior parameter | plain positive int `1..N` | only valid if `parameters` has ≥N entries |
 | Faction (shared) register | `{ "fr": <name> }` (name, resolved at runtime — not a fixed slot, see "Faction (shared) registers" below) | `{ "fr": "some_key" }` |
-| `exec` branch target | plain int = **target's rendered dict key + 1** (see "Branch and fall-through resolution" — these values are never adjusted to the 0-based keys used elsewhere in this format); omit = fall through to the next instruction; `false` = stop, take no further action on this path | `11` jumps to dict key `"10"` |
+| `exec` branch target | plain int = **target's rendered dict key + 1** (see "Branch and fall-through resolution" — these values are never adjusted to the 0-based keys used elsewhere in this format); omit = fall through to the next instruction (an explicit wire the compiler encoded compactly because it matched physical position — not a lesser or undecided connection, see "Branch and fall-through resolution" below); `false` = stop, take no further action on this path | `11` jumps to dict key `"10"` |
 
 Local variables are the easy path for anything you don't need to persist
 outside the behavior: pick any string name, use it consistently as both an
