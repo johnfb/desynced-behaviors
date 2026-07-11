@@ -37,25 +37,29 @@ Update this file directly as items are picked up/finished.
       fallthrough-vs-declared-arg wiring; `dodrop`'s default `c=2` auto-subtracting the target's
       current stock, ruling out an apparent over-delivery issue at `n146`). No bugs found.
 
-## Magnifier / drone-swarm design (root task, not started)
+## Magnifier / drone-swarm design
 
-- [ ] **Update `MinerDrone` with a second parameter** (which resource to mine + which signal
-      to watch), building on the existing register-linked design in
-      `blight_magnifier_mining.md`.
-- [ ] **Author the `MagnifierSignal` building behavior** — broadcast "come mine here" (the
-      `num=0` serving convention) when any node in range is below the 200 cap, turn itself off
-      via `shutdown`/`turnon` when all nodes are full (mechanism already verified against
-      source: toggling the whole building's power stops the magnifier's own regen without
-      affecting the Behavior Controller).
-- [ ] **Compile/validate `MinerDrone` against real Lua.** Still only hand-authored directly
-      against `behavior_source_format.md`'s grammar (per the doc's own "Known gaps" section) —
-      never run through `desynced_toolkit`'s own compile/decode pipeline, round-tripped through
-      `dcs_wire.py`, or tested in-game.
-- [ ] **Integrate `MinerDrone` with an outer building-selection/travel routine.** It currently
-      only handles "given you're already in a good area, pick and mine nodes there" — not
-      *which* area to travel to first. Intended integration point (per `blight_magnifier_mining.md`):
-      building-side Signal broadcast, drones pick among currently-signaling buildings and
-      travel there before running the existing procedure.
+- [x] **Update `MinerDrone` with a second parameter** (which resource to mine + which signal
+      to watch). Done 2026-07-11: `Resource` param added, doubling as both the mining-type
+      filter and the signal id watched for building demand.
+- [x] **Author the `MagnifierSignal` building behavior.** Done 2026-07-11 — see
+      `blight_magnifier_mining.md`. Caught and fixed a real deadlock during authoring: power
+      management (200-cap regen) and drone invitation (100-floor mining) must be independent
+      conditions, not one shared threshold (an abundant, never-mined area would otherwise
+      never invite drones at all).
+- [x] **Compile/validate `MinerDrone` against real Lua.** Done 2026-07-11 — rewritten in the
+      real, current BSF grammar and actually compiled/decompiled/round-tripped through
+      `desynced_toolkit.bsf` (not just hand-authored prose this time). Caught a second real bug
+      this way: an omitted loop `Done` pin resolves to the position right after the loop
+      *instruction itself* (its own body start), not "after the loop" — all three loop
+      instructions in the first draft had this wrong; confirmed via a minimal compiled test
+      case and by the mermaid render collapsing from 4 disconnected components to 1 once fixed.
+      Still not tested in-game.
+- [x] **Integrate `MinerDrone` with an outer building-selection/travel routine.** Done
+      2026-07-11 — reservoir-samples among buildings broadcasting demand, travels there, then
+      runs the local mining loop; only escalates back to re-picking a building when the local
+      area has no viable candidate at all (tries another local node first on single-node
+      depletion).
 - [ ] **Tune the hardcoded oversubscription cap (2) and floor (100) in `MinerDrone`**
       empirically once it's actually running — currently just reasonable-guess constants, not
       derived.

@@ -18,10 +18,24 @@
 -- Negative integers 1..4 select a frame register (Signal/Visual/Store/Goto, per
 -- behavior_format.md's table) via `comp.owner:GetRegister`.
 
-REG_INFINITE = math.maxinteger
-REG_NOT = math.mininteger  -- guess: sentinel below any real coordinate, per combine_coordinate's
-                            -- `if new_x <= REG_NOT then new_x = 0 end` guard -- unconfirmed exact
-                            -- value, only that it must be lower than any real coordinate component.
+-- Confirmed 2026-07-11 via a real in-game test (a behavior with plain `set_reg(Value=N,
+-- Target=Result)` calls for N = 0, 1, -2147483647, -2147483648, read back from the Result
+-- parameter's UI display) cross-checked against `ui/RegisterSelection.lua`'s own display/parse
+-- code three independent ways: the display formatter itself (`self.input.text = (not reg_num
+-- and "") or (reg_num == REG_INFINITE and "\xe2\x88\x9e") or (reg_num == REG_NOT and "\xe2\x89\xa0") or tostring(reg_num)`,
+-- confirming empty/0/1 as plain text and only these two exact values get the special symbols),
+-- the text-input clamp boundary (`math.max(math.min(tonumber(...), 2147483647), REG_NOT+1)` --
+-- ordinary typed numbers clamp to [REG_NOT+1, 2147483647], i.e. these two sentinels sit just
+-- outside the normal typeable range), and the button tooltips ("Set infinite"/"Set not equal").
+-- These are INT32-scale values, not Lua's own 64-bit math.maxinteger/mininteger -- a previous
+-- version of this file guessed the latter (right shape, wrong magnitude and, for REG_NOT, wrong
+-- sign relative to REG_INFINITE: REG_NOT is the smaller-magnitude sentinel, not the larger).
+-- This also retroactively confirms every real behavior reviewed this project that uses the
+-- literal `-2147483648` for a "Range"/"Amount" argument (Mining Leader's `Check Emergency`,
+-- Fendersons Transport's `dopickup`) was genuinely writing REG_INFINITE, not just "a very large
+-- negative number that happens to trip some fallback."
+REG_INFINITE = -2147483648
+REG_NOT = -2147483647
 
 Value = {}
 Value.__index = Value

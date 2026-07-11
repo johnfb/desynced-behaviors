@@ -298,206 +298,283 @@ to real seconds, not for the relative comparisons.
   (`for_entities_in_range`, `instructions.lua:869-897`) with
   `Filter=v_resource`.
 
-### The MinerDrone behavior (graph source format)
+### The MinerDrone behavior (real BSF, compiled and validated)
 
-**Revision note (this session):** the original draft below called the
-`mine` instruction once to establish the target and relied entirely on the
-confirmed native auto-store/auto-resume cycle from there. Indexing `data/`
-into a code knowledge graph and tracing `c_miner:on_update`'s actual stop
-conditions (`components.lua:2254-2536`) found a real bug: none of its four
-real stop conditions (register 1 cleared, requested amount reached,
-inventory full, node destroyed) cover "the Program decided to abandon this
-node" — the old instructions 19-21 cleared the Signal broadcast but never
-touched the miner's actual register, so the native auto-resume cycle kept
-mining the abandoned node, unsupervised, straight through the 100-unit
-floor and potentially to permanent depletion (`AddResourceHarvestItemAmount`'s
-`num > 0` guard, cited above). A `mine(Resource=nil)`-style explicit clear
-was investigated and rejected: `mine`'s only real "stop" path requires the
-raw compiled argument to be entirely *absent* (`instructions.lua:126-133`'s
-`GetStack`), which an unconnected-but-never-wired pin in the visual editor
-is not confirmed to produce; a `mine`-`Num`-threshold alternative was also
-considered and rejected (see the `Num`/`CountItem` bullet in "Native
-mechanics confirmed" above). The fix used below instead: drive `c_miner`'s
-register 1 through a genuine register link — a declared output parameter,
-`$MineTarget`, wired via the Link Editor directly to register 1 of every
-`c_miner`/`c_adv_miner` on the drone — rather than through `mine` at all, a
-technique the user confirmed using successfully before this session. This
-also caught and fixed a second, independent bug in the old draft: its
-fastest exit path (old `21 -> 2`) skipped resetting `$BestRoll`, silently
-corrupting the next round's reservoir sampling with a stale roll value
-carried over from the node just abandoned.
+**Rewritten 2026-07-11** in `behavior_source_format.md`'s real, current
+grammar (the earlier pseudocode below predated the actual `desynced_toolkit
+.bsf` parser/compiler) and, unlike the original draft, genuinely **compiled
+and round-tripped through the real toolkit**: `bsf compile` → real `.dcs` →
+`bsf decompile` byte-identical, confirmed against raw wire data (not just
+the decompiler's own rendering), and the mermaid render collapses to a
+single connected component from Program Start — a real structural sanity
+check, not just "it didn't crash." Saved as `miner_drone.dcs` (workspace
+root) — not yet tested in-game.
 
-Algorithm: loop nearby resource nodes via reservoir sampling (candidates
-must be >100 remaining and not oversubscribed per `Loop Signal`), commit to
-the winner via Signal broadcast, drive the register-linked `$MineTarget`
-directly to start mining (still relying on native auto-store/auto-resume —
-just without going through `mine`), wait-and-recheck the node's own
-remaining stock until it drops to the 100 floor, then explicitly clear the
-link to actually stop the miner, release the claim, and restart.
+This revision also adds the second parameter (`Resource` — which item type
+to mine, doubling as the signal id to watch for building demand, same
+single-parameter convention `Fendersons Transport`'s Hauler already
+established for its own `Resource` param) and the outer building-seek loop,
+closing two of the "Known gaps" the original draft left open.
+
+Three real bugs were caught and fixed authoring this version, all worth
+recording since they're easy to reintroduce by hand:
+
+1. **A genuine deadlock in the (separately-authored) `MagnifierSignal`
+   companion behavior, caught by the user**: an earlier draft used a single
+   200-cap threshold to drive *both* the power-management decision (should
+   the magnifier keep regenerating) *and* the drone-invitation signal
+   (should drones come mine here). An abundant, never-mined area (every
+   node already above 200) would conclude "nothing needs regen" and clear
+   its own signal *and* shut down — permanently starving itself of drones,
+   since nothing would ever flip that condition back. Fixed by tracking two
+   independent flags per poll cycle (`$NeedsRegen` against the 200 cap,
+   `$Mineable` against the 100 floor) and gating power and signal off each
+   independently — see `MagnifierSignal` below.
+2. **Omitting a loop instruction's own `Done` pin does not "skip past the
+   loop body"** — confirmed directly against a minimal compiled test case
+   (not just documentation): an omitted `Done` resolves to the wire
+   position immediately following *the loop instruction itself* (its own
+   body's first instruction), per the same universal omission-is-positional
+   convention documented in `behavior_format.md`'s "Branch and fall-through
+   resolution" — there is no loop-aware special case. All three
+   `for_signal_match`/`for_entities_in_range` loops in the first draft of
+   this behavior (and the one in `MagnifierSignal`) omitted `Done` assuming
+   it would naturally fall through to after the loop; all four needed an
+   explicit numeric target instead. This is exactly why the mermaid render
+   initially split into 4 (`MinerDrone`)/2 (`MagnifierSignal`) disconnected
+   components — forward-reachability from Program Start genuinely couldn't
+   reach the rest of the graph through a `Done` pin pointing back into its
+   own loop body — and collapsing back to one component after the fix is
+   the concrete confirmation the fix was real, not cosmetic.
+3. **A real signal-protocol collision with `Mining Leader`/`Mining
+   Follower`, caught by the user**: the first draft had `MinerDrone`'s Seek
+   loop search for `{id: Resource, num: 0}` (matching `MagnifierSignal`'s
+   own broadcast), using `for_signal_match`'s default "Match" filter mode —
+   which only checks `id`, never `num` at all. But `Mining Leader`'s own
+   `Monitor mine` state (`set_reg(Value=Resource, Target=@signal)`) and the
+   Hauler-facing pickup convention `Fendersons Transport` depends on
+   *already* use `num=0` on this exact same `Resource` id to mean "I'm
+   offering this for pickup" — a completely different, mobile-squad-facing
+   meaning. A drone would have genuinely traveled toward a roaming mining
+   gang mid-pickup-broadcast, mistaking it for a stationary mining site.
+   Fixed by reserving `num=-1` exclusively for the drone-facing "come mine
+   here" signal (never used by the Hauler-facing `num=0`/`num>0`
+   pickup/dropoff convention) and using `for_signal_match`'s "Exact" filter
+   mode (`c=2`) to match it precisely — confirmed in the compiled wire data
+   (`"c": 2`), not just the source text.
+4. **A silent arg-clobber caught by this project's own round-trip
+   discipline**: `is_same_grid` (added for the grid constraint below)
+   genuinely declares two args both literally named "Unit" in the game data.
+   Writing `is_same_grid(Unit=$Self, Unit=$Cand)` in BSF text — repeating
+   the bare name instead of using the occurrence-disambiguated `Unit2` — let
+   the second assignment silently overwrite the first in `parse_node`'s args
+   dict. It compiled and round-tripped with *no error at all*; the decoded
+   wire showed `$Cand` in position 1 and **nothing** in position 2 — `$Self`
+   silently discarded. Since `is_same_grid` treats an empty second unit as
+   "no match," this would have rejected every candidate, always, with a
+   clean compile. Caught because the *decompiled* text visibly had one arg
+   instead of two, prompting a raw wire-data check — see
+   `reference_bsf_duplicate_arg_name_silent_clobber` (project memory) for
+   the general pattern. Fixed by using `Unit2` for the second occurrence,
+   matching the same disambiguation convention `for_entities_in_range`'s
+   `Filter`/`Filter2`/`Filter3` already established.
+
+**A hard constraint, not a preference, discovered discussing this with the
+user**: drones have no capacitor and become extremely slow the moment they
+leave their power grid's coverage — so a drone must *never* travel to a
+target outside its own grid, not just prefer to stay within it. This
+applies to both candidate searches: a `MagnifierSignal` building found via
+Seek, and — less obviously, but still a real risk given `Range=5` — a
+resource node found via the local Mine search, if the node happens to sit
+just past the grid's edge. `is_same_grid(Unit, Unit2)` (checks
+`power_grid_index` on both entities, falling back to coordinate-based grid
+lookup for non-grid-connected entities — which is *why* it also happens to
+reject Mining Leader/Follower on its own, since a roaming bot has no
+`power_grid_index` at all) gates both.
 
 ```
-behavior MinerDrone($MineTarget):
-  desc: "Reservoir-sample a resource node above the 100-unit floor, avoid oversubscribed nodes via Signal broadcast, mine down to the floor by driving a register-linked output parameter directly, repeat"
+behavior MinerDrone(Resource, MineTarget*):
+  desc: "Find a building broadcasting demand for Resource via the drone-only signal (id=Resource, num=-1 -- deliberately distinct from the Hauler-facing num=0/num>0 pickup/dropoff convention Mining Leader/Follower and Fendersons Transport already use on this same Resource id, so a roaming mining squad offering pickup is never mistaken for a stationary mining site), travel there, then reservoir-sample a nearby resource node of that type above the 100-unit floor (skipping oversubscribed nodes via Signal broadcast), mine it down to the floor by driving the register-linked MineTarget parameter directly (link MineTarget to register 1 of every c_miner/c_adv_miner on this drone via the Link Editor -- no mine() call), then repeat. Both candidate searches reject anything outside this drone's own power grid -- drones have no capacitor and become extremely slow off-grid, so leaving grid coverage is never acceptable, not just suboptimal. Falls back to re-picking a building whenever no valid local candidate is found."
 
-  # Setup, done once outside the instruction graph via the Link Editor:
-  # register-link $MineTarget to register 1 of every c_miner / c_adv_miner
-  # component on this drone. One-to-many, same effect as mine's own internal
-  # `for _, m in ipairs(miners) do ... end` loop, without calling mine at all.
-
-1: set_reg(Value=0, Target=$BestRoll)
-2: for_entities_in_range(Range=5, Filter=v_resource, Unit=$Node) >13 (Done)
-3: get_resource_num(Resource=$Node, Result=$Amt)
-4: check_number(Value=$Amt, Compare=100) >5 (If Larger) >STOP (If Smaller) >STOP (next)
-5: set_reg(Value=0, Target=$Count)
-6: for_signal_match(Signal=$Node, Unit=$SigUnit) >8 (Done)
-7: add(To=$Count, Num=1, Result=$Count) >STOP (next)
-8: check_number(Value=$Count, Compare=2) >STOP (If Larger) >9 (If Smaller) >STOP (next)
-9: random_number(Min=1, Max=1000, Result=$Roll)
-10: check_number(Value=$Roll, Compare=$BestRoll) >11 (If Larger) >STOP (If Smaller) >STOP (next)
-11: set_reg(Value=$Node, Target=$Best)
-12: set_reg(Value=$Roll, Target=$BestRoll) >STOP (next)
-13: check_number(Value=$BestRoll, Compare=0) >14 (If Larger) >STOP (If Smaller) >19 (next)
-14: set_reg(Value=$Best, Target=@signal)
-15: set_reg(Value=$Best, Target=$MineTarget)
-16: wait(Time=5)
-17: get_resource_num(Resource=$Best, Result=$Amt2)
-18: check_number(Value=$Amt2, Compare=100) >16 (If Larger) >20 (If Smaller) >20 (next)
-19: wait(Time=20) >1 (next)
-20: set_reg(Value=nil, Target=$MineTarget)
-21: set_reg(Value=nil, Target=@signal) >1 (next)
+n1: label(Label=v_arrow_right, cmt="Seek: find a building signaling demand for Resource")
+n2: set_reg(Value=0, Target=$BldRoll)
+n3: set_reg(Target=$Bldg)
+n4: get_self(Unit Reference=$Self)
+n5: set_number(Value=Resource, Number=-1, Result=$SeekSig, cmt="Drone-only signal value -- num=-1 never collides with the Hauler-facing num=0 (pickup)/num>0 (dropoff) convention")
+n6: for_signal_match(Signal=$SeekSig, Unit=$Cand, c=2)  >n12 (Done)
+n7: is_same_grid(Unit=$Self, Unit2=$Cand)  >POP (Different)
+n8: random_number(Min=1, Max=1000, Result=$Roll)
+n9: check_number(Value=$Roll, Compare=$BldRoll)  >POP (If Smaller) >POP (If Equal)
+n10: set_reg(Value=$Roll, Target=$BldRoll)
+n11: set_reg(Value=$Cand, Target=$Bldg)  >POP (next)
+n12: is_empty(Value=$Bldg)  >n14 (Has Value)
+n13: wait(Time=20)  >n1 (next)
+n14: set_number(Value=$Bldg, Number=4, Result=@goto)
+n15: wait(Time=5)
+n16: get_distance(Target=$Bldg, Distance=$Dst)
+n17: check_number(Value=$Dst, Compare=8)  >n15 (If Larger)
+n18: label(Label=c_radar, cmt="Mine: reservoir-sample a nearby node of the right type")
+n19: set_reg(Value=0, Target=$BestRoll)
+n20: set_reg(Target=$Best)
+n21: for_entities_in_range(Range=5, Filter=v_resource, Filter2=Resource, Unit=$Node)  >n33 (Done)
+n22: is_same_grid(Unit=$Self, Unit2=$Node)  >POP (Different)
+n23: get_resource_num(Resource=$Node, Result=$Amt)
+n24: check_number(Value=$Amt, Compare=100)  >POP (If Smaller) >POP (If Equal)
+n25: set_reg(Value=0, Target=$Count)
+n26: for_signal_match(Signal=$Node, Unit=$SigUnit)  >n28 (Done)
+n27: add(To=$Count, Num=1, Result=$Count)  >POP (next)
+n28: check_number(Value=$Count, Compare=2)  >POP (If Larger)
+n29: random_number(Min=1, Max=1000, Result=$Roll)
+n30: check_number(Value=$Roll, Compare=$BestRoll)  >POP (If Smaller) >POP (If Equal)
+n31: set_reg(Value=$Node, Target=$Best)
+n32: set_reg(Value=$Roll, Target=$BestRoll)  >POP (next)
+n33: is_empty(Value=$Best)  >n35 (Has Value)
+n34: jump(Label=v_arrow_right)  >POP (next) >n1 (jump→label)
+n35: set_reg(Value=$Best, Target=@signal)
+n36: set_reg(Value=$Best, Target=MineTarget)
+n37: wait(Time=5)
+n38: get_resource_num(Resource=$Best, Result=$Amt2)
+n39: check_number(Value=$Amt2, Compare=100)  >n37 (If Larger)
+n40: set_reg(Target=MineTarget)
+n41: set_reg(Target=@signal)
+n42: jump(Label=c_radar)  >POP (next) >n18 (jump→label)
 ```
 
-Notes on the wiring:
-- **4**: strictly `>100` — `If Smaller` and the `Equal` fallthrough both
-  reject via `STOP`, which (per the loop semantics in
-  `behavior_source_format.md`) pops back into the enclosing
-  `for_entities_in_range` and advances to the next candidate — the intended
-  meaning of a `STOP` reached inside a loop's dynamic scope, not a bug.
-- **6-8**: oversubscription check — cap of 2 total claimants is a tunable
-  design choice, not a derived constant.
-- **9-12**: the actual reservoir-sampling step.
-- **13**: `$BestRoll` starts at 0 and a real roll is always ≥1, so `==0`
-  unambiguously means "nothing survived the loop." Its `next` branch now
-  goes to **19** (renumbered from the original draft's **20**).
-- **14-15**: **14** broadcasts the claim via Signal, unchanged from the
-  original draft. **15** replaces the old `mine(Resource=$Best)` call
-  entirely — it writes `$Best` (a bare entity value, `num` untouched/0)
-  straight to the register-linked `$MineTarget`, propagating directly to
-  register 1 on every linked `c_miner`. `num=0` still reads as "unlimited"
-  (`REG_INFINITE`), the same as `mine` itself would have written. There are
-  no `Cannot Mine`/`Full` exec branches here — those belong to the `mine`
-  wrapper instruction specifically; a direct register write has no such
-  layer, and this design never depended on them.
-- **16-18**: unchanged in intent — still polling the node's own remaining
-  stock directly via `get_resource_num`, the only signal actually monotonic
-  with respect to *this node's* depletion (see the `mine`'s `Num` bullet in
-  "Native mechanics confirmed" for why a `CountItem`/`Num`-based
-  alternative was rejected). On hitting the floor, both `If Smaller` and the
-  `Equal` fallthrough now converge on **20** instead of the original
-  draft's three separate stubs.
-- **19**: the "no candidate found this round" backoff — renumbered from the
-  original draft's **20**, otherwise unchanged.
-- **20-21**: **the actual fix.** **20** explicitly clears the linked
-  `$MineTarget` — since it's a real register link, this hits the same plain
-  `if not reg1_num then ... return comp:SetStateSleep() end` shutdown path
-  (`components.lua:2259-2263`) any other register-empty case does, genuinely
-  halting the native auto-resume cycle instead of just abandoning it. **21**
-  then releases the Signal claim. Both exit paths (**19** and **21**) now
-  converge on **1** — the original draft's fastest path (`21 -> 2`) skipped
-  resetting `$BestRoll`, a real bug independent of the register-clearing
-  issue (see the revision note above), fixed here by routing every restart
-  through **1**.
+Notes on the design:
+- **`n4`**: `$Self` computed once at Program Start (not re-fetched per
+  candidate) and reused by both grid checks below.
+- **`n1`-`n17` ("Seek")**: reservoir-samples among faction entities
+  broadcasting `{id: Resource, num: -1}` (a `MagnifierSignal` building
+  signaling demand — see below; the reserved `num=-1` and "Exact" filter
+  mode are the fix for bug 3 above), rejecting any candidate not on the
+  drone's own power grid (`n7`, bug 4's fix — the actual grid-safety
+  constraint) before even rolling the reservoir sample. Waits 20 ticks and
+  retries if none found, otherwise travels there (`@goto`, arrival
+  tolerance 4) and waits until within distance 8 before proceeding — a
+  generous tolerance since the target is a building, not a point, and
+  footprint size varies.
+- **`n18`-`n32` ("Mine")**: the original reservoir-sampling/oversubscription
+  logic, with two additions — `Filter2=Resource` on the
+  `for_entities_in_range` call, filtering to nodes of the specific
+  requested item type (the same confirmed-working two-filter AND mechanism
+  `Mining Leader`'s `Check Emergency` sub already uses with
+  `v_own_faction`+`v_damaged` — **not independently confirmed** whether a
+  resource node's yielded item type is itself a valid filter value this way,
+  worth checking in-game before trusting it in a mixed-resource-type area)
+  — and the same `is_same_grid` rejection (`n22`) applied to resource-node
+  candidates, since even a local `Range=5` search could turn up something
+  just past the grid's edge. (This loop's own `@signal=$Node`/`Loop Signal`
+  oversubscription channel is entity-based, not id-based, so it was never
+  at risk of the same num=0 collision bug 3 describes — only the
+  building-seeking channel was.)
+- **`n33`-`n34`**: no candidate found locally → back to **Seek** (`n1`), not
+  a local wait-and-retry — the actual outer-loop integration the original
+  draft's "Known gaps" flagged as not yet built.
+- **`n35`-`n41`**: unchanged in intent from the original draft — broadcast
+  the claim, drive `MineTarget` directly (no `mine()` call), poll down to
+  the floor, then clear the link (genuinely halting the native auto-resume
+  cycle, not just abandoning it — see the original revision note below for
+  why this matters) and the signal claim.
+- **`n42`**: on finishing one node, loop back to **Mine** (`n18`) to try
+  another node in the same area *first*, only escalating to **Seek** if
+  `n33` finds nothing at all — avoids re-picking a building every time a
+  single node depletes.
 
-Rendered as Mermaid (STOP edges omitted, matching
-`scripts/render_examples.py`'s actual `to_mermaid` convention — real,
-present in the listing above, just nothing for the diagram to draw an arrow
-to):
+**Revision note (2026-07-10, preserved from the original draft):** an
+earlier version called the `mine` instruction once to establish the target
+and relied entirely on the confirmed native auto-store/auto-resume cycle
+from there. Indexing `data/` into a code knowledge graph and tracing
+`c_miner:on_update`'s actual stop conditions (`components.lua:2254-2536`)
+found a real bug: none of its four real stop conditions (register 1
+cleared, requested amount reached, inventory full, node destroyed) cover
+"the Program decided to abandon this node" — clearing only the Signal
+broadcast left the native auto-resume cycle mining the abandoned node,
+unsupervised, straight through the 100-unit floor and potentially to
+permanent depletion (`AddResourceHarvestItemAmount`'s `num > 0` guard,
+cited above). A `mine(Resource=nil)`-style explicit clear was investigated
+and rejected: `mine`'s only real "stop" path requires the raw compiled
+argument to be entirely *absent*, not confirmed producible from an
+unconnected pin in the visual editor; a `mine`-`Num`-threshold alternative
+was also considered and rejected (see the `Num`/`CountItem` bullet in
+"Native mechanics confirmed" above). The fix: drive `c_miner`'s register 1
+through a genuine register link (`MineTarget`, wired via the Link Editor
+directly to register 1 of every `c_miner`/`c_adv_miner` on the drone)
+rather than through `mine` at all — a technique the user confirmed using
+successfully before that session.
 
-```mermaid
-flowchart TD
-  n1["1: Copy (0 -> BestRoll)"]
-  n2["2: Loop Units (Range) [Filter=Resource]"]
-  n3["3: Get Resource Num"]
-  n4["4: Compare Number (Amt vs 100)"]
-  n5["5: Copy (0 -> Count)"]
-  n6["6: Loop Signal (match Node)"]
-  n7["7: Add (Count+1)"]
-  n8["8: Compare Number (Count vs 2)"]
-  n9["9: Random Number (1..1000)"]
-  n10["10: Compare Number (Roll vs BestRoll)"]
-  n11["11: Copy (Node -> Best)"]
-  n12["12: Copy (Roll -> BestRoll)"]
-  n13["13: Compare Number (BestRoll vs 0)"]
-  n14["14: Copy (Best -> @signal)"]
-  n15["15: Copy (Best -> $MineTarget) [register-linked to c_miner reg1]"]
-  n16["16: Wait Ticks (5)"]
-  n17["17: Get Resource Num (Best)"]
-  n18["18: Compare Number (Amt2 vs 100)"]
-  n19["19: Wait Ticks (20)"]
-  n20["20: Copy (nil -> $MineTarget)"]
-  n21["21: Copy (nil -> @signal)"]
+### The MagnifierSignal behavior (real BSF, compiled and validated)
 
-  n1 --> n2
-  n2 --> n3
-  n2 -->|Done| n13
-  n3 --> n4
-  n4 -->|If Larger| n5
-  n5 --> n6
-  n6 --> n7
-  n6 -->|Done| n8
-  n8 -->|If Smaller| n9
-  n9 --> n10
-  n10 -->|If Larger| n11
-  n11 --> n12
-  n13 -->|If Larger| n14
-  n13 -->|next| n19
-  n14 --> n15
-  n15 --> n16
-  n16 --> n17
-  n17 --> n18
-  n18 -->|If Larger| n16
-  n18 -->|If Smaller/Equal| n20
-  n19 -->|next| n1
-  n20 --> n21
-  n21 -->|next| n1
+Building-side companion to `MinerDrone`, closing the "author the
+`MagnifierSignal` building behavior" gap. Compiled, round-tripped, and
+collapses to a single mermaid component the same way `MinerDrone` does.
+Saved as `magnifier_signal.dcs` (workspace root) — not yet tested in-game.
+
 ```
+behavior MagnifierSignal(Resource):
+  desc: "Periodically check Resource nodes within range, tracking two INDEPENDENT conditions per node -- needs regen (below the 200 cap) and worth mining (above the 100 floor). Power (shutdown/turnon) follows the regen condition only; the drone-invitation signal (id=Resource, num=0) follows the mining condition only. Keeping these separate avoids a deadlock: an abundant, never-mined area (all nodes already above 200) still needs to invite drones even though it needs no regen at all."
+
+n1: label(Label=v_arrow_right, cmt="Poll nearby Resource nodes; manage power (regen cap) and drone invitation (mining floor) independently")
+n2: wait(Time=20)
+n3: set_reg(Value=0, Target=$NeedsRegen)
+n4: set_reg(Value=0, Target=$Mineable)
+n5: for_entities_in_range(Range=2, Filter=v_resource, Filter2=Resource, Unit=$Node)  >n11 (Done)
+n6: get_resource_num(Resource=$Node, Result=$Amt)
+n7: check_number(Value=$Amt, Compare=200)  >n9 (If Larger) >n9 (If Equal)
+n8: set_reg(Value=1, Target=$NeedsRegen)
+n9: check_number(Value=$Amt, Compare=100)  >POP (If Smaller) >POP (If Equal)
+n10: set_reg(Value=1, Target=$Mineable)  >POP (next)
+n11: check_number(Value=$NeedsRegen, Compare=0)  >n13 (If Larger)
+n12: shutdown()  >n14 (next)
+n13: turnon()
+n14: check_number(Value=$Mineable, Compare=0)  >n16 (If Larger)
+n15: set_reg(Target=@signal, cmt="Nothing worth mining -- stop broadcasting")  >n18 (next)
+n16: set_number(Value=Resource, Number=0, Result=$Sig)
+n17: set_reg(Value=$Sig, Target=@signal, cmt="Broadcast: come mine Resource here")
+n18: jump(Label=v_arrow_right)  >POP (next) >n1 (jump→label)
+```
+
+Notes on the design:
+- **`n6`-`n10`**: for every node in range (`Range=2`, matching the
+  Magnifier's own Chebyshev range — not independently confirmed that
+  `for_entities_in_range`'s range calculation treats a multi-tile
+  building's footprint the same way the Magnifier's own native range check
+  does), independently mark `$NeedsRegen` (any node `<200`) and `$Mineable`
+  (any node `>100`) — both can be true for the same node simultaneously
+  (e.g. a node at 150 both still benefits from regen *and* has material
+  worth mining right now), which is the point: they're unrelated questions.
+- **`n11`-`n13`**: power management, gated on `$NeedsRegen` only.
+- **`n14`-`n17`**: drone invitation, gated on `$Mineable` only, entirely
+  independent of whichever way the power decision went.
 
 ### Known gaps / not yet done
 
-- **Not compiled or validated against real Lua** — this is hand-authored
-  directly against `behavior_source_format.md`'s grammar, the way a human
-  would write source code, not run through `interpreter.py` or round-tripped
-  through `dcs_wire.py`. The reverse direction (parsing this text format back
-  into a real instruction table) doesn't exist yet, per
-  `behavior_source_format.md`'s own "Status" section — this doc predates
-  that tooling being built, and should be one of its first real test cases
-  once it exists.
-- **Fixed this session (previously: "Instructions 19-21 are redundant")**:
-  the original draft had three separate reset-and-restart entry points, one
-  of which (the fastest exit path) silently skipped resetting `$BestRoll`,
-  corrupting the next round's reservoir sampling — caught while tracing
-  `c_miner:on_update`'s stop conditions for the register-link fix (see the
-  revision note above). The current graph collapses this to two shared exit
-  instructions (20-21), both routed through step 1. Left in this list as a
-  record of what was wrong, not because it still needs doing. The deeper
-  issue this same tracing surfaced — the old draft never actually stopped
-  the native miner on abandonment at all, since it only ever cleared the
-  Signal broadcast, not register 1 — is also fixed, by driving register 1
-  through a genuine register link instead of through `mine` (see "Native
-  mechanics confirmed" above for the full trace).
-- **Not yet integrated with an outer building-selection/travel routine.**
-  This behavior handles "given you're already in a good area, pick and mine
-  nodes there" — it does not yet handle *which* area to travel to in the
-  first place. The intended integration point (per direct user design
-  discussion): a building-side Signal broadcast ("I have nodes >100 nearby"),
-  drones randomly pick among currently-signaling buildings, travel there,
-  and only then run this procedure — with instruction 13's "no candidate"
-  path (19) and the reset-and-restart tail (20-21) re-routed to that outer
-  loop's "check inventory / wait for store delivery / pick a building /
-  travel" logic instead of just looping locally. Not built yet.
-- **The oversubscription cap (2) and floor (100) are both hardcoded design
+- **Not tested in-game.** Both behaviors compile, round-trip byte-identical
+  through the real toolkit, and collapse to a single connected mermaid
+  component — a real structural validation, not just "didn't crash" — but
+  neither has been loaded and run in the actual client yet.
+- **The `Filter2=<item id>` resource-node type filter** (both behaviors) —
+  the two-filter-AND mechanism itself is confirmed working elsewhere
+  (`Mining Leader`'s `Check Emergency` sub), but whether a resource node's
+  own yielded item type is a valid filter value this way specifically is
+  not independently confirmed.
+- **The oversubscription cap (2) and floor (100) in `MinerDrone`, and the
+  100/200 thresholds in `MagnifierSignal`, are all hardcoded design
   choices**, not derived constants — reasonable starting points, worth
-  tuning empirically once this runs for real.
+  tuning empirically once these run for real.
+- **`MinerDrone`'s outer building-seek loop doesn't account for
+  building-level oversubscription** — multiple drones could pick the same
+  building simultaneously; nothing analogous to the per-node `Loop Signal`
+  claim-counting exists at the building level. Not built yet.
+- **`is_same_grid`'s coordinate-based fallback depends on the *calling*
+  drone's own position, not just the candidate's.** Confirmed from source
+  (`instructions.lua:4192-4211`): when either side isn't itself a
+  grid-connected entity, it falls back to comparing `GetPowerGridIndexAt`
+  for both positions. A drone that's currently *not* standing within any
+  grid's coverage (plausible mid-search, though the whole design intent is
+  to never actually leave grid) could see this check spuriously fail even
+  against a legitimate in-grid candidate. Not yet a problem in practice
+  (the drone should always be within its own grid when this check runs,
+  by construction) but worth keeping in mind if this ever needs debugging.
 
 ## What this exercise demonstrated about the toolset itself
 

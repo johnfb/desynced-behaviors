@@ -258,6 +258,62 @@ never entities — if any of them ever became entity-typed, the `num` would
 start adding instead of being preserved, corrupting the intended Tolerance
 value. Not yet tested: `mul`/`div` may or may not follow the same rules.
 
+### Reserved sentinel numbers: `REG_INFINITE` and `REG_NOT`
+
+**Confirmed 2026-07-11** via a real in-game test — a behavior with five
+plain `set_reg(Value=N, Target=Result)` calls for `N` = empty/0/1/
+`-2147483647`/`-2147483648`. Two things were checked, at two different
+layers, and are easy to conflate:
+
+- The **`Value` input pin's own widget in the editor**, left unconfigured
+  (the "empty" case), displays `""` — the widget's own "nothing entered
+  here" state, genuinely `nil`/`false` at that point, per the display
+  formatter below.
+- The **`Result` parameter's UI display, read back after actually running**
+  all five steps, showed `"0"`/`"0"`/`"1"`/`"≠"`/`"∞"` — i.e. the "empty"
+  and explicit-`0` cases are **indistinguishable once compiled and run**:
+  an omitted `Value` argument resolves through `Get()`'s own
+  `Tool.NewRegisterObject()` fallback to a real `num=0` (`NewValue`'s own
+  `num = num or 0` default), not `nil` — so the register it gets copied
+  into ends up holding a genuine zero, identical to the explicit-`0` case.
+  The blankness is an editor-time-only distinction; it never survives into
+  an actual runtime value.
+
+Cross-checked three independent ways against `ui/RegisterSelection.lua`'s
+own display and input-parsing code (the same widget renders both an
+argument's input pin and a plain register display, which is why both cases
+above go through the identical formatter):
+
+- The display formatter itself: `self.input.text = (not reg_num and "") or
+  (reg_num == REG_INFINITE and "∞") or (reg_num == REG_NOT and "≠") or
+  tostring(reg_num)` — pinning down exactly which two numbers get the
+  special symbols, and confirming the blank-string case is specifically
+  `not reg_num` (Lua nil/false), not some third distinct sentinel.
+- The text-input clamp boundary: `math.max(math.min(tonumber(...),
+  2147483647), REG_NOT+1)` — ordinary typed numbers clamp to
+  `[REG_NOT+1, 2147483647]`, i.e. both sentinels sit just outside the
+  normal user-typeable range, with `REG_NOT` the smaller-magnitude one.
+- The dedicated UI buttons' own tooltips: "Set infinite" / "Set not equal -
+  Double click to apply" (`ui/RegisterSelection.lua`'s `infbtn`/`notbtn`).
+
+**`REG_INFINITE = -2147483648`, `REG_NOT = -2147483647`** — both INT32-scale
+values, and notably **not** what `engine_stub.lua` originally guessed
+(`math.maxinteger`/`math.mininteger`, Lua's own 64-bit extremes): the real
+sentinels are far smaller in magnitude than 64-bit-int bounds, and
+`REG_NOT` is the *smaller-magnitude* one of the pair, not the larger — a
+guess based on "one should be a very large positive number, the other a
+very large negative number" gets the relative ordering backwards. This
+also retroactively confirms every real behavior this project has reviewed
+that writes the literal `-2147483648` into a `Range`/`Amount`-style
+argument (Mining Leader's `Check Emergency` sub, Fendersons Transport's
+`dopickup`) was genuinely writing `REG_INFINITE`, not just "a very negative
+number that happens to trip some fallback" — see `data/instructions.lua`'s
+own many `== REG_INFINITE`/`== REG_NOT` special-cases (`for_signal_match`,
+`for_number`, `check_number`, `combine_coordinate`, `get_distance`, item/
+resource-count instructions) for how pervasively the real engine treats
+these as meaningful, checkable sentinel values rather than "just very big
+numbers." `engine_stub.lua` has been corrected to match.
+
 ### Frame registers
 
 Exactly 4 exist (hardcoded bound in `library.lua`), addressed as negative
