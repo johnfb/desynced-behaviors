@@ -62,6 +62,36 @@ _BRANCH_RE = re.compile(r">\s*(\S+?)\s*\(([^)]*)\)")
 _SYMBOLIC_FRAME_REGS = {"goto": -1, "store": -2, "visual": -3, "signal": -4}
 
 
+def _unescape_string(s: str) -> str:
+    """Reverses render_text.py's `_escape_string` -- `\\\\`/`\\"`/`\\n`/`\\r` are the only
+    escapes that side ever produces, so anything else following a backslash is left as-is rather
+    than erroring (forward-compatible with a hand-typed escape this module doesn't know about
+    yet, matching this pipeline's general preference for permissive parsing over a hard error on
+    text a human edited by hand)."""
+    out = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = s[i + 1]
+            if nxt == "n":
+                out.append("\n")
+                i += 2
+                continue
+            if nxt == "r":
+                out.append("\r")
+                i += 2
+                continue
+            if nxt in ('"', "\\"):
+                out.append(nxt)
+                i += 2
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _mask_quotes(s: str) -> str:
     """Return a same-length version of `s` with every `"..."` span's contents (including the
     quote characters themselves) replaced by a neutral placeholder. Used only to decide *where*
@@ -145,7 +175,14 @@ def _split_num_suffix(s: str) -> tuple[str, int | float | None]:
 def parse_value(s: str, params: list[BsfParam]) -> BsfValue:
     s = s.strip()
     if s.startswith("$"):
-        return Var(s[1:])
+        rest = s[1:]
+        # render_text.py quotes a variable name that contains grammar-significant characters
+        # (parens, commas, brackets, quotes, a raw newline) as `$"escaped name"` instead of the
+        # bare `$name` form -- see `_var_needs_quoting`'s sibling docstring in render_text.py for
+        # why a bare name can't safely carry those characters.
+        if len(rest) >= 2 and rest.startswith('"') and rest.endswith('"'):
+            return Var(_unescape_string(rest[1:-1]))
+        return Var(rest)
     if s.startswith("@"):
         rest = s[1:]
         if rest in _SYMBOLIC_FRAME_REGS:
@@ -182,7 +219,7 @@ def _parse_hidden_value(s: str) -> object:
     if s == "True":
         return True
     if s.startswith('"') and s.endswith('"'):
-        return s[1:-1].replace('\\"', '"')
+        return _unescape_string(s[1:-1])
     if _NUM_RE.match(s):
         return _parse_number(s)
     return s

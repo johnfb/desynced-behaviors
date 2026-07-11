@@ -12,11 +12,43 @@ from .values import BsfValue, Coord, Fr, FrameReg, IdLit, Num, Param, Unknown, V
 
 _SYMBOLIC_FRAME_REGS = {-1: "goto", -2: "store", -3: "visual", -4: "signal"}
 
+# Characters that would corrupt the surrounding grammar if they landed unescaped in a bare
+# (unquoted) token -- parens/brackets throw off `_find_close_paren`/`_split_top_level`'s nesting
+# count, a comma would split the arg early, a quote would confuse `_mask_quotes`, and a raw
+# newline breaks parse_text.py's one-node-per-physical-line assumption outright. Found real,
+# in-the-wild-achievable cases of all of these 2026-07-10: a variable renamed to contain literal
+# BSF syntax (`A)  >POP (next)`) and a multi-line `cmt` -- both silently corrupted or crashed the
+# round trip before this fix (see reference_dangling_param_ref_copy_paste.md's sibling finding for
+# the sequence of events).
+_UNSAFE_VAR_CHARS = set('(),[]"\\\n\r')
+
 
 def _fmt_num(n: int | float) -> str:
     if isinstance(n, float) and n.is_integer():
         n = int(n)
     return str(n)
+
+
+def _escape_string(s: str) -> str:
+    """Used for both hidden free-text values (`cmt`/`sub`/`c`/`txt`) and a quoted variable name --
+    same escape scheme, same quoted-string surface form. Order matters: backslash must be escaped
+    before anything that itself introduces a backslash (the quote/newline/CR escapes below), or
+    those would be double-escaped on the next pass. `\\r`/`\\n` are kept as distinct escapes
+    (not folded into one) so a real `\r\n` round-trips byte-exact -- an earlier version collapsed
+    both to `\\n`, which round-tripped fine structurally but silently changed a comment's actual
+    line-ending bytes, caught by the fixture round-trip test comparing compiled wire tables."""
+    return (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
+
+
+def _var_needs_quoting(name: str) -> bool:
+    if not name or name != name.strip():
+        return True
+    return any(ch in _UNSAFE_VAR_CHARS for ch in name)
 
 
 def _param_name(slot: int, params: list[BsfParam]) -> str:
@@ -38,6 +70,8 @@ def render_value(v: BsfValue, params: list[BsfParam]) -> str:
     if isinstance(v, IdLit):
         return f"{v.id}[num={_fmt_num(v.num)}]" if v.num is not None else v.id
     if isinstance(v, Var):
+        if _var_needs_quoting(v.name):
+            return '$"' + _escape_string(v.name) + '"'
         return f"${v.name}"
     if isinstance(v, Param):
         return _param_name(v.slot, params)
@@ -101,13 +135,19 @@ def render_hidden_value(v: object) -> str:
     `txt`/`cmt`'s free text) -- simpler and more robust than trying to resolve `call`'s target
     to a bare name token (the one illustrative example in the spec does this, but that requires
     cross-referencing sibling `sub` blocks not yet parsed at that point in a single top-to-bottom
-    pass; deferred, noted for reconsideration)."""
+    pass; deferred, noted for reconsideration).
+
+    The quoted string escapes backslash/quote/newline (`_escape_string`) -- a first version of
+    this only escaped `"`, so a `cmt` containing a literal newline (an ordinary thing to type in
+    the real editor's comment box) split one node across multiple physical lines and crashed
+    parse_text.py outright (`SyntaxError: unmatched '('`), found 2026-07-10 building a
+    deliberately adversarial test fixture."""
     if isinstance(v, bool):
         return str(v)
     if isinstance(v, (int, float)):
         return _fmt_num(v)
     if isinstance(v, str):
-        return '"' + v.replace('"', '\\"') + '"'
+        return '"' + _escape_string(v) + '"'
     return repr(v)
 
 

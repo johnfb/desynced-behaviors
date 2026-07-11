@@ -28,6 +28,7 @@ REAL_DCS_FILES = [
     "keepvars_keep.dcs",
     "deprecated_haul_to_signal.dcs",
     "mining_leader.dcs",
+    "adversarial_text_stress.dcs",
 ]
 
 
@@ -39,6 +40,28 @@ def test_fixture_roundtrips_through_text(engine, fname):
     text = render_behavior(b1, argcache)
     b2 = parse_behavior(text, argcache)
     assert to_py(compile_behavior(engine, b1, argcache)) == to_py(compile_behavior(engine, b2, argcache))
+
+
+def test_var_name_containing_a_quote_and_fake_syntax_roundtrips(engine):
+    """The game lets a local variable be renamed to literally anything, including a `"` --
+    user-raised follow-up (2026-07-10) to the `adversarial_text_stress.dcs` fixture's own
+    `A)  >POP (next)` name: what if the name is `A")  >POP (next)` instead, with the quote
+    landing right before the fake syntax? Confirmed this already works: `_escape_string` escapes
+    the `"` to `\\"`, and `_mask_quotes` (used by `_find_close_paren`/`_split_top_level` to find
+    real structural boundaries) already recognizes a backslash-preceded `"` as an escaped quote,
+    not a real closing boundary -- so the whole fake-syntax tail stays masked as protected string
+    content all the way to the true closing quote, same as it would for a `cmt` containing the
+    same characters."""
+    tricky_name = 'A")  >POP (next)'
+    n1 = BsfNode(id="n1", op="set_reg", args={"Value": Num(1), "Target": Var(tricky_name)})
+    behavior = BsfBehavior(name="QuoteTest", nodes={"n1": n1}, order=["n1"])
+    argcache = ArgCache(engine)
+
+    text = render_behavior(behavior, argcache)
+    assert '$"A\\")  >POP (next)"' in text
+    b2 = parse_behavior(text, argcache)
+    assert b2.nodes["n1"].args["Target"].name == tricky_name
+    assert to_py(compile_behavior(engine, behavior, argcache)) == to_py(compile_behavior(engine, b2, argcache))
 
 
 def test_jump_label_annotation_literal_vs_dynamic(engine):

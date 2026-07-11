@@ -218,3 +218,22 @@ def test_direction_parameter(engine):
     (mmd,) = render_mermaid(_compare_number_demo(), ArgCache(engine), direction="LR")
     assert "flowchart LR" in mmd
     assert "flowchart TD" not in mmd
+
+
+def test_adversarial_fixture_html_escaped_not_raw(engine):
+    """Regression test for a real bug found 2026-07-10 building this deliberately adversarial
+    fixture (a variable renamed to an HTML/XSS payload, `<b onmouseover="alert('xss')">...`): an
+    earlier version of `_render_component` only replaced `"` with `'` in a node's label, leaving
+    the actual `<b onmouseover=...>` tag intact in the generated .mmd source -- a real
+    unescaped-HTML-in-generated-diagram issue for a pipeline whose own established workflow
+    renders .mmd through a real mermaid.js instance inlined into a browser-viewed Artifact (see
+    project memory). `html.escape` neutralizes the tag AND correctly protects the label's own
+    quote delimiters, so this checks both that the raw tag never appears and that its escaped
+    form does."""
+    argcache = ArgCache(engine)
+    raw = (DATA_DIR / "adversarial_text_stress.dcs").read_text().strip()
+    b = decompile_dcs(engine, raw)
+    diagrams = render_mermaid(b, argcache)
+    combined = "\n".join(diagrams)
+    assert "<b onmouseover=" not in combined
+    assert "&lt;b onmouseover=" in combined

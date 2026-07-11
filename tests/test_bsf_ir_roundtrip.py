@@ -27,6 +27,7 @@ REAL_DCS_FILES = [
     "keepvars_keep.dcs",
     "deprecated_haul_to_signal.dcs",
     "mining_leader.dcs",
+    "adversarial_text_stress.dcs",
 ]
 
 

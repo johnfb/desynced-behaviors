@@ -95,6 +95,8 @@ diagram or a real behavior, not just described in prose):
 
 from __future__ import annotations
 
+import html
+
 from .argcache import ArgCache, arg_pin_names
 from .ir import BsfBehavior
 from .render_text import _jump_label_targets, render_value
@@ -219,7 +221,13 @@ def _render_component(
     for node_id in component:
         node = b.nodes[node_id]
         args_str = ", ".join(f"{name}={render_value(v, b.params)}" for name, v in node.args.items())
-        label = f"{node_id}: {node.op}({args_str})".replace('"', "'")
+        # HTML-escaped, not just quote-substituted (a prior version only did `"`->`'`, which
+        # left a raw HTML tag in e.g. a maliciously-renamed variable's value intact in the
+        # generated .mmd source -- found 2026-07-10 building an adversarial test fixture whose
+        # whole point was to check for exactly this. Mermaid's own quoted-label syntax already
+        # expects HTML entities for special characters, so this is also the *correct* escaping,
+        # not just the safe one -- it doubles as protecting the label's own `"..."` delimiters.
+        label = html.escape(f"{node_id}: {node.op}({args_str})")
         node_lines.append(f'  n{node_id}["{label}"]')
 
         pins = [(pin, node.branches.get(pin)) for _, atype, pin in arg_pin_names(node.op, argcache) if atype == "exec"]

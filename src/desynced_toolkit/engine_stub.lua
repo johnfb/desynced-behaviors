@@ -166,6 +166,14 @@ function NewState()
 	return { counter = nil, stk = 0, mem = {}, revid = 1, limit = 1 }
 end
 
+-- `unlock`'s func checks `Map.GetSettings().block_unlocked_behaviors` (a server-side setting
+-- that can disable the instruction entirely) before touching `state.limit` -- stubbed to always
+-- report "not blocked" since this harness has no map/server-settings concept.
+Map = {}
+function Map.GetSettings()
+	return { block_unlocked_behaviors = false }
+end
+
 -- `jump`'s func scans `GetCachedBehaviorAsm(state.revid)` for a matching `label` instruction --
 -- the real compiled-asm array shape isn't reused here (that lives in `GetFactionBehaviorAsm`,
 -- data/library.lua, not yet integrated); this harness just needs `asm[i][1] == "label"` and
