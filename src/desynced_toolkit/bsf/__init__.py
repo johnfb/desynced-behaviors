@@ -11,6 +11,7 @@ from .ir import BsfBehavior, BsfNode, BsfParam
 from .parse_text import parse_behavior
 from .render_mermaid import render_mermaid
 from .render_text import render_behavior
+from .semantic_diff import semantic_diff_behaviors, semantic_diff_dcs
 
 __all__ = [
     "BsfBehavior",
@@ -23,6 +24,8 @@ __all__ = [
     "parse_behavior",
     "render_behavior",
     "render_mermaid",
+    "semantic_diff_behaviors",
+    "semantic_diff_dcs",
     "dcs_to_bsf",
     "bsf_to_dcs",
 ]

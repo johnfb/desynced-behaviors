@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from desynced_toolkit import LupaEngine, open_asset_source
-from desynced_toolkit.bsf import dcs_to_bsf, bsf_to_dcs
+from desynced_toolkit.bsf import bsf_to_dcs, dcs_to_bsf, semantic_diff_dcs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 DEFAULT_GAME_DATA_DIR = REPO_ROOT.parent / "desynced-game-data"
@@ -51,6 +51,13 @@ def main(argv: list[str] | None = None) -> int:
     p_compile.add_argument("--output", type=argparse.FileType("w"), default=sys.stdout)
     p_compile.add_argument("--type", default="C", help="wire type char to encode (default: C, a behavior/program)")
 
+    p_diff = sub.add_parser(
+        "semantic-diff",
+        help="two .dcs files -> stdout: human-readable diff, ignoring wire-position-only encoding differences",
+    )
+    p_diff.add_argument("old", type=argparse.FileType("r"), help="path to the earlier .dcs file")
+    p_diff.add_argument("new", type=argparse.FileType("r"), help="path to the later .dcs file")
+
     args = parser.parse_args(argv)
     engine = _make_engine(args.game_data)
 
@@ -63,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
         dcs_str = bsf_to_dcs(engine, bsf_text, args.type)
         args.output.write(dcs_str)
         args.output.write("\n")
+    elif args.command == "semantic-diff":
+        old_dcs = args.old.read().strip()
+        new_dcs = args.new.read().strip()
+        report = semantic_diff_dcs(engine, old_dcs, new_dcs)
+        print(report if report else "(no semantic differences)")
 
     return 0
 
