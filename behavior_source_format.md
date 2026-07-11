@@ -478,6 +478,61 @@ own independent `NODE_ID` namespace (matching how the real table addresses
 it as a separate array — a `call` target's node IDs are only ever meaningful
 within that specific sub-behavior's own graph, never the caller's).
 
+## Common idioms
+
+Patterns confirmed independently in two real, unrelated user-authored
+behaviors (`Mining Leader V4.0`'s `Async Radar` sub, `Fendersons Transport
+V2.0`'s `Async Transit` sub — reviewed 2026-07-10/11) rather than designed
+in the abstract — worth reaching for by name instead of re-deriving from
+scratch each time a new behavior needs the same shape.
+
+### Async progress/timeout via a shared `call` sub
+
+**Problem:** a top-level jump/label state machine needs to keep doing
+something over many ticks (move toward a target, poll a slow sensor) without
+blocking the rest of the loop (enemy checks, health checks, etc. still need
+to run every tick), and needs to give up after some bounded number of
+attempts rather than getting stuck forever.
+
+**Shape:** one `call`-based sub, parameterized by what the *caller* wants to
+happen on each of up to three outcomes — conventionally named something like
+`Finish Value` / `Continue Value` / `Timeout Value` — plus an in/out
+`Progress count` parameter the caller owns and persists (typically the same
+register the caller already uses for a different bookkeeping purpose
+elsewhere, e.g. a search-retry counter). The sub:
+
+1. Does one unit of real work (one step toward a target; one poll of a
+   slow-changing resource).
+2. Detects whether that step actually made progress (`Async Transit`:
+   distance-to-target changed since last call, using the target's own `num`
+   field as scratch storage to remember "last measured distance" across
+   calls; `Async Radar`: a scheduled tick has elapsed).
+3. If finished outright, returns `Finish Value`.
+4. If no progress for some threshold number of calls (`Async Transit`: 100,
+   "approx 20 seconds" per its own comment), resets `Progress count` and
+   returns `Timeout Value` — letting the caller give up and try something
+   else instead of waiting forever.
+5. Otherwise increments `Progress count` and returns `Continue Value`.
+
+The caller writes the sub's `Result` directly into its own dispatch register
+(`@visual` in both real examples — the same register already driving the
+top-level `jump(Label=@visual)` dispatch, so the sub's return value *is* the
+next state, no separate translation step needed) and loops back through
+`Begin` every tick regardless of outcome. **`Continue Value` is almost
+always just "whatever state we're already in"** (a bare self-reference, not
+a distinct label) — both real examples use this trick, since "keep doing
+what you were doing" doesn't need its own name.
+
+**When it's *not* worth it:** if the two things being unified only differ in
+which literal value gets passed to an already-shared sub call (e.g. two
+3-node `label`/`call`/`jump` sections whose only difference is which
+`Finish Value`/`Timeout Value` literal they pass), collapsing them into one
+shared label via a memory-array "what to do next" stack usually isn't a net
+win — the push/pop plumbing needed at every entry point can cost more
+instructions than the small duplication it removes. This idiom pays off when
+the *duplicated logic itself* is substantial (a whole search loop, not just
+which two labels get passed into an already-existing sub call).
+
 ## Loop-type instructions (`for_number`, `for_component`, `for_signal_match`, etc.)
 
 **Correction, caught by direct user feedback — an earlier draft of this

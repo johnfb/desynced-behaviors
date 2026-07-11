@@ -96,6 +96,7 @@ class Memory:
         self.state = state
         self._next_slot = 1
         self._vars: dict[str, int] = {}
+        self._literals: dict[tuple, int] = {}
 
     def _alloc(self) -> int:
         slot = self._next_slot
@@ -105,8 +106,22 @@ class Memory:
     def literal(
         self, num: int = 0, coord: tuple[int, int] | None = None, id_: str | None = None
     ) -> int:
+        """Cached by content (num, coord, id_) -- a literal slot is only ever read (`Get`), never
+        `Set`/`:Init()`'d in place the way a named variable's slot is (only `var()` slots are ever
+        used as an output/target), so sharing one slot across every occurrence of the same literal
+        is safe: nothing durably aliases it without going through `coerce`'s own copy first (see
+        `engine_stub.lua`'s `coerce` docstring). Without this, a long-lived loop re-executing the
+        same literal-valued instruction every iteration (e.g. `memory_insert`'s `Index=v_foo` arg,
+        re-translated fresh on every `_step()` call) leaked one new mem slot per iteration
+        forever -- harmless correctness-wise, unbounded memory growth otherwise. Found reviewing
+        the `adversarial_text_stress.dcs` Fibonacci fixture, whose loop runs indefinitely."""
+        key = (num, coord, id_)
+        cached = self._literals.get(key)
+        if cached is not None:
+            return cached
         slot = self._alloc()
         self.state.mem[slot] = self.engine.new_value(num, coord, id_)
+        self._literals[key] = slot
         return slot
 
     def var(self, name: str) -> int:

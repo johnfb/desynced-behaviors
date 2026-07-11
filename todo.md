@@ -6,30 +6,36 @@ Update this file directly as items are picked up/finished.
 
 ## Mining Leader / Follower review
 
-- [ ] **Fix `$Offset` reset asymmetry in Miner Follower V2.0's `v_arrow_down` empty-signal
-      path.** At `n30` (`is_empty($Signal)`), only the "Has Value" branch (→n32) clears
-      `$Offset` before entering `v_moving`. The implicit "Empty" fallthrough goes straight to
-      `n31` and reuses a stale `$Offset` instead of rolling a fresh one — same underlying bug
-      as the one already fixed in `v_resource`'s failure path (`n49`), just not applied to this
-      rarer trigger.
-- [ ] **Add a proactive leash-distance check before committing a candidate in `v_resource`.**
-      `n46-50` accepts whatever `get_closest_entity(Filter=$Signal)` returns and commits
-      immediately, with no `get_distance(Target=Target, Source=Forman, ...)` check against
-      `Max Range` first. The reactive per-tick check in `Begin` (`n13-14`) still eventually
-      catches an out-of-leash pick, but only after the follower has already started walking
-      toward it.
-- [ ] **Confirm intentionality of the Equal-case merge in `v_arrow_down`'s Max-Range check.**
-      Original `Miner V1.3.4`'s `n31` wired `If Smaller` and `If Equal` to different targets
-      (Equal got its own signal-tolerance approach). `Mining Follower V2.0`'s `n28` only wires
-      `If Smaller` — Equal now falls through with Larger to the same flat-tolerance approach.
-      Likely a harmless cleanup; confirm rather than assume.
-- [ ] **Wire the Async Radar sub into Mining Leader V3.2.** Design-complete and confirmed
-      working (register-4 fix, State/NextState mechanism) but never actually swapped in — the
-      whole motivation for building it was to fix the Search state's blocking-during-`scan`
-      problem.
-- [ ] **Review the Mining Hauler behavior.** User said they'd share it as a third reference
-      example alongside Leader/Follower; deferred to focus on leader/follower first, never
-      actually pasted. Blocked on the user providing the `.dcs`.
+- [x] **Fix `$Offset` reset asymmetry in Miner Follower V2.0's `v_arrow_down` empty-signal
+      path.** Resolved/superseded 2026-07-11: reviewed the current `Mining Follower V2.0` (BSF
+      decompile via the new CLI) node-by-node. The out-of-range dispatch (`is_empty($Signal)`)
+      still has the same shape (`Empty` → straight to the formation-following entry, `Has Value`
+      → clears `$Offset` first) but `$AnchorPos` is unconditionally recomputed fresh on every
+      entry regardless of branch, so a stale `$Offset` only ever affects *which* relative slot
+      within the formation you reuse, not correctness of the follow itself. Not worth a code
+      change; no longer tracked as an open bug.
+- [x] **Add a proactive leash-distance check before committing a candidate in `v_resource`.**
+      Confirmed 2026-07-11: still no proactive check ahead of the reactive per-tick one, same as
+      described — reviewed and judged an acceptable, minor inefficiency (one extra tick or two
+      before self-correcting) rather than something worth the extra instructions. Not pursuing.
+- [x] **Confirm intentionality of the Equal-case merge in `v_arrow_down`'s Max-Range check.**
+      Confirmed 2026-07-11: current `Mining Follower V2.0`'s distance `check_number` still merges
+      `Equal` with the `Larger` ("get closer") branch. Reviewed in context and it's the correct,
+      sensible simplification — no separate handling needed for exact-distance-match.
+- [x] **Wire the Async Radar sub into Mining Leader V3.2.** Done — the behavior reviewed this
+      session is `Mining Leader V4.0`, which has `Async Radar` fully wired in as a real `sub`
+      (component auto-detection with per-tier polling cadence, `State`/`NextState` hand-off into
+      the main state machine). Round-tripped clean through the BSF pipeline; only issue found in
+      the whole behavior was a misplaced comment (cosmetic, not fixed in-repo since this project
+      doesn't hold a copy of the player's own behavior to edit).
+- [x] **Review the Mining Hauler behavior.** Done 2026-07-11: `Fendersons Transport V2.0`
+      pasted and reviewed node-by-node (150 nodes, 1 sub). State machine keyed directly off
+      `@visual` (doubles as both icon and state register); shared `Async Transit` sub used by
+      emergency/pickup-transit/dropoff-transit; dual-purpose signal protocol (`num==0`=
+      available for pickup, `num>0`=wants delivery). Two of my own branch-direction misreads
+      caught and corrected against raw wire data before concluding (`match(...,v_droppeditem)`'s
+      fallthrough-vs-declared-arg wiring; `dodrop`'s default `c=2` auto-subtracting the target's
+      current stock, ruling out an apparent over-delivery issue at `n146`). No bugs found.
 
 ## Magnifier / drone-swarm design (root task, not started)
 

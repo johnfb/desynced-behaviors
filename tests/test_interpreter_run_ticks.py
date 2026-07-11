@@ -41,6 +41,23 @@ def test_fibonacci_fixture_via_run_ticks(engine):
         assert interp.read_param(1).num == want
 
 
+def test_literal_mem_slots_dont_grow_unboundedly(engine):
+    """Regression test for a real inefficiency found reviewing this same fixture: `Memory.literal`
+    used to allocate a brand-new `state.mem[]` slot on every single translation of a literal-
+    valued arg, even when re-translating the exact same literal on every pass of an infinite loop
+    (this fixture's `Index=v_color_green` arg, re-read fresh on every `_step()` call). Caching by
+    content in `lua_runtime.py`'s `Memory.literal` caps this."""
+    raw = (DATA_DIR / "adversarial_text_stress.dcs").read_text().strip()
+    _, table = engine.decode_dcs(raw)
+    interp = Interpreter(engine, table)
+
+    interp.run_ticks(6 * 5)
+    slots_after_5 = interp.mem._next_slot
+    interp.run_ticks(6 * 15)
+    assert interp.mem._next_slot == slots_after_5  # unchanged after 15 more iterations
+    assert interp.read_param(1).num == 17711  # 20th term -- caching didn't change the result
+
+
 def test_memory_array_push_is_an_independent_copy(engine):
     """Regression test for a real engine_stub.lua bug found building the fixture above: `coerce`
     used to return the SAME Lua table when given an already-constructed Value, instead of a copy
