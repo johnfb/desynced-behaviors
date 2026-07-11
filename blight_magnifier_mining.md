@@ -198,9 +198,15 @@ to real seconds, not for the relative comparisons.
   `comp:RequestStateMove` directly with the target and range, and does
   **not** touch `FRAMEREG_GOTO` at all — writing the register directly is a
   genuinely different, parallel mechanism, not a documented alias for
-  calling `domove`. User also noted `@goto` has additional semantics when
-  the "transport route" option is enabled — not yet investigated, flagged
-  for later if it becomes relevant.
+  calling `domove`. **Resolved 2026-07-11, via source, no in-game test
+  needed**: "transport route" isn't a special mode of `@goto` itself — it's
+  a separate flag (`entity.logistics_transport_route`, toggled by the
+  `enable_transport_route`/`disable_transport_route` instructions,
+  `instructions.lua:4398-4422`) whose tooltip (`data/data.lua:237`) says it
+  plainly: "Continually pick up from Goto and deliver to Store. Requires
+  both Goto Register and Store Register to be set." With it enabled, the
+  unit shuttles automatically between `@goto` (pickup) and `@store`
+  (delivery) instead of just moving to `@goto` once.
 - **Drones can be produced by a plain Robotics Factory**, not only by
   drone-port-family components — `c_robotics_factory = 100` is already
   listed as an equally-valid crafting station in both `f_drone_miner_a`'s and
@@ -297,6 +303,29 @@ to real seconds, not for the relative comparisons.
   correct per-entity iterator is **"Loop Units (Range)"**
   (`for_entities_in_range`, `instructions.lua:869-897`) with
   `Filter=v_resource`.
+- **`c_miner`'s register 2 is a live, read-only status readout: the entity
+  currently being mined plus its remaining resource amount** — user-reported
+  2026-07-11, confirmed against source. The component's own schema
+  (`components.lua:2205`) declares it `{ read_only = true, tip = "Resource
+  mining" }`; it's written every time mining starts or advances a step
+  (`components.lua:2396`, `:2519`) as `comp:SetRegister(2, { entity = target,
+  num = target:GetRegisterNum(FRAMEREG_GOTO) })` — a resource node stores its
+  own remaining amount in its `FRAMEREG_GOTO` register (confirmed by the
+  adjacent `target:SetRegisterNum(FRAMEREG_GOTO, amount - 1)` decrement at
+  `components.lua:2517`), so register 2's `num` field is always the node's
+  current remaining count, live, with no separate polling instruction needed.
+  This is distinct from register 1 (the mine-*target*-setting register
+  `MinerDrone` drives via the Link Editor, described above) — register 2 is
+  read-only telemetry about whatever register 1 is currently driving the
+  component to mine. **Possible simplification for `MinerDrone`, not yet
+  acted on**: the current design tracks remaining amount by separately
+  calling `get_resource_num` against a remembered `$Best` entity (`n34`/`n35`
+  in the current graph) — reading register 2 directly (`get_reg`/component
+  register read against this drone's own `c_miner`) could replace that
+  separate poll with the component's own live value instead, since it's
+  already being kept current by the engine on every mining tick. Left as a
+  follow-up, not redesigned here without confirming register-read access
+  from a Program to a component's own register works the way this assumes.
 
 ### The MinerDrone behavior (real BSF, compiled and validated)
 
@@ -458,9 +487,13 @@ Notes on the design:
   `for_entities_in_range` call, filtering to nodes of the specific
   requested item type (the same confirmed-working two-filter AND mechanism
   `Mining Leader`'s `Check Emergency` sub already uses with
-  `v_own_faction`+`v_damaged` — **not independently confirmed** whether a
-  resource node's yielded item type is itself a valid filter value this way,
-  worth checking in-game before trusting it in a mixed-resource-type area)
+  `v_own_faction`+`v_damaged`. **Confirmed 2026-07-11** via a real in-game
+  test (a bot next to a single Laterite Ore node, `for_entities_in_range`
+  count with `Filter2` set to Laterite Ore → `1`, an unset `Filter2` → `1`
+  — an empty `Filter2` acts as "no filter," not "match nothing" — and
+  `Filter2` set to the wrong item (Metal Ore) → `0`, proving it's a real
+  applied constraint rather than being silently ignored) — a resource
+  node's yielded item type genuinely is a valid `Filter2` value)
   — and the same `is_same_grid` rejection (`n22`) applied to resource-node
   candidates, since even a local `Range=5` search could turn up something
   just past the grid's edge. (This loop's own `@signal=$Node`/`Loop Signal`
@@ -548,15 +581,13 @@ Notes on the design:
 
 ### Known gaps / not yet done
 
-- **Not tested in-game.** Both behaviors compile, round-trip byte-identical
-  through the real toolkit, and collapse to a single connected mermaid
-  component — a real structural validation, not just "didn't crash" — but
-  neither has been loaded and run in the actual client yet.
-- **The `Filter2=<item id>` resource-node type filter** (both behaviors) —
-  the two-filter-AND mechanism itself is confirmed working elsewhere
-  (`Mining Leader`'s `Check Emergency` sub), but whether a resource node's
-  own yielded item type is a valid filter value this way specifically is
-  not independently confirmed.
+- **Not tested in-game as complete behaviors.** Both behaviors compile,
+  round-trip byte-identical through the real toolkit, and collapse to a
+  single connected mermaid component — a real structural validation, not
+  just "didn't crash" — but neither has been loaded and run as a whole in
+  the actual client yet. (The `Filter2` item-type mechanism both rely on
+  *has* now been confirmed directly, see above — this gap is about the
+  full behaviors, not that specific building block.)
 - **The oversubscription cap (2) and floor (100) in `MinerDrone`, and the
   100/200 thresholds in `MagnifierSignal`, are all hardcoded design
   choices**, not derived constants — reasonable starting points, worth
@@ -575,6 +606,24 @@ Notes on the design:
   against a legitimate in-grid candidate. Not yet a problem in practice
   (the drone should always be within its own grid when this check runs,
   by construction) but worth keeping in mind if this ever needs debugging.
+
+### Future idea, not designed or built: a Mining Leader for slot-less Human Miner Mechs
+
+User idea, 2026-07-11: Human Miner Mechs have no Internal socket for a behavior controller, so
+unlike `MinerDrone` they can't run a Program of their own. Checked against source for
+plausibility rather than left as pure speculation: `set_reg_remotely`/`get_reg_remotely`
+(`instructions.lua:6849` on) normally require the source and target to be physically touching
+(`GetAdjacentFactionEntityOrSelf`, `instructions.lua:302`), *except* when the calling
+component's `def.key == "autobase"` — that branch instead requires only that both ends share
+the same `faction:GetPowerGridIndexAt(...)` grid index, no adjacency at all. `c_autobase`
+(`components.lua:4116`) *is* the "AI Behavior Controller" component (Internal, alien tech,
+`key = "autobase"`). So a structure or unit carrying an AI Behavior Controller plus a Power
+Field (`c_power_relay`, `components.lua:1007`, extends grid coverage) could run a Program that
+scans idle Human Miner Mechs sharing its grid and remotely drives their registers via
+`set_reg_remotely` — no adjacency needed, only shared grid membership. Confirmed mechanically
+plausible from source; not designed in detail (what register to drive on the mech, how it picks
+targets, oversubscription) or built. Tracked in `todo.md` under "Magnifier / drone-swarm
+design."
 
 ## What this exercise demonstrated about the toolset itself
 

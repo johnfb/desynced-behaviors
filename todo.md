@@ -63,6 +63,20 @@ Update this file directly as items are picked up/finished.
 - [ ] **Tune the hardcoded oversubscription cap (2) and floor (100) in `MinerDrone`**
       empirically once it's actually running — currently just reasonable-guess constants, not
       derived.
+- [ ] **(Idea, not started) Mining Leader/Foreman for slot-less Human Miner Mechs.** User idea
+      2026-07-11: Human Miner Mechs have no Internal socket for a behavior controller, so they
+      can't run a `MinerDrone`-style Program of their own. Mechanism now grounded in source
+      (`instructions.lua:302`, `GetAdjacentFactionEntityOrSelf`): `set_reg_remotely`/
+      `get_reg_remotely` normally require the target to be physically touching, *except* when the
+      calling component's `def.key == "autobase"` — that branch instead only requires the same
+      `GetPowerGridIndexAt` grid index on both ends, no adjacency at all. `c_autobase`
+      (`components.lua:4116`) *is* the "AI Behavior Controller" component (Internal, alien tech).
+      So: a small structure/unit fitted with an AI Behavior Controller plus a Power Field
+      (`c_power_relay`, `components.lua:1007`) extending grid coverage to a squad of Human Miner
+      Mechs could run a Program that scans idle mechs on the same grid and remotely writes mining
+      targets into their registers via `set_reg_remotely` — no physical adjacency needed, only
+      shared grid membership. Not designed in detail or built — just confirmed mechanically
+      plausible.
 
 ## Combat Squad (`combat_squad_spec.md`)
 
@@ -76,10 +90,10 @@ Update this file directly as items are picked up/finished.
       spec-only pseudocode.
 - [ ] **Test `beacon.dcs`/`beacon2.dcs` in-game.** Round-trip-verified against the codec, but
       per `CLAUDE.md`'s own note, "Not yet tested in-game."
-- [ ] **Confirm the §2.4 self-healing anchor lookup assumption empirically.** Assumes destroyed
-      entities drop out of `GetEntitiesWithRegister` queries the same way they drop out of
-      `Loop Units (Range)` — consistent with how every other faction-wide query in this
-      codebase behaves, but not directly observed in a running game yet.
+- [x] **Confirm the §2.4 self-healing anchor lookup assumption empirically.** Confirmed
+      2026-07-11: `for_entities_in_range` scan of a single resource node returned `Result=1`
+      before depletion, `Result=0` on an identical rescan right after the node was mined to
+      exactly 0 — destroyed/depleted entities really do drop out of faction-wide scans.
 - [ ] **(Future extension, explicitly out of scope so far)**: grow the Beacon into a
       multi-slot `c_autobase` building that auto-produces/replenishes squad units, taking
       advantage of `c_autobase`'s exemption from the ordinary remote-write adjacency
@@ -126,9 +140,27 @@ Update this file directly as items are picked up/finished.
       `render_examples.py`). Currently exercised only by direct manual runs and one real live
       edit — not covered by `uv run pytest tests/` at all, a gap explicitly flagged in
       `CLAUDE.md` as "worth closing before relying on them for more than ad hoc use."
-- [ ] **Investigate `@goto`'s "transport route" option semantics.** User noted `@goto` has
-      additional behavior when this option is enabled on the target; not yet investigated,
-      flagged for later if it becomes relevant.
+- [ ] **Require explicit pin wiring in BSF text for any op with 2+ declared exec pins** (user
+      idea, 2026-07-11, prompted by hitting the loop-`Done`-omission bug twice in one session —
+      see `feedback_bsf_loop_done_pin_omission` memory). Currently an omitted pin silently means
+      "physically next," which is safe/unambiguous for a single-pin op but easy to get wrong for
+      a multi-pin one (forgetting a second pin exists because the first one is visible and looks
+      complete). Proposed design: for any op with only one exec pin, keep today's behavior
+      unchanged (omission still fine, matches how `render_mermaid.py` already only bothers
+      labeling a pin when there's more than one). For any op with 2+ exec pins, require every one
+      of them to be explicitly written as one of `POP` / a label / a new `NEXT` token (meaning
+      "physically next in this behavior's own `order`," spelled out instead of invisible).
+      Touches `render_node`/`parse_node` (a new `NEXT` token in the parser) — real grammar
+      change, not a wire-format change (the wire keeps its own compact-encoding omission
+      regardless, per the earlier "Node identity vs. wire position" decision). Breaks every
+      existing fixture's expected text in `test_bsf_text_roundtrip.py` (mechanically fixable,
+      but every test string changes). Not started — deliberately deferred to keep focus on the
+      ambiguity-survey work in progress.
+- [x] **Investigate `@goto`'s "transport route" option semantics.** Resolved 2026-07-11 via
+      source, no in-game test needed: it's not a `@goto` mode at all, it's the separate
+      `logistics_transport_route` flag (`enable_transport_route`/`disable_transport_route`
+      instructions) that makes a unit continuously shuttle between `@goto` (pickup) and
+      `@store` (delivery) instead of moving once. See `blight_magnifier_mining.md`.
 
 ## Dev tooling
 

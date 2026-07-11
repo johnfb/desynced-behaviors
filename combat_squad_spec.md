@@ -370,9 +370,13 @@ No `SQUAD_BAND` constant is needed — the Radio band is just the Beacon's own e
   pick). If several are reported and squads happen to be near each other, they may still land on
   the same pick by chance.
 - **The self-healing anchor lookup (§2.4) assumes destroyed entities drop out of
-  `GetEntitiesWithRegister` queries the same way they drop out of `Loop Units (Range)`.** That's
-  consistent with how every other faction-wide query in this codebase behaves, but hasn't been
-  observed directly in a running game — worth confirming empirically once this is built.
+  `GetEntitiesWithRegister` queries the same way they drop out of `Loop Units (Range)`.**
+  **Confirmed empirically 2026-07-11**: a `for_entities_in_range` scan of a single resource node
+  returned `Result=1` before the node was mined out and `Result=0` on an identical rescan
+  immediately after it was depleted to exactly 0 — the entity dropped out of the faction-wide scan
+  the moment it stopped existing, with no stale/dangling hit. Same query family as
+  `GetEntitiesWithRegister`, so this assumption now rests on direct observation, not just
+  consistency-with-other-queries reasoning.
 
 ## 8. Future extension (not built here)
 

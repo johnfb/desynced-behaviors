@@ -581,6 +581,27 @@ loop / return to a caller / restart from Program Start — never a bare
 `state.returns`, at the moment that specific `false` executes) — not a fixed
 property of the instruction's position in the flat array.
 
+**⚠️ Authoring gotcha, hit twice for real (`MinerDrone`, then a throwaway
+test behavior one turn after fixing it there — see
+`reference_bsf_duplicate_arg_name_silent_clobber`-adjacent memory for the
+pattern): never omit a loop's `Done` pin when hand-authoring BSF, even
+though it "should" be safe to omit whenever the loop's per-iteration body
+happens to sit physically right after it — which is the natural, common way
+to write a loop, making this the *default* way to get it wrong, not an edge
+case.** Omission always resolves to "physically next `NODE_ID` after this
+instruction" — which is the body's own first instruction, never "after the
+loop as a whole," regardless of how many instructions the body actually
+spans. Landing there when the loop is genuinely `Done` means: (1) the body
+executes one extra, spurious time with no valid per-iteration value, and
+(2) whatever `POP`/dead-end already ends that body now fires with the
+loop's own block frame *already popped* (that's what `Done` firing means),
+so it falls through to the *next* enclosing scope instead — at top level,
+a full Program Start restart, silently looping forever once per tick if the
+behavior is locked (no `unlock()`), never tripping any instruction-count
+safety cap since only unlocked mode has one. Always give `Done` its own
+explicit target — even a bare `exit()` node that does nothing else — never
+leave it to fall through into the body.
+
 **Decided against building any static resolution of what a pop's
 destination actually is, even as an optional nicety — not merely
 deferred.** An earlier pass floated the reachability-heuristic idea sketched

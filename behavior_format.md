@@ -256,7 +256,19 @@ into `Spot`): this relies on the "coordinate ⊕ bare number" rule above, and
 holds because `Offset`/`AnchorPos`/`Spot` are always plain coordinates,
 never entities — if any of them ever became entity-typed, the `num` would
 start adding instead of being preserved, corrupting the intended Tolerance
-value. Not yet tested: `mul`/`div` may or may not follow the same rules.
+value.
+
+**`mul`/`div` confirmed 2026-07-11 to follow the identical rules** (a real
+in-game test: `mul(To=coord(10,20)[num=5], Num=3)` → `coord(30,60)[num=5]`;
+`div(From=coord(90,60)[num=7], Num=3)` → `coord(30,20)[num=7]` — bare-number
+broadcast onto both components, `num` preserved untouched, exactly like
+`add`/`sub`; `mul(To=v_resource[num=5], Num=3)` → `v_resource[num=15]`;
+`div(From=v_resource[num=90], Num=3)` → `v_resource[num=30]` — id passes
+through unchanged, `num` scales normally, same shape as `add`/`sub`'s
+"adds/subtracts normally" rule extended to multiply/divide). Not derivable
+from source (same engine-native `Value` operator overload mechanism as
+`add`/`sub`, `data/instructions.lua:1867-1888`), so this was a genuine
+open question, not just an unverified formality — now closed.
 
 ### Reserved sentinel numbers: `REG_INFINITE` and `REG_NOT`
 
@@ -313,6 +325,33 @@ own many `== REG_INFINITE`/`== REG_NOT` special-cases (`for_signal_match`,
 resource-count instructions) for how pervasively the real engine treats
 these as meaningful, checkable sentinel values rather than "just very big
 numbers." `engine_stub.lua` has been corrected to match.
+
+**A second, related sentinel behavior — dangling entity references — confirmed by direct
+in-game observation 2026-07-11, mechanism not traceable in Lua source (native/engine-side):**
+when an entity referenced by a register or variable is destroyed, that reference doesn't error
+or silently keep pointing at stale data — the `entity` field reads back `nil` and the `num`
+field reads back `REG_INFINITE`. `GetRegister`/`GetRegisterData` themselves are native (no Lua
+definition anywhere in this extract — confirmed by grep), so unlike the widget-formatter trace
+above, this can't be pinned down to a specific Lua line; it's taken on the user's direct
+gameplay observation, same evidentiary tier as other engine-native mechanics in this project
+(e.g. the DCS clipboard codec before it was cross-checked against the disassembly).
+
+**Working hypothesis (user's, not yet independently tested), stated precisely because it's a
+sharper and more useful claim than "destruction clears registers":** this isn't necessarily an
+eager write-on-destroy pass over every register that happens to reference the dying entity —
+it may instead be what you get whenever something tries to *read* a value whose entity
+reference no longer resolves, regardless of when the entity actually died. Under this framing,
+`entity=nil, num=REG_INFINITE` is a general "this reference no longer resolves" read-time
+result, not a one-time mutation applied at the moment of destruction. Consistent with
+`REG_INFINITE` already being the engine's general "unresolvable/unbounded" sentinel elsewhere
+(see above) — reusing it here means an ordinary `check_number` against a since-destroyed
+target's register resolves as "definitely larger than anything" without needing a dedicated
+is-this-still-alive check. Not yet confirmed which framing (eager-clear-on-destroy vs.
+lazy-resolve-on-read) is actually correct — they're behaviorally identical for the common case
+of reading shortly after destruction, and distinguishing them would need a targeted test (e.g.
+checking whether a *stale, unread* register still reports the entity's last real value if
+queried indirectly some other way before ever being read post-destruction). Flagging the
+distinction here so it isn't accidentally overwritten by the simpler-sounding claim later.
 
 ### Frame registers
 
