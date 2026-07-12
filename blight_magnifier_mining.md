@@ -454,6 +454,24 @@ yet applied to the checked-in `library/hauler.dcs`.
 
 ### Native mechanics confirmed this session (source-cited, several corrected mid-session)
 
+- **`get_distance` against a multi-tile entity (e.g. a building) measures to
+  its closest tile, not a center point** — user-confirmed 2026-07-12, not
+  visible from source (`get_distance` just delegates to the native
+  `Map.GetDistance`). Bit us in `MinerDrone`: a loose building-approach distance
+  check (`Compare=8`) combined with a narrower node-search range
+  (`Range=5`) meant the drone's "arrived" state could be satisfied near one
+  edge of a large building while nodes on the *opposite* side (footprint
+  width + magnifier range further away) sat outside the search range —
+  fixed by tightening the dock distance to `Compare=1` and widening the
+  search to `Range=8`, regardless of which side the drone approaches from.
+  **Contrast, also user-confirmed:** `get_location(Unit=X)` gives a
+  *different* point — the entity's center tile (`ent.location`, itself a
+  native/opaque property per `get_location`'s own Lua), rounding **up** in
+  each dimension when the true center falls between two tiles (any even
+  footprint dimension, e.g. 2x2/2x3). So `get_distance` straight on an
+  entity and `get_distance` on a coordinate obtained via `get_location`
+  first are genuinely different measurements for the same multi-tile
+  target — closest-tile vs. center-tile — not interchangeable.
 - **Mining recipe rates** (`data/items.lua:661-673`, `blight_crystal`):
   `c_miner` = 50 ticks/unit, `c_adv_miner` = 25 ticks/unit (Advanced Miner
   Drone is 2x faster) — always prefer the Advanced Miner Drone. Stack size
