@@ -62,22 +62,20 @@ Update this file directly as items are picked up/finished.
       found and fixed across two review passes during this rebuild (both rooted in an
       intermediate `$NextState` variable later designed away entirely — a value read before
       ever being written, corrupting dispatch on a later completion).
-- [ ] **Finish Observer's Task 1 (sensing loop).** Substantial progress 2026-07-13: authored,
-      compiled, and round-tripped clean through the BSF pipeline (first as a round-robin
-      cascade, then the user rebuilt it in-game directly into a priority-lock design — found
-      something at a higher-priority stage means stay locked on it (enemy) or reset back to
-      the top (damaged/infected), never advance past it; only an empty result advances one
-      step down the ladder). One real bug found during review and fixed: the Dropped stage's
-      found/empty branches didn't share the cycle-completion bookkeeping, so a found dropped
-      item silently skipped publishing `$CycleFoundAny`/incrementing `$CycleId` and left
-      `$CycleAccum` contaminated for a later pass — fixed by making the bookkeeping the shared
-      unconditional tail both branches fall into. `observer_redesign.md`'s Task 1 section is
-      now up to date with the actual implemented design, not the earlier round-robin plan.
-      Not yet tested in-game (the fixed `.dcs` was handed back via clipboard, awaiting import).
-- [ ] **Design and implement Observer's Task 2 (movement loop).** Not started. Spec is in
-      `observer_redesign.md` (enemy avoidance via visible-range `get_closest_entity` +
-      stealth-aware standoff, `Config` entity/coordinate/empty classification, follow logic,
-      wait-for-a-clean-cycle random-stepping) but depends on Task 1 actually running first.
+- [x] **Finish Observer's Task 1 (sensing loop) and Task 2 (movement loop).** Done
+      2026-07-13, checked in as `library/observer.dcs`. Task 1: authored, then the user
+      rebuilt its state transitions in-game into a priority-lock design (found something at a
+      higher-priority stage means stay locked on it (enemy) or reset back to the top
+      (damaged/infected), never advance past it; only an empty result advances one step down
+      the ladder enemy→damaged→infected→dropped) — one real bug found and fixed (the Dropped
+      stage's found/empty branches didn't share cycle-completion bookkeeping). Task 2:
+      authored, then substantially rewritten by the user in-game — `value_type`-based
+      `Config` classification (verified against source: empty and `Coord` correctly share one
+      fallthrough), genuine directional-bias random walking (extrapolating the last observed
+      movement vector, closing a gap the original plan left open since `scout_rand_range`
+      can't be reused directly), tuned standoff constants (14→20 unstealthed, 5→10 stealthed)
+      — reviewed clean, no bugs found. `observer_redesign.md` fully updated to match the
+      actual implemented design in both tasks' sections.
 
 ## Local behavior-library storage (`desynced_toolkit`)
 

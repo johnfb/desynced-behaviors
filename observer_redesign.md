@@ -2,19 +2,23 @@
 
 Design doc for reworking `library/observer.dcs`, written before touching any `.dcs`/BSF —
 same "spec first" convention `blight_magnifier_mining.md` and `combat_squad_spec.md` used.
-Not yet implemented.
 
-**Status (resumed 2026-07-13):** The blocker that paused this doc — `Async Radar`'s
-filter/result attribution ambiguity — is resolved. The interface was redesigned
+**Status (2026-07-13): implemented, reviewed, and checked in as `library/observer.dcs`.**
+Both tasks are done. Getting here required resolving a real blocker first: `Async Radar`'s
+filter/result attribution ambiguity, fixed by redesigning its interface
 (`State*`/`NextState` replaced by `Tag*`/`Pending Tag*`/`Next Tag`, deliberately with **no
 result-queueing of any kind** — an earlier "queue-and-delay-one-tick" fix was rejected by the
-user as a workaround, not a solution), reviewed twice against the real
-`async_radar.dcs`/`mining_leader.dcs` files the user built directly, and two real bugs found
-during review were eliminated by a further rebuild of Mining Leader itself (collapsing its
-several `Async Radar` call sites down to one shared call in its `Begin` hub). See "`Async
-Radar` subroutine" below for the final interface and "Validated against a real caller" for
-how the Mining Leader rebuild works. Task 1 (sensing loop)'s design below has been updated to
-the new interface and is unblocked. Task 2 (movement loop) still hasn't been started.
+user as a workaround, not a solution) — see "`Async Radar` subroutine" below for the final
+interface and "Validated against a real caller" for how `library/mining_leader.dcs` was
+rebuilt around it, catching two real bugs along the way. Task 1 (sensing loop) was then
+authored, compiled, and — after the user rebuilt its state transitions directly in-game into
+a priority-lock cascade rather than the round-robin this doc originally sketched — reviewed
+and had one real bug fixed (the Dropped stage's cycle-completion bookkeeping wasn't shared
+between its found/empty branches). Task 2 (movement loop) was authored, then substantially
+rewritten by the user directly in-game (`value_type`-based `Config` classification, genuine
+directional-bias random walking, tuned standoff constants) and reviewed clean, no bugs found.
+See each task's own section below for the actual implemented design, not just the original
+plan.
 
 ## Background
 
@@ -238,70 +242,67 @@ flat round-robin.
 
 ## Task 2: movement loop
 
-Gated first by `unit_type(Unit=Self)`: **buildings/construction sites do nothing** (matches
-the user's spec directly). Everything below only runs if self is a bot.
+**Implemented, reviewed, no bugs found** — authored first per the plan below, then
+substantially rewritten by the user directly in-game. The rewrite is better than the original
+plan in real ways, not just a re-styling; documented here against the actual final shape.
 
-**User-confirmed priority rule, restated directly (2026-07-13):** avoidance and follow "do
-not pay attention to the scan cycle" — both run unconditionally, every tick. Only random
-movement is gated on a full clean cycle ("we scanned for all four and no result, only then
-does a random movement become something we might do"). Priority 1/2 below already match this
-as originally designed; see Task 1's own note above for why Task 1's priority-lock redesign
-makes "`$CycleId` advanced, `$CycleFoundAny` false" line up exactly with "all four checked,
-nothing found" with no extra work on either side.
+**Structural change**: wrapped in the same `sequence()`-per-tick shape Task 1 already uses,
+with the Bot-only gate implemented via the `POP`-vs-`last()` distinction rather than a plain
+branch — `unit_type(Unit=Self)`'s `Bot` pin routes to `POP` (ends the sequence's first stage
+*normally*, so it auto-advances into the stage holding Task 2's own logic), while
+Building/Construction/the default all fall through to an explicit `last()` (breaks straight
+to the tag dispatch, skipping Task 2 entirely) — reusing block-stack mechanics rather than an
+`if`/`else`. `$Self` and `$Vis` (visibility range, `get_unit_info(c=2)`) are now computed
+*once* at init rather than refetched per use — safe for `$Self` (never changes); a real,
+accepted tradeoff for `$Vis` (could go stale if a Visibility Range module gets
+added/removed mid-run — harmless if it does, just a slightly-off wander radius, not a
+functional break).
 
-**Priority 1 — enemy avoidance, every tick, unconditionally:**
-`get_closest_entity(Filter 1=v_enemy_faction)` — this instruction natively uses
-`owner.visibility_range`, i.e. *actual visible range*, not radar range, exactly the
-distinction the user wants. If it returns an entity: overwrite that value's `num` field with
-the desired keep-away distance via `set_number`, then `moveaway_range(Target=that)`.
-Confirmed from `data/instructions.lua`: `moveaway_range` already no-ops once the target is
-farther than its `num`-field range, so this is safe to call every single tick with no extra
-"am I already far enough" state of its own.
+**`Config` classification now uses `value_type`, not `is_empty` + `unit_type`.** Checked
+`data/instructions.lua:737` since it's load-bearing: `value_type` returns without touching
+`state.counter` when the value is genuinely empty (`if not value or value.is_empty then
+return end`) — a separate, independently-omittable outcome from its declared type pins
+(Item/Unit/Component/Tech/Value/Coord). Since neither the empty case nor `Coord` is
+explicitly annotated in the real node, both default to the same positionally-next node —
+confirmed this is the identical "two independently-omitted pins converge on one fallthrough"
+mechanism already relied on elsewhere in `async_radar.dcs`, not a coincidence. So "empty or
+coordinate" and "unit" correctly split into the two branches below with one instruction.
 
-The keep-away distance itself is **stealth-dependent** (see "Resolved decisions" #1 below):
-most mobile units running this will be unarmed (socket spent on Long-Range Radar instead)
-and most are planned to carry the alien Stealth mechanic (in this data's actual naming —
-`c_alien_stealth` / `c_integrated_stealth`, not literally called "Cloak" anywhere in
-`data/components.lua`), which the user confirmed suppresses enemy engagement entirely
-regardless of distance — but not splash damage from fights the unit merely wanders into. So:
-check both stealth component ids once per tick (or cache like `Radar`'s own detection, since
-stealth doesn't change while running); stealthed → small splash-safety buffer; unstealthed →
-the full engagement-range-based standoff.
+**Priority 1 — enemy avoidance, every tick, unconditionally, checked *first* via a jump but
+written physically last in the file (stylistic, not a priority change):**
+`get_closest_entity(Filter=v_enemy_faction)` (native `visibility_range`, not radar range). If
+found: `has_like_component(Component=c_alien_stealth)` (family-match, same mechanism as
+`Async Radar`'s own radar-family detection) picks the standoff distance — **tuned in-game to
+10 (stealthed) / 20 (not stealthed)**, revised up from this doc's original 5/14 placeholder
+guesses — then `moveaway_range`. Finding an enemy skips Priority 2/3 entirely for the tick.
 
-**Priority 2 — only if no enemy in visible range**, classify `Config`:
-`is_empty(Config)` first, then (if not empty) `unit_type(Unit=Config)` — any of the
-Bot/Building/Construction pins firing means Config resolved to a real entity (follow
-target); the "No Unit" fallthrough with `Config` non-empty means it's a bare coordinate.
-
-- **Config is an entity** → follow it, reusing the exact idiom today's `observer.dcs`
-  already uses for this case (`get_distance(Target=Config)`, `check_number` against
-  `Config`'s own `num` field, `domove`/`moveaway_range` split at that range) — this directly
-  confirms the user's "maybe the num part is the desired max range?" guess; it's already the
-  established convention in this same file for exactly this purpose.
-- **Config is empty or a coordinate** → the "wait for a clean cycle" logic:
-  - A persistent `$WaitTarget` (`= $CycleId + 1`) is (re-)armed any time we're not already
-    waiting on one. This is what makes "if we arrived mid-cycle, wait for *another* full
-    cycle" work: we never act on a cycle that was already partway done when we started
-    caring.
-  - While `$CycleId < $WaitTarget`: do nothing (besides Priority 1).
-  - Once `$CycleId` reaches `$WaitTarget`, consult `$CycleFoundAny` for the cycle that just
-    finished:
-    - **found something** → stay put; re-arm `$WaitTarget = $CycleId + 1` and keep
-      re-checking every subsequent cycle (so we naturally start moving again once whatever
-      we're broadcasting eventually gets handled and a later cycle comes back clean).
-    - **found nothing** → take one random step, then re-arm `$WaitTarget` the same way (so
-      we don't re-roll again until another full clean cycle, mirroring today's `is_moving()`
-      gate against restarting a walk mid-move):
-      - `Config` empty: `random_coordinate(Coordinate=Self, Range=<explore radius>)`,
-        same as today's random-walk case.
-      - `Config` a coordinate: `random_coordinate(Coordinate=Config, Range=<step radius>)`,
-        then `Config := Result`. **Note:** `scout_rand_range` can't be reused directly for
-        this despite the user's "similar to scout range" framing — confirmed from source,
-        it drives `MoveTo` internally and has no output register at all, so there's nothing
-        to write back into `Config`. `random_coordinate` centered on `Config` is the closest
-        equivalent that actually exposes a coordinate; it won't reproduce
-        `scout_rand_range`'s directional-bias term (biasing further in whatever direction
-        the last step already went), just a uniform-random offset within range.
+- **`Config` is a unit** → follow it, using the exact distance-vs-`Config`'s-own-`num`-field
+  idiom already established in this file: `If Smaller` (too close) → `moveaway_range`;
+  `If Equal` → do nothing; default/`Larger` (too far) → `domove`.
+- **`Config` is empty or a coordinate** → the "wait for a clean cycle" gate, using
+  `$WaitTarget` exactly as planned (armed to `$CycleId + 1` the first time via
+  `is_empty($WaitTarget)`, compared against `$CycleId` once armed, re-armed after every
+  outcome) — then, once a clean cycle is confirmed (`$CycleFoundAny` empty):
+  - **`Config` empty** → `random_coordinate(Coordinate=$Self, Range=$Vis, Result=@goto)` —
+    plain undirected wander, written straight to `@goto` (no intermediate temp needed,
+    `Result` accepts any writable target directly). **`Config` never gets set in this branch**
+    — confirmed intentional, not a gap: an empty `Config` is a stable, permanent "just wander
+    around self" mode, mirroring the original `observer.dcs`'s own behavior of never
+    "graduating" the empty case into a coordinate one. Directional bias (below) is only
+    available once `Config` is deliberately seeded with a starting coordinate.
+  - **`Config` is a coordinate** → real directional-bias wandering, closing the gap this doc
+    previously flagged as unclosed (`scout_rand_range` itself can't be reused, still true —
+    it drives movement internally with no output register). Computes
+    `$A = 2·$D − Config` where `$D = get_location(Self)` (current position) and `Config`
+    (the position recorded *before* the previous step) — extrapolating the last observed
+    movement vector forward — then `random_coordinate(Coordinate=$A, Range=$Vis,
+    Result=@goto)` randomizes around that biased point. **`Config` is then set to `$D`
+    (current position *before* this move), not the newly computed destination** — checked
+    this deliberately since it looks backwards at first: comparing next cycle's position
+    against "where I was before this step" gives a real observed-movement vector; storing the
+    destination instead would compare "where I am" against "where I just said I'd go," which
+    collapses to ~zero once movement actually completes. Grounding the bias in observed
+    motion rather than intended motion is also more robust to interrupted/blocked movement.
 
 ## Resolved decisions
 
@@ -316,15 +317,15 @@ target); the "No Unit" fallthrough with `Config` non-empty means it's a bare coo
      Speed`/socket counts — there's no "weapon range" stat exposed there, and a *weapon's*
      range lives on the item (`stats_item[2]`, via `get_item_info`), which would need
      enumerating equipped items to find — a real separate chunk of work, not a one-line
-     substitution, and mostly moot anyway since these units are typically unarmed. Building
-     this now as a **fixed constant around the user's own "10-12 tiles, not exactly sure"
-     estimate — defaulting to 14 tiles** (a few tiles of margin over the observed range,
-     since it's stated as approximate and erring toward more standoff is cheap for a
-     non-combat sensing unit). Tune directly once you've watched it in play.
-   - **Stealthed** (`c_alien_stealth` or `c_integrated_stealth` equipped): a much smaller
-     **splash-safety-only buffer, defaulting to 5 tiles** — there's no generic way to query
-     an *enemy's* splash/blast radius from here, so this is a flat guess pending in-game
-     tuning, not derived from anything.
+     substitution, and mostly moot anyway since these units are typically unarmed. Built as a
+     fixed constant, originally a 14-tile placeholder guess — **tuned in-game to 20 tiles**
+     once actually watched in play.
+   - **Stealthed** (`c_alien_stealth` or `c_integrated_stealth` equipped, detected via
+     `has_like_component` — the same family-match mechanism `Async Radar` uses for its own
+     radar detection, reused here for the stealth family): a much smaller
+     **splash-safety-only buffer** — there's no generic way to query an *enemy's*
+     splash/blast radius from here, so this was always a flat guess pending in-game tuning,
+     not derived from anything; originally 5 tiles, **tuned in-game to 10 tiles**.
    - Weapon-range-if-armed (for the rare armed unit) remains flagged as a deferred follow-up
      refinement rather than silently dropped.
 2. **Ping throttling** — explicit minimum interval, not just hardware cadence. A persistent
@@ -334,7 +335,10 @@ target); the "No Unit" fallthrough with `Config` non-empty means it's a bare coo
    cadence would otherwise ping far more often than "every second or two").
 3. **Explore/step radius** — `get_unit_info(c=2)` ("Visibility Range") reused for both the
    `Config`-empty (walk from `Self`) and `Config`-coordinate (step from `Config`) cases,
-   matching what today's `observer.dcs` already does for its one random-walk case.
+   matching what today's `observer.dcs` already does for its one random-walk case — now
+   cached once at init rather than refetched (see Task 2's own section). The
+   `Config`-coordinate case additionally got genuine directional bias in the final
+   implementation (see Task 2's section) — closing a gap this item originally left open.
 4. **Re-arm granularity after "found something"** — wait for another *full* 4-stage cycle
    (not just the next single stage) before re-checking, consistent with the "wait for a full
    cycle" rule used when first arriving at this branch.
