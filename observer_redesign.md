@@ -4,24 +4,17 @@ Design doc for reworking `library/observer.dcs`, written before touching any `.d
 same "spec first" convention `blight_magnifier_mining.md` and `combat_squad_spec.md` used.
 Not yet implemented.
 
-**Status (paused 2026-07-12):** Task 1 (sensing loop) authoring was in progress and is
-paused, not abandoned. While working out the exact node-by-node calling convention against
-`Async Radar`, traced a real correctness issue: `Async Radar`'s hardware path (one-poll
-pipeline lag — a completion's `Result` reflects the *previous* call's filters) and its
-fallback path (`get_closest_entity`, zero lag — reflects the *current* call's filters) can't
-both be attributed correctly by a caller using one fixed rule, and the caller has no visible
-way to tell which path just ran. A same-call-lag fix confined to `async_radar.dcs`'s fallback
-branch (queue-and-delay-one-tick, matching the hardware path's lag) was worked out in detail
-and is captured in this session's history, but **the user considers this a workaround, not a
-fix**, and wants to reconsider `Async Radar`'s calling interface itself before building
-anything further on top of it — see `todo.md`'s new "Async Radar interface redesign" item for
-the actual next step and why it now also involves `library/mining_leader.dcs` (the only
-current caller). Task 1's design in this doc (the 4-stage `S_ENEMY`→`S_DAMAGED`→`S_INFECTED`→
-`S_DROPPED` cascade, `$CycleId`/`$CycleFoundAny` handoff to Task 2, etc.) is still believed
-correct at the *architecture* level — what's blocked is the low-level mechanics of correctly
-consuming a single poll result once the interface changes, so expect this doc's Task 1
-section to need a revisit once that's settled, not a rewrite from scratch. Task 2 (movement
-loop) was never started.
+**Status (resumed 2026-07-13):** The blocker that paused this doc — `Async Radar`'s
+filter/result attribution ambiguity — is resolved. The interface was redesigned
+(`State*`/`NextState` replaced by `Tag*`/`Pending Tag*`/`Next Tag`, deliberately with **no
+result-queueing of any kind** — an earlier "queue-and-delay-one-tick" fix was rejected by the
+user as a workaround, not a solution), reviewed twice against the real
+`async_radar.dcs`/`mining_leader.dcs` files the user built directly, and two real bugs found
+during review were eliminated by a further rebuild of Mining Leader itself (collapsing its
+several `Async Radar` call sites down to one shared call in its `Begin` hub). See "`Async
+Radar` subroutine" below for the final interface and "Validated against a real caller" for
+how the Mining Leader rebuild works. Task 1 (sensing loop)'s design below has been updated to
+the new interface and is unblocked. Task 2 (movement loop) still hasn't been started.
 
 ## Background
 
@@ -42,154 +35,158 @@ parallelism.
 
 ## `Async Radar` subroutine — what it actually does
 
-Decompiled signature: `Async Radar(Radar*, Next Tick*, Filter 1, Filter 2, Filter 3,
-Result*, State*, NextState)`. `Radar`/`Next Tick`/`State` are read *and* written every call,
+**Signature**: `Async Radar(Radar*, Next Tick*, Filter 1, Filter 2, Filter 3, Result*, Tag*,
+Pending Tag*, Next Tag)`. `Radar`/`Next Tick`/`Pending Tag` are read *and* written every call,
 so the caller must own them as its own persistent locals (a `call`ed subroutine's own
 internals are always freshly allocated per call — this can't hold state internally).
 
 What it does, per call:
 
-1. **Auto-detect and cache the equipped radar/sensor component**, only once (cheap
-   `is_equipped`/`check_number` check first; skips straight to step 2 if `Radar` already
-   holds a valid, still-equipped component). Priority: `c_radar` > `c_small_radar` >
-   `c_portable_radar` > `c_radar_array` (common radars), falling back to `c_radar_suite` >
-   `c_alien_sensor` > `c_alien_sensor_wide` > `c_sensor_spike_comp` (advanced sensors) only
-   if none of the common ones are equipped. Each match stores the component id **with its
-   own real hardware refresh cadence baked into the value's `num` field**:
-   `c_radar[num=10]`, `c_portable_radar[num=2]`, `c_radar_array[num=10]`,
-   `c_radar_suite[num=10]`, `c_alien_sensor[num=5]`, `c_alien_sensor_wide[num=3]`,
-   `c_sensor_spike_comp[num=5]`. If nothing at all is equipped, the whole call is a no-op
-   (pops out immediately, doesn't even reach the polling logic below).
+1. **Auto-detect and cache the equipped radar/sensor component** — unchanged by the interface
+   redesign below; full mechanism (priority cascade, `has_like_component` gate, Scout Radar
+   exclusion) is in "No-radar fallback" further down.
 2. **Poll gate**: reads `simulation_tick()` and compares to `Next Tick`; if the hardware's
    own cadence hasn't elapsed yet, the call is a cheap no-op (pops out).
-3. Once the cadence has elapsed: **reads register 4 (Result) off the actual radar
-   component** — i.e. whatever the *engine itself* found on its own last internal scan,
-   using whatever filters were written into registers 1-3 on the *previous* call — into the
-   `Result` out-param. Then **writes the caller's current `Filter 1/2/3` into registers
-   1-3** (arming the hardware for its *next* internal cycle), sets
-   `Next Tick = now + Radar's own num`, and finally sets `State := NextState`.
+3. **Hardware path, once the cadence has elapsed**: reads register 4 (`Result`) *live*,
+   directly off the physical radar component — whatever the engine itself computed using
+   filters armed on the *previous* completing call. In the same step, `Tag := Pending Tag`
+   (its value *before* this call) — since `Pending Tag` only ever gets updated on a
+   completing call, to whatever `Next Tag` was submitted *then*, this correctly labels
+   `Result` with the identity of the filters that actually produced it, no matter how many
+   non-completing calls happened in between. Then writes the caller's current `Filter 1/2/3`
+   into registers 1-3 (arming the *next* cycle), sets `Next Tick = now + Radar's own num`,
+   and finally `Pending Tag := Next Tag` (queuing this call's own identity for whichever
+   future completion delivers *its* result).
+4. **Fallback path (no radar)**: `Result` computed synchronously via
+   `get_closest_entity(Filter 1/2/3)` from *this same call's* own filters — zero lag — so
+   `Tag := Next Tag` directly, no `Pending Tag` involvement needed at all.
 
-So it's a real producer/consumer handshake against engine-native hardware state, not a
-polled wrapper around `scan`: the calling behavior never blocks, and the actual scan cost
-happens on the component's own schedule. The load-bearing consequence for Task 1's design:
-**`State` becoming equal to whatever `NextState` you last passed is the only reliable
-"a fresh Result just landed" edge** — there's a one-poll pipeline lag (the `Result` you read
-back corresponds to the filters you set on the *previous* completed call, not the current
-one), so Task 1 needs a "did `State` change since last tick" edge-check, not just a
-level-check.
+### Interface redesign, and why (superseded an earlier `State*`/`NextState` design)
 
-### Gap: units with no radar at all
+The original design used `State*`/`NextState` as a bare completion echo (`State := NextState`
+on every completing call) — fine for a caller with exactly one outstanding query, ambiguous
+for one that cycles through several (like Task 1's planned enemy→damaged→infected→dropped
+cascade below), because the hardware path has a **one-poll pipeline lag** (`Result` reflects
+the *previous* call's filters) while the fallback path has **zero lag** (reflects *this*
+call's own filters) — and a caller has no way to observe which path just ran, so no single
+fixed attribution rule is correct for both.
 
-Many of the mobile units this runs on won't have any radar/sensor component equipped at
-all (radar-less by design, or the socket is spent on something else). The original `scan`
+Two fixes were explored and rejected before landing on the current design:
+
+- **Queue-and-delay the fallback path by one call** (a `Pending Result*` param, artificially
+  matching the hardware path's lag so one uniform rule works everywhere) — technically
+  correct, but **the user rejected it outright as a workaround, not a fix**: it fabricates a
+  delay that doesn't naturally exist, purely to paper over the interface. It also had a real,
+  independently-disqualifying cost: *every* call site sharing a `Radar` would need to
+  consistently thread `Pending Result` through, including fire-and-forget calls that don't
+  care about the output at all, or silently fork the queue and corrupt whichever call site
+  actually relies on it.
+- **A memory-array-based queue/stack**, keyed by an `Index` value (the user's own proposal) —
+  workable, but memory arrays are global across the *entire call stack*, not scoped per call
+  (see [[reference_memory_arrays_global_across_calls]] / `behavior_format.md`'s "Top-level
+  envelope" section), so this leans directly into a real collision-risk surface, and costs
+  every caller a `Memory Set` or two before every single call — even callers (like Mining
+  Leader, see below) that never actually need multi-way disambiguation at all.
+
+**The insight that resolved it**: only the *identity* needs shadowing in software — the
+actual result data never does, because it's already sitting in the physical hardware
+register (or computed fresh, in fallback mode), and reading it live is always correct.
+`Pending Tag` is a single small id value, not a copy of the result data, which is why it
+sidesteps both rejected designs' costs: no artificial delay (the register itself *is* the
+naturally one-step-behind state — reading it directly is enough), and no global/keyed
+storage (an ordinary persistent local, passed exactly like `Radar`/`Next Tick` already are).
+
+**A clean, useful property of this shape**: since parameters are passed by reference, a
+caller with only one outstanding query at a time (like Mining Leader) can pass the *same*
+variable for both `Tag` and `Pending Tag` at a call site — the internal `Tag := Pending Tag`
+step becomes a genuine no-op (same storage, not "the second write wins" — they were never two
+different values to begin with), so the net behavior reproduces the *original*
+`State`/`NextState` echo exactly. A caller needing real disambiguation (multiple different
+in-flight queries, like Task 1) just passes two separate variables instead. Same interface,
+no separate "mode" — the caller decides per call site.
+
+**Dispatch idiom**: react to a delivered `Tag` via `jump(Label=Tag)` — a label whose
+`(id, num)` literally *is* the expected tag value — not `compare_item`/`check_number`
+branching. `jump`'s own "no label matched" behavior already falls through naturally to
+"nothing changed, keep waiting," so this costs no more instructions than the label needs
+anyway, and stays consistent with this project's established jump/label idiom (Mining
+Leader's own `v_broken[num=1]`/`[num=10]`, `HexIndexOf`'s region dispatch) rather than
+introducing a more verbose pattern just for this one case.
+
+### No-radar fallback: `has_like_component` + Scout Radar exclusion
+
+Many of the mobile units this runs on won't have any radar/sensor component equipped at all
+(radar-less by design, or the socket is spent on something else). The original `scan`
 instruction handles this natively — no radar equipped silently degrades to a visible-range
-search, equivalent to `get_closest_entity`. `Async Radar` as built doesn't: if none of the 8
-known component ids match, it dead-ends out of the sequence with `Radar` still at its
-default (empty/0) value, `State`/`Result` never touched. Called every tick from Task 1,
-`State` would just never change — Task 1's edge-detect would never fire, and the entire
-priority cascade would stall forever on `S_ENEMY` for any radar-less unit.
+search, equivalent to `get_closest_entity`. Fixed **inside `async_radar.dcs`** (any future
+caller of this subroutine gets the fallback for free, no two calling conventions).
 
-Fixing this **inside `async_radar.dcs`** (per the user's preference, and it's the right call
-architecturally — any future caller of this subroutine gets the fallback for free, and
-Task 1/Observer doesn't need two different calling conventions).
-
-**Revised approach (superseding two earlier drafts of this section — first a cached
-"confirmed none" sentinel, then an 8-`is_equipped`-OR-chain gate):** there's a real, purpose-
-built instruction for exactly this, `has_like_component` (`data/instructions.lua:3812`),
-initially missed. It does genuine family/prototype matching, not exact-id matching like
-`is_equipped`:
-
-```lua
-basecomp = GetId(in_comp)
-basedef  = data.components[basecomp]
-baseid   = (basedef and basedef.base_id) or basecomp
-findcomp = entity:FindComponent(baseid, true)   -- true = match by base_id, not exact id
-```
-
-Every component definition gets a `base_id` set at registration time
-(`Comp:RegisterComponent`, `data/components.lua:169`: `comp.base_id = self.base_id or
-self.id or id`), which propagates down the entire inheritance chain. Tracing the real
-registrations: `c_portable_radar` is the root (`Comp:RegisterComponent(...)`, so its own
-`base_id` = itself); `c_small_radar` derives from it; `c_radar`, `c_radar_array`,
-`c_radar_suite`, `c_alien_sensor_wide`, `c_sensor_spike_comp` all derive from `c_small_radar`;
-`c_alien_sensor` derives from `c_portable_radar` directly. **All 8 end up with the identical
-`base_id = "c_portable_radar"`.** Since `has_like_component` resolves *whatever you pass* to
-its `base_id` before searching, it doesn't matter which of the 8 you pass as `Component` —
-`has_like_component(Component=c_radar)` and `has_like_component(Component=c_sensor_spike_comp)`
-ask the exact same question: "does this unit have anything from the `c_portable_radar`
-family equipped." (Same mechanism independently confirmed via `reveal_if_stealthed`'s
+There's a real, purpose-built instruction for "does this unit have anything from a component
+family equipped," initially missed: `has_like_component` (`data/instructions.lua:3812`). It
+does genuine family/prototype matching, not exact-id matching like `is_equipped` — it
+resolves whatever `Component` you pass to that component's own `base_id` (set at
+`RegisterComponent` time, propagating down the whole inheritance chain), and since all 8
+radar/sensor component ids share the identical `base_id = "c_portable_radar"`, it doesn't
+matter which one you pass — they all ask the same family-membership question. (Same
+mechanism independently confirmed via `reveal_if_stealthed`'s
 `owner:FindComponent("c_stealth", true)` for the Stealth family — not a one-off.)
 
-This replaces the whole 8-way OR-chain with **one instruction call**:
+**As implemented in `async_radar.dcs`** (built directly by the user, reviewed node-by-node
+against real engine semantics): `has_like_component(Component=c_portable_radar)` gates entry
+from *outside* the existing detection `sequence()` block — has to sit outside, since
+`sequence`'s `Last` stage always runs once you're inside the block at all, so there's no way
+to enter and skip the real hardware-register logic from inside it. `Failed` → jumps straight
+to the fallback (`Radar`/`Next Tick` untouched). Inside the sequence, if all 8 known
+component checks fail, `set_reg(Target=Radar)` with no `Value` writes a genuinely empty
+register into `Radar` (confirmed against `InstGet`: an unwired arg resolves via
+`Tool.NewRegisterObject()`, a real empty register with `is_empty=true`, not merely a numeric
+0). The hardware branch then opens with `is_empty(Value=Radar)` — `Has Value` → real polling;
+empty → falls straight into the *same* fallback node the gate's own `Failed` pin uses. One
+fallback implementation, two paths converging on it cleanly, no duplicated logic.
 
-- **New gate, `has_like_component(Component=c_radar)` (or any of the 8 — arbitrary; picking
-  `c_radar` since that's the one these units are actually planned to carry), as a wrapper
-  *around* the entire existing `sequence()` block (today's `n1`-`n40`), not inside it.** It
-  still has to sit outside, not as a new stage within the existing sequence — `sequence`'s
-  `Last` stage always runs once you're inside the block at all (confirmed from
-  `behavior_format.md`'s block semantics: every wired stage runs to its own dead end, "and
-  finally jumps to `Last`" unconditionally), so there's no way to enter the sequence and skip
-  `Last`'s real hardware-register logic from inside it. Gating from outside sidesteps that
-  entirely. `has_like_component` declares one `exec` pin, `Failed` (fires when nothing in the
-  family is found); the default/fallthrough is the *found* case.
-  - **Default/fallthrough (found)** → fall through into the existing `sequence()` block
-    exactly as it is today, completely unmodified. (The old Stage "Second"/"Third" cascade
-    still needs its own per-type `is_equipped` checks afterward — `has_like_component` only
-    answers "is something in the family equipped," not *which* specific one, and the
-    specific id + its own cadence `num` still needs picking and caching into `Radar`.)
-  - **`Failed`** → the fallback: `get_closest_entity(Filter 1/2/3)` straight into `Result`,
-    `State := NextState`, and stop — **`Radar`/`Next Tick` are never written**, so there's
-    nothing to undo once a radar actually gets equipped; the very next call's gate simply
-    starts passing and control flows into the untouched original logic, which sees `Radar`
-    still at its untouched default and detects+caches fresh, same as a first-ever call. No
-    extra state, no reset needed, no periodic-recheck timer required — the "recheck" *is*
-    just every tick's gate.
+**One real gap, resolved as intentional:** the component family is bigger than the 8 ids in
+the cascade — `c_scout_radar` (`data/components.lua:4270`) shares the same `base_id` but was
+missed originally, and has an incompatible 2-register layout (`Filter`/`Result` only, not the
+other 7's `Filter1/2/3`/`Result`) that can't be added to the shared register-index logic
+without its own special case. A unit with *only* Scout Radar equipped passes the family gate
+but fails the detection cascade, converging on the same visibility-range fallback (graceful,
+not a stall — just a silent loss of Scout Radar's actual 30-tile range). The user confirmed
+Scout Radar was always meant to be unsupported and documented this directly in
+`async_radar.dcs`'s own `desc` field and inline `cmt`s, so it's self-documenting in the
+`.dcs` rather than only recorded here.
 
-This preserves the exact same call contract (`Filter 1-3` in, `Result`/`State` out, edge-
-detect on `State`) for every caller regardless of which path fired, so Task 1 needs no
-awareness of whether the unit actually has a radar, this tick or ever.
+### Validated against a real caller: Mining Leader V4.0
 
-### As actually implemented, and reviewed
+Mining Leader (`library/mining_leader.dcs`) was rebuilt around this interface directly by the
+user during design review, and the rebuild is informative beyond just confirming the
+interface works — it settles on a materially different, better shape than either the
+original design or Task 1's own plan below:
 
-The user built this directly into `library/async_radar.dcs` before I got to it. Decompiled
-and traced node-by-node against real engine semantics; it's correct, and one part is better
-than the plan above: rather than duplicating the fallback at both the gate and inside the
-sequence, the two failure paths **converge on one shared fallback** via a clean signal —
+- **One shared call site**, in the `Begin` hub, called unconditionally every tick regardless
+  of which phase Mining Leader is currently in — not one call site per phase. Each phase
+  reacts to whatever that one call delivered (`$Tag`/`$PendingTag`/`$ScanResult`) via
+  `switch` (an id-equality dispatch instruction, checked against source since it wasn't
+  previously used in this project — falls into a plain id-comparison branch for bare id-value
+  tags like these, not its entity-matching branch) to decide what to request next
+  (`$NextFilter`/`$NextTag`), rather than each phase owning its own call and its own filter
+  wiring.
+- **`Tag`/`Pending Tag` genuinely separate** (not aliased) — Mining Leader checks *both* "what's
+  currently armed" (`$PendingTag`, to avoid redundantly re-requesting a query already in
+  flight) and "what was just delivered" (`$Tag`) each tick, giving it a fully-informed
+  decision without ever needing explicit edge-detection bookkeeping of its own.
+- **This shape eliminates a whole class of bug for free**: the original multi-call-site
+  design needed *every* site sharing a `Radar` to consistently thread `Pending Tag` through,
+  and a fire-and-forget call (Mining Leader's old Emergency-handling re-arm) that didn't wire
+  it would silently desync the software-side tracking from the physical hardware state. With
+  one call site, there's nothing else to desync from.
 
-- `n1: has_like_component(Component=c_portable_radar)` (the actual root id used; confirmed
-  above it doesn't matter which of the family is passed) gates entry from outside the
-  sequence, `Failed` → jumps straight to the fallback, `Radar`/`Next Tick` untouched, exactly
-  as designed.
-- Inside the sequence, when Stage "Third" exhausts all 4 advanced-sensor checks with no
-  match, the new `n22: set_reg(Target=Radar)` (no `Value`) writes a genuinely empty register
-  into `Radar` — confirmed against `InstGet` (`data/instructions.lua:126`): an unwired arg
-  resolves via `Tool.NewRegisterObject()`, a real empty register object with `is_empty=true`,
-  not merely a numeric 0 (that's the *separate* `GetNum`-on-omitted-arg case documented
-  elsewhere in this project's memory — a different code path). Stage "Third" then dead-ends
-  normally into `Last`.
-- `Last` now opens with `n31: is_empty(Value=Radar)` — `Has Value` → the real hardware
-  polling logic (unchanged); default/empty → falls straight into the *same* fallback node
-  `n1`'s `Failed` pin uses. One fallback implementation, two paths converging on it, no
-  duplicated logic.
-
-**One real gap found, not yet fixed:** the component family is bigger than the 8 ids in the
-cascade. Every `RegisterComponent` chained off this family was re-grepped, turning up a 9th
-member missed originally: `c_scout_radar = c_portable_radar:RegisterComponent("c_scout_radar",
-{...})` (`data/components.lua:4270`), which inherits the identical `base_id =
-"c_portable_radar"` the same way the other 7 do. Consequence: `has_like_component` at `n1`
-treats a unit with *only* a Scout Radar equipped as "has one," lets it into the sequence,
-where it fails both Stage 2 and Stage 3, hits the `n22` fallback path, and ends up on
-`get_closest_entity` (native visibility range) every tick forever — not a stall (the
-`is_empty` convergence handles it gracefully), but a silent loss of Scout Radar's actual
-30-tile scan range. Not a one-line fix either: Scout Radar defines its own `registers = {
-Filter, Result }` (2 registers), not the `Filter1/Filter2/Filter3/Result` (4-register) layout
-the other 7 share and that `Last`'s hardware branch hardcodes register indices 1-4 against —
-proper support would need its own special-cased register-index branch, not just another line
-in the priority cascade. **Resolved as intentional, not a bug**: the user confirmed Scout
-Radar was always meant to be unsupported and added a top-level `desc` plus inline `cmt`s
-directly on `async_radar.dcs` documenting the fallback-to-visibility-range behavior at `n1`,
-`n22`, `n33`, and `n45`, so this is now self-documenting in the `.dcs` itself rather than
-only recorded here.
+Two real bugs were found and fixed across two review passes on Mining Leader specifically
+along the way (both rooted in an intermediate `$NextState` variable that no longer exists
+after the single-call-site rebuild — a dependency-ordering issue where it was read before
+ever being written, corrupting dispatch on a later completion). Not narrated in detail here
+since the variable itself is gone in the current design; worth recording that the review
+process caught real, non-obvious bugs before they'd have shipped, twice — the reason this
+whole interface redesign was worth pausing Observer for in the first place.
 
 ## Task 1: sensing loop
 
@@ -202,18 +199,23 @@ Filters per stage (unchanged from today's cascade): `S_ENEMY = v_enemy_faction`,
 `S_DAMAGED = v_damaged, v_own_faction`, `S_INFECTED = v_infected, v_own_faction`,
 `S_DROPPED = v_droppeditem`.
 
-Each tick: call `Async Radar` with `Filter 1-3` = the *current* stage's filters, `NextState`
-= the next stage in the cycle, `State`/`Radar`/`Next Tick` = Observer's own persistent
-locals. Compare `State` before vs. after the call:
+**Needs genuine disambiguation** (multiple different filters cycling through one shared
+`Result`/`Tag` pair) — unlike Mining Leader's aliased-shortcut case above, `Tag` and
+`Pending Tag` must be two separate persistent locals here, not the same variable.
 
-- **No change** → still waiting on this stage's poll (or radar hardware missing entirely);
-  nothing else to do this tick.
-- **Changed** → a fresh `Result` for the *current* stage just arrived. If `Result` is
+Each tick: call `Async Radar` with `Filter 1-3` = the *current* stage's filters, `Next Tag` =
+that same stage's own distinct tag identity (e.g. one label icon with `num=1..4`, the same
+`(id, num)`-as-family idiom Mining Leader's `c_radar[num=1]` already uses),
+`Tag`/`Pending Tag`/`Radar`/`Next Tick` = Observer's own persistent locals. React via
+`jump(Label=$Tag)`:
+
+- **No match** (`$Tag` still holds whichever stage's identity the *previous* completion
+  delivered, or the initial empty value) → nothing new landed this tick; keep submitting the
+  same stage's filters/tag next tick, unchanged.
+- **Matches the current stage's own tag** → a fresh `Result` for that stage just arrived. If
   non-empty: `set_reg` it onto `@visual`/`@signal` (same convention as today); if the stage
-  was `S_ENEMY`, also `ping(Target=Result)`. No separate ping-throttle counter is needed —
-  polls for `S_ENEMY` can only complete once per full hardware cadence anyway (2-10 ticks
-  depending on equipment), which already lands in the "every second or two" the user asked
-  for. Then advance to the next stage for next tick's call.
+  was `S_ENEMY`, also `ping(Target=Result)` (throttled — see "Resolved decisions" #2). Then
+  advance to the next stage in the cycle for the following tick's submission.
 - If the stage that just completed was `S_DROPPED` (i.e. we just wrapped back to
   `S_ENEMY`), that's a full-cycle boundary: increment a persistent `$CycleId`, and latch
   whether *any* of the 4 stages this past cycle had a non-empty `Result` into

@@ -39,32 +39,35 @@ Update this file directly as items are picked up/finished.
 
 ## Observer redesign (`observer_redesign.md`)
 
-- [ ] **Redesign `Async Radar`'s calling interface to remove the filter/result attribution
-      ambiguity.** Paused 2026-07-12 mid-way through authoring Observer's Task 1 (sensing
-      loop): worked out that `Async Radar`'s two internal paths have different lag —
-      hardware path has a one-poll pipeline lag (a completion's `Result` reflects the
-      *previous* call's filters), the `get_closest_entity` fallback path has zero lag
-      (reflects the *current* call's filters) — and a caller cycling through multiple
-      different filter sets on one shared `Result` register (as Task 1 needs to, across
-      enemy/damaged/infected/dropped) can't correctly attribute a given completion to the
-      right filter without knowing which path just ran, which isn't currently observable from
-      outside. A same-call fix confined to the fallback branch (queue-and-deliver-one-tick-
-      late, to match the hardware path's lag) was fully worked out and would have worked, but
-      **the user judged it a workaround, not a fix**, and wants a real interface redesign
-      instead — considered high-priority ("fixing it now before using it more is better than
-      letting this ambiguity fester") specifically because it's already relied on by
-      `library/mining_leader.dcs` (`Mining Leader V4.0`, the only current caller as of
-      2026-07-12) — the earlier this is fixed, the less rework `mining_leader.dcs` needs.
-      **Any interface change here requires updating `mining_leader.dcs` to match** — check
-      that file's own current `call(...)` sites against whatever the new signature ends up
-      being before considering this done. Not yet designed — user wants to sit down and
-      reconsider it, not iterate on the current shape. Blocks: Observer Task 1 (see below).
-- [ ] **Finish Observer's Task 1 (sensing loop).** Paused 2026-07-12, blocked on the
-      `Async Radar` interface redesign above — see `observer_redesign.md`'s "Status" note for
-      exactly where this was left off. The 4-stage `S_ENEMY`→`S_DAMAGED`→`S_INFECTED`→
-      `S_DROPPED` cascade design and the `$CycleId`/`$CycleFoundAny` handoff to Task 2 are
-      believed still correct at the architecture level; what's blocked is the low-level
-      mechanics of consuming a single poll result correctly.
+- [x] **Redesign `Async Radar`'s calling interface to remove the filter/result attribution
+      ambiguity.** Done 2026-07-13. `State*`/`NextState` replaced with `Tag*`/`Pending Tag*`/
+      `Next Tag` — deliberately no result-queueing of any kind (a queue-and-delay-one-tick fix
+      for the fallback path was fully worked out and rejected by the user as a workaround, not
+      a fix; a memory-array-based queue/stack was also considered and rejected, since arrays
+      are global across the whole call stack — real collision risk, plus a per-call cost even
+      for callers that never need disambiguation). The design that stuck: only the *identity*
+      needs shadowing in software (`Pending Tag`, a single small value); the actual result data
+      never does, since it's read live off the physical register (or computed fresh in
+      fallback mode) every time. See `observer_redesign.md`'s "Async Radar subroutine" section
+      for the full mechanism and rationale. `library/mining_leader.dcs` was rebuilt around it
+      by the user directly (see next item) — real-caller validation, not just a design on
+      paper.
+- [x] **Update `mining_leader.dcs` to match the new interface.** Done 2026-07-13, and went
+      further than a mechanical port: rebuilt around a single shared `Async Radar` call site in
+      the `Begin` hub (called unconditionally every tick) instead of one call site per phase,
+      using `switch` to react to both `$Tag` (what was just delivered) and `$PendingTag` (what's
+      currently armed) and decide what to request next. This shape eliminates the
+      "every call site sharing a `Radar` must consistently thread `Pending Tag`" requirement
+      entirely — there's only one call site, nothing else to desync from. Two real bugs were
+      found and fixed across two review passes during this rebuild (both rooted in an
+      intermediate `$NextState` variable later designed away entirely — a value read before
+      ever being written, corrupting dispatch on a later completion).
+- [ ] **Finish Observer's Task 1 (sensing loop).** Unblocked as of 2026-07-13 — the interface
+      redesign above is done and validated. `observer_redesign.md`'s Task 1 section has been
+      updated to the new `Tag`/`Pending Tag`/`Next Tag` mechanism (unlike Mining Leader, Task 1
+      needs genuine disambiguation — `Tag`/`Pending Tag` must be separate locals, not aliased,
+      since it cycles through 4 different filters on one shared `Result`). Architecture believed
+      correct; not yet authored as real BSF/`.dcs`.
 - [ ] **Design and implement Observer's Task 2 (movement loop).** Not started. Spec is in
       `observer_redesign.md` (enemy avoidance via visible-range `get_closest_entity` +
       stealth-aware standoff, `Config` entity/coordinate/empty classification, follow logic,
