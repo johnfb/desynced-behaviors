@@ -37,6 +37,63 @@ Update this file directly as items are picked up/finished.
       fallthrough-vs-declared-arg wiring; `dodrop`'s default `c=2` auto-subtracting the target's
       current stock, ruling out an apparent over-delivery issue at `n146`). No bugs found.
 
+## Observer redesign (`observer_redesign.md`)
+
+- [ ] **Redesign `Async Radar`'s calling interface to remove the filter/result attribution
+      ambiguity.** Paused 2026-07-12 mid-way through authoring Observer's Task 1 (sensing
+      loop): worked out that `Async Radar`'s two internal paths have different lag —
+      hardware path has a one-poll pipeline lag (a completion's `Result` reflects the
+      *previous* call's filters), the `get_closest_entity` fallback path has zero lag
+      (reflects the *current* call's filters) — and a caller cycling through multiple
+      different filter sets on one shared `Result` register (as Task 1 needs to, across
+      enemy/damaged/infected/dropped) can't correctly attribute a given completion to the
+      right filter without knowing which path just ran, which isn't currently observable from
+      outside. A same-call fix confined to the fallback branch (queue-and-deliver-one-tick-
+      late, to match the hardware path's lag) was fully worked out and would have worked, but
+      **the user judged it a workaround, not a fix**, and wants a real interface redesign
+      instead — considered high-priority ("fixing it now before using it more is better than
+      letting this ambiguity fester") specifically because it's already relied on by
+      `library/mining_leader.dcs` (`Mining Leader V4.0`, the only current caller as of
+      2026-07-12) — the earlier this is fixed, the less rework `mining_leader.dcs` needs.
+      **Any interface change here requires updating `mining_leader.dcs` to match** — check
+      that file's own current `call(...)` sites against whatever the new signature ends up
+      being before considering this done. Not yet designed — user wants to sit down and
+      reconsider it, not iterate on the current shape. Blocks: Observer Task 1 (see below).
+- [ ] **Finish Observer's Task 1 (sensing loop).** Paused 2026-07-12, blocked on the
+      `Async Radar` interface redesign above — see `observer_redesign.md`'s "Status" note for
+      exactly where this was left off. The 4-stage `S_ENEMY`→`S_DAMAGED`→`S_INFECTED`→
+      `S_DROPPED` cascade design and the `$CycleId`/`$CycleFoundAny` handoff to Task 2 are
+      believed still correct at the architecture level; what's blocked is the low-level
+      mechanics of consuming a single poll result correctly.
+- [ ] **Design and implement Observer's Task 2 (movement loop).** Not started. Spec is in
+      `observer_redesign.md` (enemy avoidance via visible-range `get_closest_entity` +
+      stealth-aware standoff, `Config` entity/coordinate/empty classification, follow logic,
+      wait-for-a-clean-cycle random-stepping) but depends on Task 1 actually running first.
+
+## Local behavior-library storage (`desynced_toolkit`)
+
+- [ ] **(Idea, not started, 2026-07-12) Build a local mirror of the in-game behavior library,
+      instead of only ever working with one-off `.dcs`/BSF files.** Motivating fact: `call`'s
+      `sub` field referencing a *saved-library* behavior is an opaque id the game assigns when
+      you save it there, which isn't recoverable from a plain "Copy Program" clipboard export
+      (confirmed while trying to hand-author a `call` into Observer's Task 1 — the exported
+      `library/async_radar.dcs` table has no such id, only `name`/`desc`/`parameters`/
+      `pnames`/instructions) — and the user confirmed the in-game editor's own copy/paste
+      always embeds subroutines rather than referencing them by id when you copy a behavior
+      that has any, meaning **the id form is effectively only used in the game's own internal
+      save format**, not something this project's tooling can currently produce a working
+      reference to at all. Proposed direction: a local "library" store that mirrors the
+      in-game one (behaviors saved as BSF files, each with references to others by name/id
+      rather than always embedding), plus an import/export script pair, plus two
+      `desynced_toolkit.bsf` changes: (1) a decompiler option to write an embedded
+      (`dependencies`-array) sub-behavior out as its own separate BSF file with a reference
+      left in the parent's text instead of inlining it, (2) a matching compiler change to
+      resolve such file references back into embedded `dependencies` entries (or, longer-term,
+      real library-id references once/if this project's local store can track real assigned
+      ids) when producing the final `.dcs`. Not designed in detail yet — flagged by the user
+      as one of two things to think about next, alongside the `Async Radar` interface
+      redesign above.
+
 ## Magnifier / drone-swarm design
 
 - [x] **Update `MinerDrone` with a second parameter** (which resource to mine + which signal
