@@ -190,37 +190,49 @@ whole interface redesign was worth pausing Observer for in the first place.
 
 ## Task 1: sensing loop
 
-A 4-stage cyclic state machine wrapped around one `Async Radar` call per tick, mirroring
-today's priority order:
+**Implemented, compiled, and reviewed** (superseding an earlier round-robin-cascade draft of
+this section) — built directly by the user in-game, not a plan anymore. It's a **priority-lock
+cascade, not a round-robin**: finding something at a higher-priority stage means *staying* on
+that stage (enemy) or *resetting back to the top* (damaged, infected), never advancing past it
+— only an empty result at a stage advances one step down the priority ladder. Concretely:
 
-`S_ENEMY -> S_DAMAGED -> S_INFECTED -> S_DROPPED -> (wrap) S_ENEMY -> ...`
+- **Enemy** (top priority): found → report, then submit *nothing different* next call — no
+  `$NextFilter`/`$NextTag` write at all in that path, so the same enemy filter just keeps
+  getting resubmitted. "Keep tracking" is implemented by omission, not a special case. Empty →
+  advance filters/tag to Damaged.
+- **Damaged**: found → report, then explicitly reset `$NextFilter1/2`/`$NextTag` back to
+  enemy. Empty → advance to Infected.
+- **Infected**: found → report, then reset back to enemy (reusing Damaged's own "reset to
+  enemy" block rather than duplicating it). Empty → advance to Dropped.
+- **Dropped** (only reachable at all once enemy/damaged/infected were *all* empty this pass):
+  found or empty, either way — report first if found, then **unconditionally** increment
+  `$CycleId`, publish `$CycleAccum` into `$CycleFoundAny`, and reset `$CycleAccum` for the
+  next pass, before resetting back to enemy. (A real bug here — only the *empty* branch did
+  this bookkeeping in an earlier draft, so a found dropped item silently skipped publishing a
+  cycle completion and left `$CycleAccum` contaminated for a later pass — found during review,
+  fixed by making the bookkeeping the unconditional tail both branches fall into, matching the
+  shape the other three stages already use.)
 
-Filters per stage (unchanged from today's cascade): `S_ENEMY = v_enemy_faction`,
-`S_DAMAGED = v_damaged, v_own_faction`, `S_INFECTED = v_infected, v_own_faction`,
-`S_DROPPED = v_droppeditem`.
+Tags are just the filter constants themselves (`v_enemy_faction`, `v_damaged`, `v_infected`,
+`v_droppeditem`) rather than an invented label family — simpler than the original plan below,
+since the filters are already unique per stage, nothing extra needed to identify them.
 
-**Needs genuine disambiguation** (multiple different filters cycling through one shared
+**Needs genuine disambiguation** (multiple different filters used across one shared
 `Result`/`Tag` pair) — unlike Mining Leader's aliased-shortcut case above, `Tag` and
-`Pending Tag` must be two separate persistent locals here, not the same variable.
+`Pending Tag` are two separate persistent locals here, not the same variable. Dispatch is
+`jump(Label=$Tag)` after each call: no match (still holding whichever tag the *previous*
+completion delivered) → nothing new this tick, keep waiting; a match → handle that stage's
+fresh result as described above.
 
-Each tick: call `Async Radar` with `Filter 1-3` = the *current* stage's filters, `Next Tag` =
-that same stage's own distinct tag identity (e.g. one label icon with `num=1..4`, the same
-`(id, num)`-as-family idiom Mining Leader's `c_radar[num=1]` already uses),
-`Tag`/`Pending Tag`/`Radar`/`Next Tick` = Observer's own persistent locals. React via
-`jump(Label=$Tag)`:
-
-- **No match** (`$Tag` still holds whichever stage's identity the *previous* completion
-  delivered, or the initial empty value) → nothing new landed this tick; keep submitting the
-  same stage's filters/tag next tick, unchanged.
-- **Matches the current stage's own tag** → a fresh `Result` for that stage just arrived. If
-  non-empty: `set_reg` it onto `@visual`/`@signal` (same convention as today); if the stage
-  was `S_ENEMY`, also `ping(Target=Result)` (throttled — see "Resolved decisions" #2). Then
-  advance to the next stage in the cycle for the following tick's submission.
-- If the stage that just completed was `S_DROPPED` (i.e. we just wrapped back to
-  `S_ENEMY`), that's a full-cycle boundary: increment a persistent `$CycleId`, and latch
-  whether *any* of the 4 stages this past cycle had a non-empty `Result` into
-  `$CycleFoundAny` (OR'd across all 4 stage completions, reset at the start of the new
-  cycle).
+**Why this shape gives Task 2 exactly the guarantee it needs, for free:** because finding
+anything in enemy/damaged/infected loops straight back to the top without ever reaching
+Dropped, the cycle-completion bookkeeping is *only* ever reached when all three were already
+empty this pass. So `$CycleId` advancing with `$CycleFoundAny = false` now means precisely
+"all four categories were checked this pass and none of them found anything" — exactly the
+"scanned for all four, no result" condition Task 2 needs before considering a random move (see
+Task 2's own note below) — no extra coordination needed between the two tasks beyond reading
+those two variables, despite Task 1's control flow being considerably more involved than a
+flat round-robin.
 
 `$CycleId` and `$CycleFoundAny` are the only two things Task 2 needs to read from Task 1.
 
@@ -228,6 +240,14 @@ that same stage's own distinct tag identity (e.g. one label icon with `num=1..4`
 
 Gated first by `unit_type(Unit=Self)`: **buildings/construction sites do nothing** (matches
 the user's spec directly). Everything below only runs if self is a bot.
+
+**User-confirmed priority rule, restated directly (2026-07-13):** avoidance and follow "do
+not pay attention to the scan cycle" — both run unconditionally, every tick. Only random
+movement is gated on a full clean cycle ("we scanned for all four and no result, only then
+does a random movement become something we might do"). Priority 1/2 below already match this
+as originally designed; see Task 1's own note above for why Task 1's priority-lock redesign
+makes "`$CycleId` advanced, `$CycleFoundAny` false" line up exactly with "all four checked,
+nothing found" with no extra work on either side.
 
 **Priority 1 — enemy avoidance, every tick, unconditionally:**
 `get_closest_entity(Filter 1=v_enemy_faction)` — this instruction natively uses
