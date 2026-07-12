@@ -95,14 +95,19 @@ Update this file directly as items are picked up/finished.
       bug found in `MinerDrone`'s node-search loop (`is_same_grid(Unit=$Self, Unit2=$Node)`).
       User has an uncommitted local edit to `library/miner_drone.dcs` as of 2026-07-11 — not yet
       reviewed to confirm it applies this exact fix.
-- [ ] **Found: `for_signal_match` can accidentally match world-faction entities (resource
-      nodes) through the signal value's embedded `entity` field**, not just the intended
-      signal-broadcasting unit — caused Fendersons Transport haulers to try picking up "metal
-      ore" from resource nodes instead of only drone-carried piles. Fix identified: add
-      `match(Unit=$Signal, Filter=v_mineable)` (or the combined `v_resource` = `FF_RESOURCE|
-      FF_DROPPEDITEM`, replacing the existing `v_droppeditem`-only check) right after the
-      `for_signal_match` in `library/hauler.dcs` (`n42`-`n43` and `n78`-`n79`). Not yet applied
-      or documented in `blight_magnifier_mining.md`.
+- [x] **`for_signal_match` can accidentally match a unit through the signal value's embedded
+      `entity` field** — not the intended signal-broadcasting unit itself, but something it
+      references — caused Fendersons Transport haulers to interact with `MinerDrone`'s own
+      resource-node-referencing broadcast (oversubscription counting) and with `Observer`'s
+      dropped-item-referencing broadcast (unrelated telemetry, `Observer` runs on both mobile
+      scouts and stationary power-pole buildings). Fixed 2026-07-12, took three attempts —
+      `v_mineable` alone missed dropped items, `v_resource` alone looked right from its bitmask
+      but has a narrower per-entity check (`FilterEntity`'s `fnum==7`: `def.type=="Resource" or
+      def.name=="Scattered Resource"`) that silently excludes ordinary dropped items. Working
+      fix: two separate sequential `match` checks (`v_droppeditem` then `v_resource`), since
+      `match`'s multiple filter args are AND-combined, not OR — applied and checked in to
+      `library/hauler.dcs` (`n42`-`n43`, `n79`-`n80`). See `blight_magnifier_mining.md`'s hauler
+      section for the full trace.
 - [ ] **(Idea, not started) Mining Leader/Foreman for slot-less Human Miner Mechs.** User idea
       2026-07-11: Human Miner Mechs have no Internal socket for a behavior controller, so they
       can't run a `MinerDrone`-style Program of their own. Mechanism now grounded in source

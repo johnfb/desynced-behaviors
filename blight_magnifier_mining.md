@@ -433,22 +433,61 @@ some regen margin/slack rather than a mismatch). Not yet turned into a
 concrete buildable layout — see `todo.md`'s "Magnifier / drone-swarm design"
 section.
 
-### A live behavioral bug found downstream: haulers picking up from resource nodes by mistake
+### A live behavioral bug found downstream: haulers interacting with units broadcasting a resource node or dropped item
 
 `library/hauler.dcs`'s `for_signal_match(Signal=Resource, ...)` (used to
-find drones broadcasting they're carrying a mineable resource, e.g. metal
-ore) also matches resource *nodes* of that same type — traced to
-`for_signal_match`'s own internal fallback (`instructions.lua:~2498`): a
-candidate whose signal value carries an `entity` field gets tested against
-`FilterEntity` too, and a resource node's `FRAMEREG_GOTO` legitimately holds
-its own item id, satisfying that fallback match. The hauler already checks
-`match(Unit=$Signal, Filter=v_droppeditem)` right after (`n43`/`n79`) to
-reject dropped-item false positives — the same idiom fixes this: add (or
-replace with) `match(Unit=$Signal, Filter=v_mineable)` (`v_mineable =
-FF_RESOURCE`, confirmed in `data/utilities.lua`'s `prep_filters` table), or
-better, the single combined `v_resource = FF_RESOURCE|FF_DROPPEDITEM` filter
-to reject both false-positive cases in one instruction instead of two. Not
-yet applied to the checked-in `library/hauler.dcs`.
+find drones/buildings broadcasting resource pickup/dropoff demand) can also
+match a unit whose *own* broadcast happens to embed a resource-node or
+dropped-item entity for an unrelated reason — traced to `for_signal_match`'s
+own internal fallback (`instructions.lua:~2498`): a candidate whose signal
+value carries an `entity` field gets tested against `FilterEntity` too. Two
+concrete real sources of this, both confirmed in-game: (1) `MinerDrone`
+itself deliberately broadcasts `set_reg(Value=$Best, Target=@signal)` where
+`$Best` is the resource *node* it's mining (for oversubscription counting —
+working as intended for that purpose, but a false positive for the hauler);
+(2) the `Observer` behavior (`tests/data/observer.dcs`, also loaded on
+stationary power-pole buildings, not just mobile scouts) broadcasts
+`set_reg(Value=$A, Target=@signal)` where `$A` is the raw result of
+`scan(Filter 1=v_droppeditem, ...)` — an entity-embedded *dropped item pile*
+reference, for completely unrelated reasons (informational only).
+
+**Getting the fix right took three attempts, worth recording precisely
+since the filter names are misleading:**
+
+1. `match(Unit=$Signal, Filter=v_mineable)` (`v_mineable = FF_RESOURCE`) —
+   rejects the resource-node case but does nothing for the dropped-item
+   case (`v_mineable`'s bitmask has no `FF_DROPPEDITEM` bit).
+2. `match(Unit=$Signal, Filter=v_resource)` (`v_resource =
+   FF_RESOURCE|FF_DROPPEDITEM`) — looks like it should cover both from the
+   bitmask alone, but **doesn't**: `FilterEntity`'s own per-entity check for
+   `v_resource` (`fnum==7`, `data/utilities.lua`) is `ok = edef.type ==
+   "Resource" or edef.name == "Scattered Resource"` — a narrower,
+   *additional* requirement layered on top of the bitmask pre-check. An
+   ordinary dropped item pile (`def.type == "DroppedItem"`, not
+   `"Resource"`, and not specifically named `"Scattered Resource"`) fails
+   this narrower check and is never rejected — confirmed in-game, `v_resource`
+   alone still let haulers deliver to Observer.
+3. **The actual fix, confirmed working and now checked in**: two separate,
+   sequential `match` checks, not one combined filter (`match`'s multiple
+   filter args are AND-combined, so one call can't express "reject if
+   either condition holds"):
+   ```
+   match(Unit=$Signal, Filter=v_droppeditem)  → reject on match
+   match(Unit=$Signal, Filter=v_resource)     → reject on match
+   ```
+   `v_droppeditem` (`fnum==18`) has no narrowing per-entity check (`goto
+   PREPARED_FILTER`, bitmask-only) — it reliably catches *any* dropped item,
+   fixing the Observer case. `v_resource`'s own narrow check, while it
+   fails on ordinary dropped items, *does* correctly match genuine
+   `Resource`-type nodes (that's exactly the `def.type == "Resource"` half
+   of its condition) — fixing the `MinerDrone` case, and additionally
+   catching the special "Scattered Resource" world-spawned pickup type as a
+   bonus. `v_mineable` would have covered the node case equally well, but
+   the user's own applied fix (`v_droppeditem` + `v_resource`) is slightly
+   more thorough as a result. Applied at both the pickup-search (`n42`-`n43`)
+   and dropoff-search (`n79`-`n80`) locations in `library/hauler.dcs`,
+   verified via semantic-diff to be the only change (one new node added at
+   each site, nothing else touched).
 
 ## Part 2: Miner-drone behavior design
 
