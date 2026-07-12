@@ -118,6 +118,27 @@ few sibling metadata keys:
   needed — so it's always the outer program's own flags in play, never a
   sub's. A sub-behavior's own `keepvars`/`keeparrays`, even if set on its own
   saved definition, are therefore dead data at runtime.
+- **Memory arrays themselves are global across the entire call stack within one
+  execution — genuinely shared between a behavior and every subroutine it
+  calls — which is a separate fact from what `keeparrays` governs, and easy to
+  conflate with the "locals are fresh per call" point directly above. Don't.**
+  Confirmed 2026-07-12 by reading `memory_get`/`memory_set` (`data/instructions.lua:7292`
+  onward) against `call`'s own `func` again with this specific question in mind: arrays
+  live in `state.arrays`, a single flat table keyed by whatever value you pass as the
+  "Index" argument (its `.id`, an entity's `.key`, or a coordinate string) — addressed by
+  explicit key, not by stack position. `call`'s `func` (the same block cited above)
+  extends `state.mem` and pushes a new `state.stk` window for the callee's *named*
+  locals/parameters, but never references `state.arrays` anywhere — no allocation, no
+  windowing, no save/restore, no clearing. So within one run, however many `call`s deep,
+  `state.arrays` is just one shared table the whole time: a subroutine reading/writing an
+  array under the same Index a caller (or a sibling call) uses is reading/writing the
+  *exact same* array, not an isolated copy — a real, deliberate side-channel if used on
+  purpose, and a real silent-collision risk if not. `keeparrays` is unrelated to this
+  sharing — it only governs whether `state.arrays` gets cleared across a `restart`/
+  component-(re)start event (and, per the point above, only the outermost behavior's
+  setting is ever consulted for that); it says nothing about — and has no effect on —
+  sharing across `call` boundaries within a single run, which is unconditional and always
+  on.
 - `dependencies` (optional) — present when this behavior `call`s a
   sub-behavior that is *embedded* rather than referenced by saved-library
   id (see `call`'s `sub` field under "Hidden literal fields" below). A
