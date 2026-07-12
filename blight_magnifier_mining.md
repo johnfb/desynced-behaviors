@@ -467,27 +467,35 @@ since the filter names are misleading:**
    `"Resource"`, and not specifically named `"Scattered Resource"`) fails
    this narrower check and is never rejected — confirmed in-game, `v_resource`
    alone still let haulers deliver to Observer.
-3. **The actual fix, confirmed working and now checked in**: two separate,
-   sequential `match` checks, not one combined filter (`match`'s multiple
-   filter args are AND-combined, so one call can't express "reject if
-   either condition holds"):
-   ```
-   match(Unit=$Signal, Filter=v_droppeditem)  → reject on match
-   match(Unit=$Signal, Filter=v_resource)     → reject on match
-   ```
-   `v_droppeditem` (`fnum==18`) has no narrowing per-entity check (`goto
-   PREPARED_FILTER`, bitmask-only) — it reliably catches *any* dropped item,
-   fixing the Observer case. `v_resource`'s own narrow check, while it
-   fails on ordinary dropped items, *does* correctly match genuine
-   `Resource`-type nodes (that's exactly the `def.type == "Resource"` half
-   of its condition) — fixing the `MinerDrone` case, and additionally
-   catching the special "Scattered Resource" world-spawned pickup type as a
-   bonus. `v_mineable` would have covered the node case equally well, but
-   the user's own applied fix (`v_droppeditem` + `v_resource`) is slightly
-   more thorough as a result. Applied at both the pickup-search (`n42`-`n43`)
-   and dropoff-search (`n79`-`n80`) locations in `library/hauler.dcs`,
-   verified via semantic-diff to be the only change (one new node added at
-   each site, nothing else touched).
+3. A working intermediate fix: two separate, sequential `match` checks
+   (`v_droppeditem` then `v_resource`), since `match`'s multiple filter args
+   are AND-combined, not OR — one call can't express "reject if either
+   condition holds." This worked (confirmed in-game) but needed two
+   instructions and relied on knowing the specific entity types involved.
+
+4. **The actual, final fix — one instruction, and root-cause rather than
+   type-enumeration:** `compare_item(Value 1=Resource, Value 2=$Signal) →
+   If Different → reject`. This doesn't check entity types at all; it
+   checks whether `$Signal.id` equals the `Resource` parameter. Tracing
+   why that's sufficient: in `for_signal_match`'s fallback branch
+   (`instructions.lua:~2498`), the output's `id` field is always just
+   `unit_sig.id` passed through unchanged — and both false-positive sources
+   (`MinerDrone`'s node-embedding broadcast, `Observer`'s dropped-item-embedding
+   one) only ever set `.entity` on their own signal, never `.id` (the
+   engine's entity/id/coord mutual-exclusivity rule means a value with
+   `.entity` set has `.id = nil`). So *every* fallback-matched candidate
+   has `Signal2.id == nil`, regardless of what type of entity got embedded
+   — while a genuine direct broadcast (`MagnifierSignal`'s
+   `set_number(Value=Resource, Number=0, Result=$Sig)`) hits
+   `for_signal_match`'s direct-match path and has `Signal2.id` genuinely
+   equal to `Resource`. One equality check on `.id` cleanly separates "real
+   id-based broadcast" from "only matched via the entity-embedded
+   fallback," with no dependency on enumerating entity types — it would
+   keep working even if some future behavior embeds a different kind of
+   entity into its own signal for its own unrelated reasons. Applied at
+   both the pickup-search (`n43`) and dropoff-search (`n79`) locations in
+   `library/hauler.dcs`, replacing the two-`match` intermediate fix;
+   verified via semantic-diff to be the only change at each site.
 
 ## Part 2: Miner-drone behavior design
 
