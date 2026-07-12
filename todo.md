@@ -60,9 +60,49 @@ Update this file directly as items are picked up/finished.
       runs the local mining loop; only escalates back to re-picking a building when the local
       area has no viable candidate at all (tries another local node first on single-node
       depletion).
-- [ ] **Tune the hardcoded oversubscription cap (2) and floor (100) in `MinerDrone`**
-      empirically once it's actually running — currently just reasonable-guess constants, not
-      derived.
+- [x] **Tune the hardcoded oversubscription cap (2) in `MinerDrone` — superseded by real math,
+      not just empirical tuning.** Resolved 2026-07-11/12: the flat "2" turned out to badly
+      undersell what a real dense layout can deliver. Confirmed via a real in-game blueprint
+      (`library/magnifier_lattice.dcs`, see `blight_magnifier_mining.md`'s "final confirmed
+      design" section) that a fully-tiled node gets regen from 6 big + 2 small buildings
+      (2.161 units/s), needing a cap of 6-9 depending on resource, not 2. The mining floor
+      (100) is still an untuned guess.
+- [ ] **Make the oversubscription cap a build-density-dependent parameter, not a hardcoded
+      constant** (user idea, 2026-07-11). Since the right cap varies a lot by layout (2 for one
+      shared building up to 9 for the dense lattice), `MinerDrone` should read it from whatever
+      `MagnifierSignal` broadcasts (e.g. packed into the demand signal's own `num`) rather than
+      assume a fixed value. Not yet implemented.
+- [x] **Overclock modules were wrongly declared "pointless on mining drones" — reversed.**
+      Confirmed 2026-07-11 via two independent real in-game stopwatch tests (magnifier cycle
+      time, mining drone cycle time) that `SetStateStartWork` applies the `eff_boost`
+      calculation natively regardless of whether the calling component's Lua ever references
+      `get_work_time` — the original "pointless" claim rested on the opposite, now-disproven
+      assumption. See `reference_setstatestartwork_native_boost` memory and
+      `blight_magnifier_mining.md`'s corrected "core formula" section.
+- [x] **Fix the roaming-Mining-Leader-depletes-managed-nodes problem.** Done 2026-07-11/12:
+      `library/mining_leader.dcs` now has a `Check Avoidance` subroutine (`for_signal_match` on
+      `v_alert`, `get_distance` with an explicit `Source`, `check_number` against the
+      broadcaster's own `num`-as-range) checked both when picking a resource target and when
+      choosing a random patrol destination. One real regression caught and fixed during this:
+      the random-walk path validated its candidate destination but never actually applied it to
+      `@goto`, silently never moving — fixed, confirmed via semantic-diff (exactly one node
+      added, nothing else touched).
+- [x] **Found: `is_same_grid` fails outright when the second unit is a non-owned/world-faction
+      entity** (e.g. a resource node) passed directly. Traced to source
+      (`instructions.lua:4192-4211`): every fallback branch not requiring matching factions
+      instead calls `GetCoord` on the raw entity, which fails for a non-owned entity reference.
+      Fix: `get_location(Unit=X, Coord=$C)` first, then check `$C` instead of `X` directly. Live
+      bug found in `MinerDrone`'s node-search loop (`is_same_grid(Unit=$Self, Unit2=$Node)`).
+      User has an uncommitted local edit to `library/miner_drone.dcs` as of 2026-07-11 — not yet
+      reviewed to confirm it applies this exact fix.
+- [ ] **Found: `for_signal_match` can accidentally match world-faction entities (resource
+      nodes) through the signal value's embedded `entity` field**, not just the intended
+      signal-broadcasting unit — caused Fendersons Transport haulers to try picking up "metal
+      ore" from resource nodes instead of only drone-carried piles. Fix identified: add
+      `match(Unit=$Signal, Filter=v_mineable)` (or the combined `v_resource` = `FF_RESOURCE|
+      FF_DROPPEDITEM`, replacing the existing `v_droppeditem`-only check) right after the
+      `for_signal_match` in `library/hauler.dcs` (`n42`-`n43` and `n78`-`n79`). Not yet applied
+      or documented in `blight_magnifier_mining.md`.
 - [ ] **(Idea, not started) Mining Leader/Foreman for slot-less Human Miner Mechs.** User idea
       2026-07-11: Human Miner Mechs have no Internal socket for a behavior controller, so they
       can't run a `MinerDrone`-style Program of their own. Mechanism now grounded in source
@@ -76,7 +116,23 @@ Update this file directly as items are picked up/finished.
       Mechs could run a Program that scans idle mechs on the same grid and remotely writes mining
       targets into their registers via `set_reg_remotely` — no physical adjacency needed, only
       shared grid membership. Not designed in detail or built — just confirmed mechanically
-      plausible.
+      plausible. Now more directly relevant: Human Miner Mechs are one of only two practical
+      mobile options for Obsidian/Laterite (see below), both slot-less.
+- [ ] **(Idea, not started) Obsidian/Laterite mining design.** Researched 2026-07-12: neither
+      resource is mineable by `c_miner`/`c_adv_miner` at all (absent from both items' own
+      `mining_recipe` in `data/items.lua`) — the only options are `c_extractor` (Medium socket,
+      real placeable component, mines both), or whole dedicated units built around
+      `c_human_miner` (Human Miner Mech / Miner Mech, ground, slot-less) or `c_alien_miner`
+      (Alien Unit / Drill Spike, ground, slot-less) — `c_virus_claws` also mines Obsidian but
+      only exists on hostile Virus creatures, not player-usable. No flying option exists for
+      either resource. Also found: the dense 6-big/2-small magnifier lattice built for the
+      other four resources badly oversupplies these two (`c_extractor`'s own mining rate is
+      much slower than a boosted `c_adv_miner`'s) — regen would run 3-5x faster than 2
+      extractors could ever consume. The *sparse* single-building pattern (one 3M1L building
+      serving its own dedicated 6 packed nodes, not the dense shared lattice) is a much closer
+      match: 1 extractor per node is a near-exact balance for Laterite, and reasonably close
+      (with some regen margin) for Obsidian. Not designed into a concrete buildable layout or
+      built yet.
 
 ## Combat Squad (`combat_squad_spec.md`)
 

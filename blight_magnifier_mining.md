@@ -371,6 +371,85 @@ positions together) — see the oversubscription-cap-as-parameter item above,
 now clearly necessary rather than a nice-to-have, since a hardcoded `2` would
 leave the large majority of this design's regen capacity unused.
 
+### Obsidian and Laterite: neither is mineable by `c_miner`/`c_adv_miner` at all
+
+Discovered 2026-07-12 while planning the drone economy for these two
+resources: both are absent entirely from `c_miner`'s and `c_adv_miner`'s side
+of `mining_recipe` in `data/items.lua` — not a range/filter issue, the
+components have no recipe entry for either. The only things that can mine
+them:
+
+- **`c_extractor`** ("Laser Extractor") — the only *real, placeable*
+  option: `attachment_size = "Medium"`, not `Hidden`, so it drops into any
+  free Medium socket on a building or mobile unit. Mines both (Obsidian 50
+  ticks, Laterite 30 ticks, `data/items.lua`).
+- **`c_human_miner`**, built into two dedicated Human-race ground units
+  (Human Miner Mech `f_human_miner`, and its upgrade Miner Mech
+  `f_human_adv_miner`, both `movement_speed=3`) — `attachment_size =
+  "Hidden"`, whole-unit only, can't be equipped elsewhere. Both are
+  slot-less (no Internal socket for their own behavior controller), same
+  constraint as the "Mining Leader for slot-less Human Miner Mechs" idea
+  above.
+- **`c_alien_miner`**, built into two Alien-race ground units (Alien Unit
+  `f_alienbot`, Drill Spike `f_alien_miner`) — same `Hidden`-attachment,
+  whole-unit-only constraint.
+- **`c_virus_claws`** — Obsidian only, exists only on hostile Virus-faction
+  creatures (e.g. "Mothika," which does fly, `cost_modifier=0`) — not
+  player-buildable or controllable in normal play.
+
+**No flying frame can mine either resource** — confirmed by checking every
+frame carrying one of these four components; none has `cost_modifier = 0`
+except the hostile Virus creature.
+
+### Obsidian/Laterite need a much sparser magnifier pattern than the other four resources
+
+The dense 6-big/2-small lattice above (built to feed fast, Overclock-boosted
+`c_adv_miner` drones at 0.4-0.5 units/s) badly oversupplies `c_extractor`,
+which is much slower (`c_extractor` inherits `c_miner`'s own
+`SetStateStartWork` call, so it gets the same native `eff_boost` treatment
+confirmed above — computed here with the extractor sharing its own
+building's `eff_boost=105`, one Internal-Overclocked small building):
+
+```
+Obsidian: 1 extractor = 0.200/s, 2 extractors = 0.400/s
+Laterite: 1 extractor = 0.333/s, 2 extractors = 0.667/s
+```
+
+Against the dense lattice's 1.956 units/s/node (6 big buildings' regen
+alone, since repurposing the small buildings' Medium sockets for extractors
+means they no longer regen anything), even 2 extractors fall short by
+4.9x (Obsidian) to 2.9x (Laterite) — regen would pin most nodes near the 200
+cap almost permanently, wasting most of the invested magnifier capacity.
+Matching this properly would need ~6 (Laterite) to ~10 (Obsidian) Medium
+sockets' worth of extractors per node — far more than 2 small buildings
+provide.
+
+The **sparse** pattern (one 3M1L building serving its own dedicated 6 packed
+nodes, not shared with 5 other big buildings — the very first pattern this
+doc worked out, `0.326` units/s/node) is a much closer match: 1 extractor
+per node is close to exact for Laterite (`0.326` regen vs `0.333` demand,
+regen slightly under) and reasonably close for Obsidian (`0.326` vs `0.200`,
+some regen margin/slack rather than a mismatch). Not yet turned into a
+concrete buildable layout — see `todo.md`'s "Magnifier / drone-swarm design"
+section.
+
+### A live behavioral bug found downstream: haulers picking up from resource nodes by mistake
+
+`library/hauler.dcs`'s `for_signal_match(Signal=Resource, ...)` (used to
+find drones broadcasting they're carrying a mineable resource, e.g. metal
+ore) also matches resource *nodes* of that same type — traced to
+`for_signal_match`'s own internal fallback (`instructions.lua:~2498`): a
+candidate whose signal value carries an `entity` field gets tested against
+`FilterEntity` too, and a resource node's `FRAMEREG_GOTO` legitimately holds
+its own item id, satisfying that fallback match. The hauler already checks
+`match(Unit=$Signal, Filter=v_droppeditem)` right after (`n43`/`n79`) to
+reject dropped-item false positives — the same idiom fixes this: add (or
+replace with) `match(Unit=$Signal, Filter=v_mineable)` (`v_mineable =
+FF_RESOURCE`, confirmed in `data/utilities.lua`'s `prep_filters` table), or
+better, the single combined `v_resource = FF_RESOURCE|FF_DROPPEDITEM` filter
+to reject both false-positive cases in one instruction instead of two. Not
+yet applied to the checked-in `library/hauler.dcs`.
+
 ## Part 2: Miner-drone behavior design
 
 ### Native mechanics confirmed this session (source-cited, several corrected mid-session)
