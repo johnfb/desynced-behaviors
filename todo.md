@@ -340,7 +340,10 @@ Update this file directly as items are picked up/finished.
       BSF text round-trip for the type-`C` files, skipping type-`B` blueprints) would close
       it cheaply. Needs care around the by-reference staleness fact above: the fixtures churn
       whenever the user re-exports, so assertions should be structural (round-trips clean),
-      never content-pinned.
+      never content-pinned. *Partially covered since the BSF validation work:
+      `test_lint_clean_on_all_library_behaviors` decompiles + lints every library behavior,
+      so decode regressions are caught — the render→parse→compile round-trip half is still
+      open.*
 - [ ] **Fix `semantic_diff`'s rendering of a node inserted at a fallthrough boundary**
       (noticed 2026-07-14 verifying the Mining Leader arm-once fix): the insertion itself
       reports fine, but the predecessor's fallthrough pins are additionally reported as

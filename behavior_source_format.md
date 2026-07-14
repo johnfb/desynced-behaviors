@@ -35,12 +35,12 @@ serve different purposes off the same data.
 ```
 behavior := header instruction+ sub_behavior*
 
-header := "behavior" NAME "(" param_list? ")" ":"
-          ("desc:" STRING)?
-          ("keepvars:" "true")?              -- see "keepvars/keeparrays" below; omitted
+header := "behavior" NAME "(" param_list? ")" ":" header_attr*
+header_attr := "desc:" STRING               -- attrs accepted in any order, each at most once
+             | "keepvars:" "true"            -- see "keepvars/keeparrays" below; omitted
                                               -- entirely when false (the common case), never
                                               -- rendered as "keepvars: false"
-          ("keeparrays:" ("\"startup\"" | "\"store\""))?  -- see below; omitted when absent
+             | "keeparrays:" ("\"startup\"" | "\"store\"")  -- see below; omitted when absent
 
 param_list := param ("," param)*
 param := NAME "*"?                 -- from pnames[i], or "param<i>" if absent; trailing "*" is
@@ -63,12 +63,20 @@ value := NUMBER
        | "@" ("goto" | "store" | "visual" | "signal" | NUMBER)  -- frame register; symbolic name when N is 1-4, else bare @N
        | "fr" "(" NAME ")" ("[" "num" "=" NUMBER "]")?  -- faction (shared) register, resolved by name at runtime
 
-branch_note := ">" (NODE_ID | "POP") "(" PINNAME ")"
-             -- omitted entirely for a plain implicit fallthrough (see below)
+branch_note := ">" (NODE_ID | "POP" | "NEXT") "(" PINNAME ")"
+             -- "NEXT" = explicit fall-to-physically-next. An op with 2+ exec pins must
+             -- write EVERY pin; a single-pin op may omit its note for plain fallthrough.
+             -- See "Explicit-pin rule" below.
 
 sub_behavior := "sub" NAME "(" param_list? ")" ":" instruction+
               -- one per bundled dependencies[]/subs[] entry
 ```
+
+`#` starts a comment (full-line, or trailing after the branch notes) —
+non-structural, dropped on parse, never emitted by the default render; see
+"Comments, annotated rendering" below. Blank lines between instructions are
+allowed and carry no structure (a block ends only at the next
+`behavior`/`sub` header).
 
 `NODE_ID` is an arbitrary, stable identifier — not a number, not required to
 be sequential, not tied to the node's position in the listing. See "Node

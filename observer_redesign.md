@@ -174,7 +174,25 @@ choice (confirmed with the user): something within visibility range is always at
 close as anything the radar could report, so it's a strictly better, zero-lag answer whenever
 it fires, at the cost of paying that search every tick rather than only for radar-less units.
 Only falls through to the poll-gated hardware register read if the fallback found nothing.
-Either way, delivers `Tag := Next Tag` directly.
+
+**Delivery contract (hardened 2026-07-14, after the fallback's unconditional `Result` write
+clobbered Mining Leader's unconsumed scan result):** the fallback reads into a temporary, and
+`Result` and `Tag := Next Tag` are written *together, only when a delivery happens* — a
+fallback hit, the fallback's own answer (even empty) when no radar is equipped, or radar
+completion (even empty, meaning "scan finished, found nothing"). A call while the radar is
+still charging touches neither, so an unconsumed delivery survives polling; only a NEW
+delivery overwrites one (latest wins — consume on the delivery tick, or shadow it yourself).
+One bug was caught in review before this shipped: the first draft's emptiness guard tested
+`Result` (the caller's stale value) instead of the temporary, which would have permanently
+disabled the guard after the first-ever delivery. Recommended consumption idiom: clear `Tag`,
+call, dispatch on `Tag` — Observer's pattern, which makes `Tag` a per-call delivery flag.
+
+**Caller-side rule — arm once per scan.** `Set` resets `Next Tick := now + period` (and the
+radar's own registers) on *every* call, so a caller that re-arms every tick while waiting
+starves the scan: the ready check never passes and only the visibility fallback can ever
+deliver (found live in Mining Leader's `Setup search`, where a stationary leader with nothing
+visible deadlocked outright — fixed with a one-node "already armed" guard before the arm).
+Both subs' `desc` fields now state their side of this contract.
 
 **`Pending Tag` is gone, and that's not a regression.** It existed solely because the unified
 interface coupled every read to that same call's own arm, creating a one-call attribution lag

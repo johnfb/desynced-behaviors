@@ -803,6 +803,13 @@ lookup for non-grid-connected entities — which is *why* it also happens to
 reject Mining Leader/Follower on its own, since a roaming bot has no
 `power_grid_index` at all) gates both.
 
+> **Grammar note (2026-07-14):** the BSF listings in this document (this `MinerDrone` and the
+> `MagnifierSignal` further down) predate the explicit-pin rule — BSF now requires every exec
+> pin of a 2+ pin op to be written (`>node`/`>POP`/`>NEXT`, see `behavior_source_format.md`
+> § "Explicit-pin rule"), so these listings no longer parse verbatim. They're kept as the
+> design record; the live, evolved versions are `library/miner_drone.dcs` /
+> `library/magnifier_signal.dcs` — decompile those for current, parseable text.
+
 ```
 behavior MinerDrone(Resource, MineTarget*):
   desc: "Find a building broadcasting demand for Resource via the drone-only signal (id=Resource, num=-1 -- deliberately distinct from the Hauler-facing num=0/num>0 pickup/dropoff convention Mining Leader/Follower and Fendersons Transport already use on this same Resource id, so a roaming mining squad offering pickup is never mistaken for a stationary mining site), travel there, then reservoir-sample a nearby resource node of that type above the 100-unit floor (skipping oversubscribed nodes via Signal broadcast), mine it down to the floor by driving the register-linked MineTarget parameter directly (link MineTarget to register 1 of every c_miner/c_adv_miner on this drone via the Link Editor -- no mine() call), then repeat. Both candidate searches reject anything outside this drone's own power grid -- drones have no capacitor and become extremely slow off-grid, so leaving grid coverage is never acceptable, not just suboptimal. Falls back to re-picking a building whenever no valid local candidate is found."

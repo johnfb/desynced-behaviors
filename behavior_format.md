@@ -890,30 +890,28 @@ slots (`Filter2`, `Filter3`) are left unused — the positions are fixed by
 
 ## Recommended authoring workflow
 
-There's no assembler/validator for this format — the game's compiler
-(`GetFactionBehaviorAsm`) is the only thing that checks it, at load time.
-To hand-author safely:
+**Don't author at this wire level directly** — that's what BSF exists for
+(`behavior_source_format.md`, implemented in `desynced_toolkit.bsf`): it
+handles the position re-indexing, off-by-one branch encoding, and
+`make_asm` hidden fields described in this document mechanically, validates
+strictly (unknown ops/args/pins/ids, duplicates — with line numbers and
+suggestions), and lints the legal-but-suspicious tier. The normal loop:
 
-1. Decode an existing behavior close to what you want (`data.behaviors`,
-   or `observer.dcs`) with `desynced_toolkit`'s `LupaEngine.decode_dcs()`
-   (backed by `dcs_wire.py`) to get a real starting structure, as a genuine
-   Lua table — or build one directly with `compiler.AstCompiler` for the
-   subset of syntax it currently supports.
-2. Edit the instruction list: add/remove/rewire instructions using
-   `instructions_index.md` for each instruction's `args` order and this
-   file for value/branch encoding.
-3. Re-index every instruction key if you insert/delete entries in the
-   middle — `exec`/`next` targets are absolute positions, so inserting an
-   instruction shifts every index after it and any jump that pointed past
-   that point needs updating. Remember the off-by-one when writing these:
-   a jump to Lua key `K` is encoded as the integer `K + 1` (see "Branch and
-   fall-through resolution").
-4. Encode with `LupaEngine.encode_dcs()`, then immediately decode the
-   result again and diff against what you intended — this round-trip is
-   your only correctness check outside the game itself. `Interpreter` can
-   also run the decoded result directly against the real instruction
-   semantics before spending an in-game test on it, which catches
-   authoring mistakes (as opposed to genuine encoding-understanding gaps)
-   cheaply.
+1. `python -m desynced_toolkit.bsf decompile` an existing behavior close to
+   what you want (or start a BSF file from scratch).
+2. Edit the text.
+3. `compile` (parse validation + lint warnings run automatically), then
+   `semantic-diff` the result against the original to confirm exactly the
+   intended changes and nothing else.
+4. Optionally run the result through `Interpreter` against the real
+   instruction semantics before spending an in-game test on it.
 5. Load it in-game (paste into the behavior library) to confirm it opens
    cleanly in the visual editor and runs as expected.
+
+The raw-table route (decode with `LupaEngine.decode_dcs()`, edit the Lua
+table per this document, re-encode) remains available for work *on the wire
+format itself* — just remember that `exec`/`next` targets are absolute
+positions (inserting an instruction shifts every index after it), the
+off-by-one (a jump to Lua key `K` is encoded as `K + 1`), and that an
+immediate decode-and-diff of your own re-encoded output is the only
+correctness check outside the game.
