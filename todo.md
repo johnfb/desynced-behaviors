@@ -4,6 +4,19 @@ Plain checked-in todo list (preferred over the CLI's session-scoped Task tool, w
 stored under `~/.claude/tasks/<session-id>/` and isn't visible from a different session).
 Update this file directly as items are picked up/finished.
 
+## Next game release (experimental changelog reviewed 2026-07-14)
+
+- [ ] **Work through `upcoming-changes.md`'s "Impact review" section when the release
+      lands.** The experimental changelog (1.0.17919–1.0.18044) is copied there with a full
+      cross-reference against this repo appended: deployed-behavior audits (Observer's
+      `value_type` dispatch first, then the `is_empty`-on-destroyed-refs sweep,
+      `for_signal_match` num-comparison in Check Avoidance, GOTO semantics), toolkit/wire
+      impacts (the new branched-`Return` call pins are the big one; mass
+      deprecation/auto-convert of `set_number`/`combine_coordinate`/etc.; removed ops that
+      break argcache on old corpus data), `instructions_index.md` regeneration, and the
+      standing first step: update the extract, run the full test suite. Note: the
+      portable-radar timing bug is absent from the changelog — expect it still broken.
+
 ## Mining Leader / Follower review
 
 - [x] **Fix `$Offset` reset asymmetry in Miner Follower V2.0's `v_arrow_down` empty-signal
