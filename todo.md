@@ -251,13 +251,20 @@ Update this file directly as items are picked up/finished.
       instead only requires the same `GetPowerGridIndexAt` grid index on both ends, no
       adjacency at all. `c_autobase` *is* the "AI Behavior Controller" component (Internal,
       alien tech); a Power Field (`c_power_relay`) extends the grid over the squad.
-      **Confirmed live 2026-07-14** with a purpose-built `Remote Write Test` behavior running
-      on the AI Behavior Controller: all four frame registers of a same-grid, NON-adjacent
-      unit accepted remote writes (`Failed` pin never fired). Still open before the design is
-      buildable: remote-writing a *miner component* register (the actual mining-target drive,
-      cf. `reference_cminer_register2` memory), the off-grid negative control, and the actual
-      Foreman behavior design. Directly relevant to Obsidian/Laterite (below): Human Miner
-      Mechs are one of only two practical mobile options for those, both slot-less.
+      **Mechanism fully confirmed live 2026-07-14** with a purpose-built `Remote Write Test`
+      behavior on the AI Behavior Controller: (a) all four frame registers of a same-grid,
+      NON-adjacent unit accept remote writes, and the remote GOTO drives movement normally;
+      (b) the off-grid negative control is exact — the gate flips at the boundary, writes are
+      inert outside, and resume the instant the unit re-enters (evaluated live per write, not
+      cached); (c) writing a resource-node ref into the mech's `c_human_miner` register 1
+      makes it walk over and mine, no Program of its own. Two design constraints found doing
+      (c): the miner normalizes register 1 to item-id form (`obsidian[num=∞]`) within ticks,
+      so assignment verification must read register 2, not entity-compare register 1; and on
+      current stable, re-writing the target resets mining progress every time (the exact bug
+      fixed in experimental 1.0.17996) — the Foreman must write once per assignment
+      (arm-once). Remaining: the actual Foreman behavior design itself. Directly relevant to
+      Obsidian/Laterite (below): Human Miner Mechs are one of only two practical mobile
+      options for those, both slot-less.
 - [ ] **(Idea, not started) Obsidian/Laterite mining design.** Researched 2026-07-12: neither
       resource is mineable by `c_miner`/`c_adv_miner` at all (absent from both items' own
       `mining_recipe` in `data/items.lua`) — the only options are `c_extractor` (Medium socket,
