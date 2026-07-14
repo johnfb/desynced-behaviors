@@ -76,6 +76,40 @@ Update this file directly as items are picked up/finished.
       can't be reused directly), tuned standoff constants (14→20 unstealthed, 5→10 stealthed)
       — reviewed clean, no bugs found. `observer_redesign.md` fully updated to match the
       actual implemented design in both tasks' sections.
+- [x] **Harden `Async Radar Get`'s delivery contract.** Done 2026-07-14 (in-game edit,
+      re-exported to `library/async-radar-get.dcs` and propagated into the Mining Leader/
+      Observer exports automatically by the in-game by-reference subroutine mechanism):
+      `get_closest_entity` now reads into a temporary, and `Result`+`Tag` are written
+      together, only when a delivery actually happens — fallback hit, authoritative
+      fallback-empty in no-radar mode, or radar completion (which delivers even an empty
+      result, meaning "scan finished, found nothing"); a charging-radar poll touches neither.
+      Closes the "unconsumed result clobbered by the next poll" hazard class root-caused
+      during the Mining Leader scan-result bug. One bug caught in review before it shipped:
+      the first draft's emptiness guard tested `Result` (the caller's stale value) instead of
+      the temporary, which would have permanently disabled the guard after the first-ever
+      delivery and turned every subsequent poll into a Tag-signaled delivery of the raw
+      fallback. Observer needed no changes — its clear-Tag-then-dispatch consumption pattern
+      already treated Tag as a per-call delivery flag.
+- [x] **Fix Mining Leader's resource-scan starvation.** Done 2026-07-14: the `c_small_radar`
+      case-1 branch re-armed `Async Radar Set` every tick while waiting for the resource scan
+      (`$Tag` stays enemy until a delivery arrives), and every `Set` call resets
+      `Next Tick := now + period` — so the radar-path resource delivery could never become
+      ready (period 10 with small radars, so strictly worse after the fleet upgraded away
+      from portables' period 2). Only the visibility-range fallback ever delivered, and a
+      stationary leader with nothing visible deadlocked outright: no delivery could flip
+      `$Tag` to `v_resource`, so it couldn't even reach `v_transport_route` to wander. Fixed
+      with a one-node arm-once guard (`compare_item($NextTag, v_resource) → If Equal → POP`)
+      between the `is_moving` check and the arm.
+- [ ] **Update `Async Radar Set`/`Get`'s `desc` fields to state the contract explicitly.**
+      Get: Result and Tag are written together, only on delivery; a call while the radar is
+      charging touches neither; radar completion delivers even an empty result. Set: calling
+      it resets the countdown — arm once per scan and wait (the caller-side lesson from the
+      starvation bug). Worth also naming the recommended consumption idiom (Observer's
+      clear-Tag → call → dispatch-on-Tag, which makes Tag a per-call delivery flag).
+- [ ] **Verify the arm-once fix in-game**: a stationary Mining Leader with a small radar and
+      no resource node in visibility range should now acquire beyond-visibility nodes via the
+      radar path, and wander (`v_transport_route`) on a genuinely-empty scan instead of
+      standing still forever.
 
 ## Local behavior-library storage (`desynced_toolkit`)
 
@@ -99,7 +133,14 @@ Update this file directly as items are picked up/finished.
       real library-id references once/if this project's local store can track real assigned
       ids) when producing the final `.dcs`. Not designed in detail yet — flagged by the user
       as one of two things to think about next, alongside the `Async Radar` interface
-      redesign above.
+      redesign above. **Motivation confirmed harder 2026-07-14:** in-game, library
+      subroutines are genuinely by-reference — editing one updates *and restarts* every
+      behavior calling it, with no per-caller action; embedding happens only at
+      clipboard-export time. So every checked-in *caller* export silently goes stale the
+      moment a shared sub is edited in-game, even though the caller itself changed nothing.
+      Seen live: one in-game edit to `Async Radar Get` propagated into three separate
+      `library/` exports (and Observer's export picked up the earlier
+      `memory_insert`→`memory_set` fix its checked-in copy had been missing).
 
 ## Magnifier / drone-swarm design
 
@@ -270,6 +311,21 @@ Update this file directly as items are picked up/finished.
       `render_examples.py`). Currently exercised only by direct manual runs and one real live
       edit — not covered by `uv run pytest tests/` at all, a gap explicitly flagged in
       `CLAUDE.md` as "worth closing before relying on them for more than ad hoc use."
+- [ ] **Add automated round-trip coverage for `library/*.dcs`** (from the 2026-07-14 repo
+      review): tests read fixtures only from `tests/data/`, so the living library exports
+      have zero automated coverage — nothing in CI would notice a pipeline regression against
+      the real deployed behaviors. A parametrized decode/re-encode over `library/` (plus a
+      BSF text round-trip for the type-`C` files, skipping type-`B` blueprints) would close
+      it cheaply. Needs care around the by-reference staleness fact above: the fixtures churn
+      whenever the user re-exports, so assertions should be structural (round-trips clean),
+      never content-pinned.
+- [ ] **Fix `semantic_diff`'s rendering of a node inserted at a fallthrough boundary**
+      (noticed 2026-07-14 verifying the Mining Leader arm-once fix): the insertion itself
+      reports fine, but the predecessor's fallthrough pins are additionally reported as
+      "pin now resolves to a different node (expected the match of 'n23', got 'n23')" — old-
+      and new-file node ids render identically, making the message unreadable, and the pin
+      lines are redundant with the reported insertion anyway (the retarget is implied by a
+      node having been spliced into the fallthrough chain).
 - [ ] **Require explicit pin wiring in BSF text for any op with 2+ declared exec pins** (user
       idea, 2026-07-11, prompted by hitting the loop-`Done`-omission bug twice in one session —
       see `feedback_bsf_loop_done_pin_omission` memory). Currently an omitted pin silently means
@@ -303,7 +359,11 @@ Update this file directly as items are picked up/finished.
       config. `ruff` covers formatting + linting (replacing black/flake8/most of pylint's
       ruleset in one fast tool); `mypy` is the separate, complementary type-checking pass ruff
       doesn't do at all. Add both as explicit dev dependencies in `pyproject.toml`, add a
-      checked-in `ruff` config, and decide on `mypy` strictness.
+      checked-in `ruff` config, and decide on `mypy` strictness. (A one-off `uvx ruff check`
+      during the 2026-07-14 repo review found a handful of findings — unused imports,
+      placeholder-less f-strings in `scripts/analyze_corpus.py`, and two annotation-only
+      `F821 undefined name 'lupa'` warnings fixable with a `TYPE_CHECKING` import — cheap to
+      burn down when this lands.)
 
 ## Tooling / cosmetic, low priority
 
