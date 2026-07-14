@@ -182,6 +182,18 @@ def _split_first_top_level_eq(s: str) -> tuple[str, str]:
     raise SyntaxError(f"expected '=' in arg: {s!r}")
 
 
+def _strip_trailing_comment(line: str) -> str:
+    """Removes a trailing `# ...` comment (quote-aware: a `#` inside a quoted string is
+    content, not a comment). Comments are never structural: parse drops them, the default
+    render never emits them, and the annotated render mode (`render_behavior(...,
+    annotate=True)`) emits them freely -- so annotated output stays parseable. Deliberately
+    stripped *before* branch-note scanning: a comment containing `>foo (bar)` must not parse
+    as a branch note."""
+    masked = _mask_quotes(line)
+    idx = masked.find("#")
+    return line[:idx].rstrip() if idx >= 0 else line
+
+
 def _parse_number(s: str) -> int | float:
     s = s.strip()
     return float(s) if "." in s else int(s)
@@ -326,6 +338,7 @@ def parse_node(
     branch_notes_str = after[close + 1 :]
 
     node = BsfNode(id=node_id, op=op)
+    branch_notes_str = _strip_trailing_comment(branch_notes_str)
     hidden_fields = {f for o, f in HIDDEN_FIELD_TABLE.items() if o == op} | {"cmt"}
     # A dynamic-arg op's value-arg names come from the *target* sub's own parameters, which may
     # not even be parsed yet -- name validation for those happens at compile time instead.
@@ -394,7 +407,7 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
     attrs: dict[str, object] = {}
     while i < len(lines):
         stripped = lines[i].strip()
-        if stripped == "":
+        if stripped == "" or stripped.startswith("#"):
             i += 1
             continue
         key = stripped.split(":", 1)[0].strip() if ":" in stripped else None
@@ -430,7 +443,7 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
     # made every following node die with a baffling "expected 'sub' header".
     while i < len(lines):
         stripped = lines[i].strip()
-        if stripped == "":
+        if stripped == "" or stripped.startswith("#"):
             i += 1
             continue
         if stripped.startswith(("sub ", "behavior ")):
@@ -479,7 +492,7 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
 def parse_behavior(text: str, argcache: ArgCache) -> BsfBehavior:
     lines = text.split("\n")
     i = 0
-    while i < len(lines) and lines[i].strip() == "":
+    while i < len(lines) and (lines[i].strip() == "" or lines[i].strip().startswith("#")):
         i += 1
     if i >= len(lines):
         raise BsfParseError("empty input (expected a 'behavior' header)")
@@ -487,7 +500,7 @@ def parse_behavior(text: str, argcache: ArgCache) -> BsfBehavior:
 
     subs = []
     while i < len(lines):
-        while i < len(lines) and lines[i].strip() == "":
+        while i < len(lines) and (lines[i].strip() == "" or lines[i].strip().startswith("#")):
             i += 1
         if i >= len(lines):
             break

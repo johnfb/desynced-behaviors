@@ -293,3 +293,39 @@ def test_lint_clean_on_all_library_behaviors(engine, argcache):
         assert lint_behavior(b, argcache) == [], f.name
         checked += 1
     assert checked >= 1
+
+
+# -- comments and annotated rendering ---------------------------------------------------------
+
+
+def test_full_line_and_trailing_comments_ignored(argcache):
+    b = _parse(
+        "# top comment\n"
+        "behavior T():\n"
+        "# after header\n\n"
+        "n1: set_reg(Value=1, Target=$B)  # trailing note\n"
+        "# between nodes\n"
+        "n2: set_reg(Value=v_resource, Target=$C)  >n1 (next)  # note with >fake (Pin)\n",
+        argcache,
+    )
+    assert b.order == ["n1", "n2"]
+    assert b.nodes["n2"].branches["next"] == "n1"
+
+
+def test_hash_inside_quoted_cmt_is_content_not_comment(argcache):
+    b = _parse('behavior T():\n\nn1: set_reg(Value=1, Target=$B, cmt="see #4")\n', argcache)
+    assert b.nodes["n1"].hidden["cmt"] == "see #4"
+
+
+def test_annotated_render_parses_to_same_compile(engine, argcache):
+    from pathlib import Path
+
+    from desynced_toolkit.bsf.decompile import decompile_dcs
+    from desynced_toolkit.lua_util import to_py
+
+    raw = (Path(__file__).parent / "data" / "mining_leader.dcs").read_text().strip()
+    b1 = decompile_dcs(engine, raw)
+    annotated = render_behavior(b1, argcache, annotate=True)
+    assert "# Copy" in annotated  # set_reg's in-game display name
+    b2 = parse_behavior(annotated, argcache)
+    assert to_py(compile_behavior(engine, b1, argcache)) == to_py(compile_behavior(engine, b2, argcache))

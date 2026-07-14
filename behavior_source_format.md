@@ -401,6 +401,25 @@ where there is nothing to forget and sequential code reads best bare.
 `NEXT` is accepted (never required) on single-pin ops too. `POP` and `NEXT`
 are reserved words and cannot be node ids.
 
+### Comments, annotated rendering, and referring to nodes
+
+`#` starts a comment: a full line, or trailing after a node's branch notes
+(quote-aware — a `#` inside a quoted string is content). Comments are
+non-structural: parse drops them, the default render never emits them
+(keeping diffs stable), and `render_behavior(..., annotate=True)` (CLI:
+`decompile --annotate`) uses them for human-correlation aids — each
+instruction's **visual-editor display name** where it differs from the op
+id (`set_reg` displays as "Copy", `check_number` as "Compare Number";
+sourced live from `data.instructions[op].name` via
+`ArgCache.display_name`), plus a blank line before each `label` section.
+
+The reason annotate mode exists: node ids are decompiler-generated —
+invisible in the game's own editor and unstable across re-exports — so a
+statement addressed to a *person* must never anchor on one. Anchor on what
+the editor shows: display name, argument values, `cmt`, enclosing label
+section, plus a short BSF excerpt for wiring discussions. (Node ids remain
+the right way to write edges *within* BSF text itself.)
+
 ### Validation (strict by design)
 
 `parse_text.py` rejects, with line numbers and did-you-mean suggestions:

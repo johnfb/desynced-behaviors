@@ -77,6 +77,15 @@ class ArgCache:
     def op_exists(self, op: str) -> bool:
         return self.engine.data.instructions[op] is not None
 
+    def display_name(self, op: str) -> str | None:
+        """The instruction's visual-editor display name (`data.instructions[op].name`, e.g.
+        `set_reg` -> "Copy", `check_number` -> "Compare Number") -- what the user actually sees
+        on the node in-game, and therefore the vocabulary any user-facing reference to a node
+        should be phrased in (BSF op ids and node ids are tooling-internal)."""
+        d = self.engine.data.instructions[op]
+        name = d.name if d is not None else None
+        return name if isinstance(name, str) else None
+
     def all_ops(self) -> list[str]:
         """Every op id in the live `data.instructions` table -- used only for typo suggestions."""
         return [k for k in self.engine.data.instructions.keys() if isinstance(k, str)]

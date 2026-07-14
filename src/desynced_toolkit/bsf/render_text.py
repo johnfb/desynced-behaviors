@@ -20,7 +20,8 @@ _SYMBOLIC_FRAME_REGS = {-1: "goto", -2: "store", -3: "visual", -4: "signal"}
 # BSF syntax (`A)  >POP (next)`) and a multi-line `cmt` -- both silently corrupted or crashed the
 # round trip before this fix (see reference_dangling_param_ref_copy_paste.md's sibling finding for
 # the sequence of events).
-_UNSAFE_VAR_CHARS = set('(),[]"\\\n\r')
+_UNSAFE_VAR_CHARS = set('(),[]"#\\\n\r')  # '#' added with comment support: an unquoted
+# variable name containing '#' would be truncated by parse_text's trailing-comment strip
 
 
 def _fmt_num(n: int | float) -> str:
@@ -191,7 +192,13 @@ def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, s
     return line
 
 
-def _render_into(b: BsfBehavior, lines: list[str], keyword: str, argcache: ArgCache) -> None:
+def _naive_pretty_op(op: str) -> str:
+    return op.replace("_", " ").title()
+
+
+def _render_into(
+    b: BsfBehavior, lines: list[str], keyword: str, argcache: ArgCache, annotate: bool = False
+) -> None:
     # behavior_source_format.md's `param := NAME` has no room for a parameter's direction at
     # all -- another real gap (see render_hidden_value's docstring for the sibling one).
     # Minimal extension: a trailing `*` marks a parameter written to somewhere in this
@@ -214,13 +221,31 @@ def _render_into(b: BsfBehavior, lines: list[str], keyword: str, argcache: ArgCa
     lines.append("")
     jump_targets = _jump_label_targets(b.nodes)
     for node_id in b.order:
-        lines.append(render_node(b.nodes[node_id], b.params, jump_targets, argcache))
+        node = b.nodes[node_id]
+        if annotate and node.op == "label" and lines[-1] != "":
+            # visual sectioning: label nodes head the behavior's own named sections
+            lines.append("")
+        line = render_node(node, b.params, jump_targets, argcache)
+        if annotate:
+            # The visual editor's own display name for this instruction -- the vocabulary the
+            # user sees on the node in-game -- appended wherever it isn't derivable from the
+            # op id by inspection (`set_reg` is displayed as "Copy"; `set_number` as
+            # "Set Number" needs no note). Comments are dropped by parse, so annotated
+            # output still round-trips.
+            display = argcache.display_name(node.op)
+            if display and display != _naive_pretty_op(node.op):
+                line += f"  # {display}"
+        lines.append(line)
     for sub in b.subs:
         lines.append("")
-        _render_into(sub, lines, keyword="sub", argcache=argcache)
+        _render_into(sub, lines, keyword="sub", argcache=argcache, annotate=annotate)
 
 
-def render_behavior(b: BsfBehavior, argcache: ArgCache) -> str:
+def render_behavior(b: BsfBehavior, argcache: ArgCache, annotate: bool = False) -> str:
+    """`annotate=True` adds non-structural `#` comments for human correlation with the in-game
+    editor: each instruction's visual display name where it differs from the op id, and a blank
+    line before each label section. Annotated output parses identically (comments are
+    stripped); the default render never emits comments, keeping diffs stable."""
     lines: list[str] = []
-    _render_into(b, lines, keyword="behavior", argcache=argcache)
+    _render_into(b, lines, keyword="behavior", argcache=argcache, annotate=annotate)
     return "\n".join(lines)

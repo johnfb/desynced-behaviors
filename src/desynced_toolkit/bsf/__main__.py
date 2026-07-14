@@ -23,10 +23,10 @@ from desynced_toolkit import LupaEngine, open_asset_source
 from desynced_toolkit.bsf import (
     ArgCache,
     compile_dcs,
-    dcs_to_bsf,
     decompile_dcs,
     lint_behavior,
     parse_behavior,
+    render_behavior,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -53,6 +53,13 @@ def main(argv: list[str] | None = None) -> int:
     p_decompile = sub.add_parser("decompile", help="stdin: .dcs string -> stdout: BSF text")
     p_decompile.add_argument("--input", type=argparse.FileType("r"), default=sys.stdin)
     p_decompile.add_argument("--output", type=argparse.FileType("w"), default=sys.stdout)
+    p_decompile.add_argument(
+        "--annotate",
+        action="store_true",
+        help="add non-structural '#' comments: each instruction's in-game display name "
+        "(set_reg is displayed as 'Copy') and blank lines before label sections -- for "
+        "correlating BSF text with what the user sees in the visual editor",
+    )
 
     p_compile = sub.add_parser("compile", help="stdin: BSF text -> stdout: .dcs string")
     p_compile.add_argument("--input", type=argparse.FileType("r"), default=sys.stdin)
@@ -79,10 +86,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "decompile":
         dcs_str = args.input.read().strip()
         try:
-            bsf_text = dcs_to_bsf(engine, dcs_str)
+            behavior = decompile_dcs(engine, dcs_str)
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
+        bsf_text = render_behavior(behavior, ArgCache(engine), annotate=args.annotate)
         args.output.write(bsf_text)
     elif args.command == "compile":
         bsf_text = args.input.read()
