@@ -20,6 +20,32 @@ directional-bias random walking, tuned standoff constants) and reviewed clean, n
 See each task's own section below for the actual implemented design, not just the original
 plan.
 
+**Update (2026-07-14): `Async Radar` split into `Async Radar Set`/`Async Radar Get`.** Using
+Task 1 for real in-game surfaced a second, more fundamental interface problem than the
+attribution ambiguity above: the unified subroutine bundled *reading* the previous result and
+*arming* the next filter into one call, so the next filter had to be decided before that same
+call's own result was visible — exactly backwards from what a priority-lock cascade needs
+(decide the next filter *from* the result you just saw). Two fixes were considered: give the
+caller a way to react to a change in the radar's result register via `event_parameter`
+(rejected — traced how the engine's `event_parameter`/`event_radio` instructions actually work
+and found they hijack the *entire* program counter on fire, discarding the whole active block
+and call stack, not just whatever's watching the radar; also only live on the outermost
+behavior assigned to a component, never inside a `call`ed subroutine — unusable without
+wrecking Task 2's own concurrent state every time the radar updated); and splitting the
+subroutine in two, so arming and reading become independent calls the caller can sequence
+however it needs — chosen, and implemented as `library/async-radar-set.dcs` /
+`library/async-radar-get.dcs`. See "`Async Radar Set`/`Async Radar Get`" below for the new
+interface and why `Pending Tag` (the previous design's attribution fix) turned out to be
+unneeded once arming and reading were decoupled. `library/mining_leader.dcs` and
+`library/observer.dcs` were both rebuilt around the split and re-reviewed; two real bugs were
+found and fixed during that pass (`Async Radar Get`'s `Next Tick` bookkeeping — see below —
+and `Observer`'s shared "wrap back to enemy" step clearing `@signal`/`@visual` on every found
+stage, not just the genuinely-empty one). Separately, digging into *why* register writes
+seemed to affect radar timing surfaced a real engine quirk (`c_portable_radar` uses a fixed
+`TICKS_PER_SECOND`-length work period on any register-write-triggered activation, decoupled
+from the equipped radar's own `charge_time`) — filed as a bug report, unrelated to the `.dcs`
+bugs above once the actual `Next Tick` math was traced correctly.
+
 ## Background
 
 The current `observer.dcs` is one linear per-tick pass: `unlock() -> wait(1) -> [scan for
@@ -117,6 +143,60 @@ anyway, and stays consistent with this project's established jump/label idiom (M
 Leader's own `v_broken[num=1]`/`[num=10]`, `HexIndexOf`'s region dispatch) rather than
 introducing a more verbose pattern just for this one case.
 
+### `Async Radar Set`/`Async Radar Get` (superseded the unified interface above, 2026-07-14)
+
+**Why**: the unified subroutine's `Filter 1/2/3` (input) and `Result`/`Tag` (output) were all
+parameters of the same call, so arming the next query and reading the previous one's result
+were the same atomic step — the next filter had to be chosen *before* that call's own result
+was visible. Fine for Mining Leader (each phase always re-arms the same fixed filter it's
+already waiting on), but wrong for a priority-lock cascade like Task 1, which must inspect the
+delivered result to decide what to look for next. Considered and rejected: reacting to the
+radar's result register via `event_parameter`/`event_radio` — traced how these actually behave
+(`data/instructions.lua` `event_setup`/`event_trigger`, dispatched from
+`InstTriggerEvent`/`data/library.lua`) and found they hijack the entire program counter on
+fire — unrolling the whole call stack and discarding every active block (loop/`sequence`),
+not just whatever's watching the radar — and only work when placed in the outermost behavior
+assigned to a component, never inside a `call`ed subroutine. Using one to react to a filter
+result would have blown away Task 2's own concurrent state on every radar update, exactly the
+kind of workaround-not-a-fix the user has rejected before (see the `Pending Tag` history
+above).
+
+**`Async Radar Set(Radar*, Index, Next Tick*, Filter 1, Filter 2, Filter 3)`** — arms the next
+query. Detects/caches the radar exactly as before, saves `Filter 1/2/3` into a memory array
+keyed by `Index` (so `Get`'s fallback path can read them back without needing its own copy of
+the filter registers), writes them into the physical registers if a radar is equipped, and
+computes `Next Tick := simulation_tick() + Radar's own num` (charge_time) fresh every call.
+
+**`Async Radar Get(Radar, Index, Next Tick*, Result*, Tag*, Next Tag)`** — reads the current
+result. Tries the visibility-range fallback (`get_closest_entity` against the memory-array
+filters) unconditionally first, every call, even when a radar is equipped — a deliberate
+choice (confirmed with the user): something within visibility range is always at least as
+close as anything the radar could report, so it's a strictly better, zero-lag answer whenever
+it fires, at the cost of paying that search every tick rather than only for radar-less units.
+Only falls through to the poll-gated hardware register read if the fallback found nothing.
+Either way, delivers `Tag := Next Tag` directly.
+
+**`Pending Tag` is gone, and that's not a regression.** It existed solely because the unified
+interface coupled every read to that same call's own arm, creating a one-call attribution lag
+that had to be tracked explicitly. `Set` and `Get` are fully decoupled now — `Get` never arms
+anything — so there's no overlap to disambiguate *as long as the caller never arms a new query
+before consuming the previous one's result*. That's not an incidental property of how Mining
+Leader or Observer happen to call it; it's the actual reason this split exists: Task 1's
+cascade cannot decide its next filter until it has seen the current one's result, so
+one-outstanding-query-at-a-time is the whole point, not a limitation. A caller that ever needed
+real overlapping queries wouldn't be well served by this interface, but none does, and none is
+expected to.
+
+One suspected bug was raised and then retracted during review: `Get` computes
+`Next Tick := Next Tick + Radar.num` (compounding off its *own* previous value, not a freshly
+read `simulation_tick()`), which looked at first like it would let `Next Tick` permanently fall
+behind and break the poll gate. Tracing the actual call order showed this isn't a problem —
+`Set` already re-anchors `Next Tick` to a real, fresh tick every time it's called, before the
+polling loop ever runs, so `Get` is only ever compounding onto an already-correct value. It's
+arguably the more precise formula of the two: it tracks the hardware's own deterministic
+schedule exactly, rather than re-anchoring to whatever tick `Get` happened to be called on.
+No change made.
+
 ### No-radar fallback: `has_like_component` + Scout Radar exclusion
 
 Many of the mobile units this runs on won't have any radar/sensor component equipped at all
@@ -192,6 +272,16 @@ since the variable itself is gone in the current design; worth recording that th
 process caught real, non-obvious bugs before they'd have shipped, twice — the reason this
 whole interface redesign was worth pausing Observer for in the first place.
 
+**Rebuilt again (2026-07-14) around the `Set`/`Get` split.** `$NextFilter`/`$PendingTag` are
+gone; each phase now calls `Async Radar Set` directly with the literal filter it wants
+(`v_enemy_faction`, `Resource`, ...) at the exact point it decides to switch, instead of
+staging the decision into a shared variable for one common call site to pick up later. `Index`
+is always `c_portable_radar` — safe because memory arrays are scoped per-entity, and this
+behavior only ever runs one radar concern at a time, never two overlapping. Reviewed clean
+after the rebuild; no bugs found on this pass (the two flagged during review — `Next Tick`'s
+bookkeeping and the missing `Pending Tag` — were both traced and found to be non-issues, see
+the interface section above).
+
 ## Task 1: sensing loop
 
 **Implemented, compiled, and reviewed** (superseding an earlier round-robin-cascade draft of
@@ -201,44 +291,50 @@ that stage (enemy) or *resetting back to the top* (damaged, infected), never adv
 — only an empty result at a stage advances one step down the priority ladder. Concretely:
 
 - **Enemy** (top priority): found → report, then submit *nothing different* next call — no
-  `$NextFilter`/`$NextTag` write at all in that path, so the same enemy filter just keeps
-  getting resubmitted. "Keep tracking" is implemented by omission, not a special case. Empty →
-  advance filters/tag to Damaged.
-- **Damaged**: found → report, then explicitly reset `$NextFilter1/2`/`$NextTag` back to
-  enemy. Empty → advance to Infected.
-- **Infected**: found → report, then reset back to enemy (reusing Damaged's own "reset to
-  enemy" block rather than duplicating it). Empty → advance to Dropped.
+  `Async Radar Set` call at all in that path, so the same enemy filter just keeps getting
+  polled. "Keep tracking" is implemented by omission, not a special case. Empty → `Set` arms
+  Damaged.
+- **Damaged**: found → report, then explicitly re-`Set` back to enemy. Empty → `Set` arms
+  Infected.
+- **Infected**: found → report, then re-`Set` back to enemy (jumping into the shared "wrap to
+  enemy" block below rather than duplicating it). Empty → `Set` arms Dropped.
 - **Dropped** (only reachable at all once enemy/damaged/infected were *all* empty this pass):
-  found or empty, either way — report first if found, then **unconditionally** increment
-  `$CycleId`, publish `$CycleAccum` into `$CycleFoundAny`, and reset `$CycleAccum` for the
-  next pass, before resetting back to enemy. (A real bug here — only the *empty* branch did
-  this bookkeeping in an earlier draft, so a found dropped item silently skipped publishing a
-  cycle completion and left `$CycleAccum` contaminated for a later pass — found during review,
-  fixed by making the bookkeeping the unconditional tail both branches fall into, matching the
-  shape the other three stages already use.)
+  found → report, then re-`Set` back to enemy. Empty → increment `$CycleId`
+  ("only advance the cycle if nothing was found" — see below for why this alone is a
+  sufficient completion signal), then also re-`Set` back to enemy.
 
 Tags are just the filter constants themselves (`v_enemy_faction`, `v_damaged`, `v_infected`,
 `v_droppeditem`) rather than an invented label family — simpler than the original plan below,
 since the filters are already unique per stage, nothing extra needed to identify them.
 
 **Needs genuine disambiguation** (multiple different filters used across one shared
-`Result`/`Tag` pair) — unlike Mining Leader's aliased-shortcut case above, `Tag` and
-`Pending Tag` are two separate persistent locals here, not the same variable. Dispatch is
-`jump(Label=$Tag)` after each call: no match (still holding whichever tag the *previous*
-completion delivered) → nothing new this tick, keep waiting; a match → handle that stage's
-fresh result as described above.
+`Result`/`Tag` pair), but — per the `Set`/`Get` split above — no `Pending Tag` needed for it:
+`Tag` alone is unambiguous here because each stage always consumes the previous result and
+decides the next filter before arming it, never arming a new query while one is still
+outstanding. Dispatch is `jump(Label=$Tag)` after each call: no match (still holding whichever
+tag the *previous* completion delivered) → nothing new this tick, keep waiting; a match →
+handle that stage's fresh result as described above.
 
-**Why this shape gives Task 2 exactly the guarantee it needs, for free:** because finding
-anything in enemy/damaged/infected loops straight back to the top without ever reaching
-Dropped, the cycle-completion bookkeeping is *only* ever reached when all three were already
-empty this pass. So `$CycleId` advancing with `$CycleFoundAny = false` now means precisely
-"all four categories were checked this pass and none of them found anything" — exactly the
-"scanned for all four, no result" condition Task 2 needs before considering a random move (see
-Task 2's own note below) — no extra coordination needed between the two tasks beyond reading
-those two variables, despite Task 1's control flow being considerably more involved than a
-flat round-robin.
+**Why this shape gives Task 2 exactly the guarantee it needs, for free — no `$CycleFoundAny`
+required:** an earlier draft published a separate `$CycleAccum`/`$CycleFoundAny` flag
+("did *anything* get found this cycle") for Task 2 to read, on top of `$CycleId`. It turned out
+to be redundant and was removed: because finding anything in enemy/damaged/infected loops
+straight back to the top without ever reaching Dropped, the *only* way `$CycleId` ever
+increments at all is when Dropped's own check is reached **and** finds nothing — which, by that
+same loop-back structure, is only possible if enemy/damaged/infected were also all empty this
+pass. So `$CycleId` advancing already means precisely "all four categories were checked this
+pass and none of them found anything" — no second variable needed to say the same thing.
 
-`$CycleId` and `$CycleFoundAny` are the only two things Task 2 needs to read from Task 1.
+**A real bug found and fixed during the `Set`/`Get` migration**: the shared "wrap back to
+enemy" block (re-`Set` enemy, called from all three non-Enemy stages) briefly also cleared
+`@signal`/`@visual` unconditionally — so a Damaged/Infected/Dropped stage that *found*
+something would set `@signal`/`@visual` to report it, then immediately clear both again in the
+same tick before anything outside this behavior could observe them, silently swallowing every
+report except Enemy's. Fixed by moving the clear so it only happens on the branch that also
+increments `$CycleId` (the genuinely-nothing-found-this-pass case) — every found-path now
+leaves `@signal`/`@visual` set through to the loop-back.
+
+`$CycleId` is the only thing Task 2 needs to read from Task 1.
 
 ## Task 2: movement loop
 
@@ -282,7 +378,9 @@ guesses — then `moveaway_range`. Finding an enemy skips Priority 2/3 entirely 
 - **`Config` is empty or a coordinate** → the "wait for a clean cycle" gate, using
   `$WaitTarget` exactly as planned (armed to `$CycleId + 1` the first time via
   `is_empty($WaitTarget)`, compared against `$CycleId` once armed, re-armed after every
-  outcome) — then, once a clean cycle is confirmed (`$CycleFoundAny` empty):
+  outcome) — then, once a clean cycle is confirmed (`$CycleId` having just advanced is itself
+  the confirmation — see Task 1's note on why a separate `$CycleFoundAny` flag turned out to be
+  unnecessary):
   - **`Config` empty** → `random_coordinate(Coordinate=$Self, Range=$Vis, Result=@goto)` —
     plain undirected wander, written straight to `@goto` (no intermediate temp needed,
     `Result` accepts any writable target directly). **`Config` never gets set in this branch**
