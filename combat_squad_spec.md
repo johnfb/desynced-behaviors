@@ -52,7 +52,7 @@ it is **maintaining the vision lock** that makes coordinated targeting exist at 
 | **Captain** (1) | Mark V (`f_bot_1m_c`: base vis 15, speed 5, 600 HP) | Medium Visibility Module (+15) + 2× Internal Visibility Module (+5 each) → **vis 40 exactly** | Unarmed by default; every remaining socket free for speed/armor |
 | **Gunners** | Mark V or Hauler (`f_bot_1m_b`: speed 4, 350 HP); optionally a tank frame or two | weapons + Portable Shield Generators | Shield generators (`c_shield_generator`/`c_shield_generator2`) are **Internal** — tank frames trade shield capacity for hull, hence "a couple at most" |
 | **Healers** | Hauler or Mark V | AOE Repair Component (`c_repairer_aoe`, Medium socket) | AOE repair works passively in radius — the behavior is mostly positioning |
-| **Power providers** | Large Tank Frame (`f_human_large_tankframe`: 1400 HP, speed 4, 1 Large + 2 Internal sockets — human tech) | Large Power Field (`c_large_power_relay`, Large socket, unlocked by `t_power_units`) + Micro Reactor (`c_micro_reactor`, Internal, fuel-rod powered); second Internal free (shield or spare reactor) | No behavior-controller socket needed: every ordinary frame carries the hidden integrated controller (`c_integrated_behavior`); only a few special frames opt out. Speed 4 matches Hauler gunners — won't drag the rally gate |
+| **Power providers** | Large Tank Frame (`f_human_large_tankframe`: 1400 HP, speed 4, 1 Large + 2 Internal sockets — human tech) | Large Power Field (`c_large_power_relay`, Large socket, unlocked by `t_power_units`) + Micro Reactor (`c_micro_reactor`, Internal, fuel-rod powered) + Behavior Controller (`c_behavior`, Internal) — both Internals spoken for | **Human frame, so no integrated controller** (integrated behavior controllers are robot-race only: `frame_def.race == "robot"` in the engine's own check — human and alien frames always need an explicit `c_behavior`). Speed 4 matches Hauler gunners — won't drag the rally gate |
 
 Visibility modules stack additively onto the frame's base `visibility_range`
 (`SumModuleBoosts(owner, "c_modulevisibility", ...)`), so the Captain loadout above is exact,
@@ -167,5 +167,6 @@ shortlist/reservoir target reporting) is preserved in git history along with its
 implementation (`tests/data/beacon.dcs`, `beacon2.dcs` — still valid as codec/BSF test
 fixtures; obsolete as designs). Two v1 mechanisms survive into v2: the self-healing
 Signal-pointing membership scan (§3, was v1 §2.4) and the integrated-behavior-controller
-socket fact (§2, was v1 §2.5). v1's reporting/dedup machinery dissolved entirely — with the
+socket fact (§2, was v1 §2.5 — corrected in passing: it is **robot-race frames only**, not
+"all frames"; human/alien units always need an explicit `c_behavior`). v1's reporting/dedup machinery dissolved entirely — with the
 Captain being the sensor, there is nothing to report, only commands to issue.
