@@ -262,14 +262,23 @@ Update this file directly as items are picked up/finished.
       so assignment verification must read register 2, not entity-compare register 1; and on
       current stable, re-writing the target resets mining progress every time (the exact bug
       fixed in experimental 1.0.17996) — the Foreman must write once per assignment
-      (arm-once). Remaining: the actual Foreman behavior design itself. Directly relevant to
-      Obsidian/Laterite (below): Human Miner Mechs are one of only two practical mobile
-      options for those, both slot-less.
+      (arm-once). Remaining: the actual Foreman behavior design itself. **Scope correction
+      (user observation 2026-07-14, confirmed in `frames.lua`/`visuals.lua`): only the
+      explorable-awarded "Human Miner Mech" (`f_human_miner`, no sockets at all —
+      `explorables/human_building.lua` awards this frame) is slot-less. The *buildable*
+      "Miner Mech" (`f_human_adv_miner`) has one Internal socket (plus 3 storage and a
+      frame-level `component_boost = 50`), so it can host its own Behavior Controller and
+      run a MinerDrone-style program directly — the Foreman is specifically for putting free
+      explorable mechs (and slot-less alien miners) to work, not the only automation path
+      for mobile Obsidian/Laterite mining.**
 - [ ] **(Idea, not started) Obsidian/Laterite mining design.** Researched 2026-07-12: neither
       resource is mineable by `c_miner`/`c_adv_miner` at all (absent from both items' own
       `mining_recipe` in `data/items.lua`) — the only options are `c_extractor` (Medium socket,
       real placeable component, mines both), or whole dedicated units built around
-      `c_human_miner` (Human Miner Mech / Miner Mech, ground, slot-less) or `c_alien_miner`
+      `c_human_miner` (explorable-awarded "Human Miner Mech" `f_human_miner`: slot-less;
+      buildable "Miner Mech" `f_human_adv_miner`: **one Internal socket** + frame-level
+      `component_boost = 50`, so it can run its own program — correction 2026-07-14, see the
+      Foreman item above) or `c_alien_miner`
       (Alien Unit / Drill Spike, ground, slot-less) — `c_virus_claws` also mines Obsidian but
       only exists on hostile Virus creatures, not player-usable. No flying option exists for
       either resource. Also found: the dense 6-big/2-small magnifier lattice built for the

@@ -386,10 +386,14 @@ them:
 - **`c_human_miner`**, built into two dedicated Human-race ground units
   (Human Miner Mech `f_human_miner`, and its upgrade Miner Mech
   `f_human_adv_miner`, both `movement_speed=3`) — `attachment_size =
-  "Hidden"`, whole-unit only, can't be equipped elsewhere. Both are
-  slot-less (no Internal socket for their own behavior controller), same
-  constraint as the "Mining Leader for slot-less Human Miner Mechs" idea
-  above.
+  "Hidden"`, whole-unit only, can't be equipped elsewhere. ~~Both are
+  slot-less~~ **Corrected 2026-07-14 (user observation, confirmed in
+  `visuals.lua`): only `f_human_miner` (the explorable-awarded frame) is
+  slot-less; the buildable `f_human_adv_miner` has one Internal socket
+  (plus a frame-level `component_boost = 50`), so it can host its own
+  behavior controller.** The remote-control ("Foreman") idea below is
+  therefore specifically for the free explorable mechs and the slot-less
+  alien miners.
 - **`c_alien_miner`**, built into two Alien-race ground units (Alien Unit
   `f_alienbot`, Drill Spike `f_alien_miner`) — same `Hidden`-attachment,
   whole-unit-only constraint.
@@ -1032,7 +1036,11 @@ Notes on the design:
 ### Future idea, not designed or built: a Mining Leader for slot-less Human Miner Mechs
 
 User idea, 2026-07-11: Human Miner Mechs have no Internal socket for a behavior controller, so
-unlike `MinerDrone` they can't run a Program of their own. Checked against source for
+unlike `MinerDrone` they can't run a Program of their own. (Scope corrected 2026-07-14: this
+holds only for the explorable-awarded `f_human_miner`; the buildable Miner Mech
+`f_human_adv_miner` has an Internal socket — see the component list above. The mechanism below
+was also since **confirmed live in-game**, including end-to-end remote-driven mining — see
+`todo.md`'s Foreman item for the confirmations and the two design constraints found.) Checked against source for
 plausibility rather than left as pure speculation: `set_reg_remotely`/`get_reg_remotely`
 (`instructions.lua:6849` on) normally require the source and target to be physically touching
 (`GetAdjacentFactionEntityOrSelf`, `instructions.lua:302`), *except* when the calling
