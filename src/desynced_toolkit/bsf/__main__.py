@@ -27,6 +27,7 @@ from desynced_toolkit.bsf import (
     lint_behavior,
     parse_behavior,
     render_behavior,
+    semantic_diff_dcs,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent

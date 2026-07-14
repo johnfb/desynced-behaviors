@@ -83,9 +83,18 @@ itself**.
 
 | Captain's `@signal` | Meaning | Member response |
 |---|---|---|
-| coordinate (+ num = gather radius) | **RALLY** | move to the point (`@goto`); weapon register left empty → auto-acquire self-defense only, no pursuit |
-| entity | **ENGAGE** | write it into own weapon component register 1 (`set_comp_reg`) → native focus fire + group pursuit (§1.1) |
+| **enemy** entity | **ENGAGE** | write it into own weapon component register 1 (`set_comp_reg`) → native focus fire + group pursuit (§1.1) |
+| **non-enemy** entity (normally the Captain itself) | **RALLY, mobile** | move to that unit (`@goto` takes an entity natively); weapon register cleared → auto-acquire self-defense only, no pursuit |
+| coordinate | **RALLY at a fixed point** (used by RETREAT → Home) | move to the point (`@goto`); weapon register cleared |
 | empty | **HOLD** | clear weapon register; hold position (after a timeout with no readable Captain: return home — Captain-lost fallback) |
+
+**The enemy filter on the entity row is mandatory, learned by live fire**: the first in-game
+test dispatched on `value_type` alone, treating *any* entity command as a kill order — and the
+Captain's rally broadcast is itself an entity, so the squad's opening act was focus-firing its
+own Captain. Every member behavior must gate the engage path on
+`match(Unit = cmd, Filter = v_enemy_faction)`, with the Failed branch routed to the
+rally-on-unit response, never to a dead end (a dead-ended Failed silently disables rallying
+instead).
 
 Assembly per squad is one manual step per member: set its `Captain` parameter.
 
@@ -96,9 +105,9 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
 - **PATROL/IDLE** — no threat in vis 40. Hold or follow a `Config`-style directive
   (Observer's movement loop shape). Broadcast: empty (HOLD).
 - **RALLY** — threat spotted (`get_closest_entity(v_enemy_faction)` — visibility *is* the
-  sensor at vis 40; no radar needed). Pick a staging point at standoff distance from the
-  threat on the squad's side (geometry worked out at implementation; v1: midpoint between
-  squad centroid and threat, clamped to ≥ standoff from threat). Broadcast the coordinate.
+  sensor at vis 40; no radar needed). Broadcast **the Captain itself** as a mobile rally
+  point (simplification adopted during the first live test — the Captain already holds
+  standoff, so "converge on me" is always a safe staging point and needs no geometry).
   **Gate**: count members within the gather radius of the staging point vs. the live roster
   size (both derived fresh from the membership scan) — advance only when the assembled
   fraction crosses the threshold (a percentage of the live roster, not a fixed count, so

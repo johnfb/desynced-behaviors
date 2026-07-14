@@ -353,3 +353,24 @@ def test_annotate_translates_opaque_ids_but_not_obvious_ones(engine, argcache):
     n2_line = next(line for line in lines if line.startswith("n2:"))
     assert 'c_radar="Long-Range Radar"' in n1_line  # opaque: annotated
     assert 'v_resource="Resource"' not in n2_line  # derivable by inspection: quiet
+
+
+def test_cli_subcommands_smoke(engine, tmp_path):
+    """Every CLI subcommand at least runs -- guards against an import falling out of
+    __main__.py (semantic_diff_dcs did exactly that during the lint rework, caught live)."""
+    import os
+    from pathlib import Path
+
+    from desynced_toolkit.bsf.__main__ import main
+
+    dcs = (Path(__file__).parent / "data" / "beacon.dcs").read_text().strip()
+    src = tmp_path / "b.dcs"
+    src.write_text(dcs)
+    bsf_out = tmp_path / "b.bsf"
+    dcs_out = tmp_path / "b2.dcs"
+    gd = ["--game-data", os.environ.get("DESYNCED_GAME_DATA", str(Path(__file__).parent.parent.parent / "desynced-game-data"))]
+    assert main(gd + ["decompile", "--input", str(src), "--output", str(bsf_out)]) == 0
+    assert main(gd + ["compile", "--input", str(bsf_out), "--output", str(dcs_out)]) == 0
+    assert main(gd + ["lint", "--input", str(src)]) == 0
+    assert main(gd + ["semantic-diff", str(src), str(dcs_out)]) == 0
+    assert main(gd + ["ids", "radar"]) == 0
