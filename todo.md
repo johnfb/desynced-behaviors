@@ -100,12 +100,21 @@ Update this file directly as items are picked up/finished.
       `$Tag` to `v_resource`, so it couldn't even reach `v_transport_route` to wander. Fixed
       with a one-node arm-once guard (`compare_item($NextTag, v_resource) → If Equal → POP`)
       between the `is_moving` check and the arm.
-- [ ] **Update `Async Radar Set`/`Get`'s `desc` fields to state the contract explicitly.**
-      Get: Result and Tag are written together, only on delivery; a call while the radar is
-      charging touches neither; radar completion delivers even an empty result. Set: calling
-      it resets the countdown — arm once per scan and wait (the caller-side lesson from the
-      starvation bug). Worth also naming the recommended consumption idiom (Observer's
-      clear-Tag → call → dispatch-on-Tag, which makes Tag a per-call delivery flag).
+- [x] **Update `Async Radar Set`/`Get`'s `desc` fields to state the contract explicitly.**
+      Done 2026-07-14, in-game, re-exported to `library/async-radar-{set,get}.dcs`. Both
+      descs verified to round-trip cleanly through the BSF text layer, including Set's
+      embedded double quotes (`"already armed"` inside the quoted desc string).
+- [ ] **Revisit `Async Radar Set`'s cached radar periods after the next game update.**
+      In-game test 2026-07-14 (Observer + portable radar + out-of-visibility dropped item):
+      actual delivery cycle is 5 ticks (`TICKS_PER_SECOND`, the register-write quirk — see
+      `reference_portable_radar_tickspersecond_quirk` memory), not the advertised 2, because
+      `Set` writes the filter registers on every arm. So `c_portable_radar[num=2]` makes
+      Get's ready check pass ~3 ticks early — a premature comp-reg read can deliver a
+      spurious "completed empty" (the real result still lands via a later re-read).
+      `c_small_radar[num=10]` errs safe (late). User has an outstanding bug report on the
+      radar timing and expects a fix next game version — after the update, re-run the
+      dropped-item test and either keep the advertised periods (if fixed) or bump portable
+      to `num=5` (if not).
 - [ ] **Verify the arm-once fix in-game**: a stationary Mining Leader with a small radar and
       no resource node in visibility range should now acquire beyond-visibility nodes via the
       radar path, and wander (`v_transport_route`) on a genuinely-empty scan instead of
