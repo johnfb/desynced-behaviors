@@ -128,10 +128,12 @@ Update this file directly as items are picked up/finished.
       radar timing and expects a fix next game version — after the update, re-run the
       dropped-item test and either keep the advertised periods (if fixed) or bump portable
       to `num=5` (if not).
-- [ ] **Verify the arm-once fix in-game**: a stationary Mining Leader with a small radar and
-      no resource node in visibility range should now acquire beyond-visibility nodes via the
-      radar path, and wander (`v_transport_route`) on a genuinely-empty scan instead of
-      standing still forever.
+- [x] **Verify the arm-once fix in-game.** Confirmed 2026-07-14, both halves: with no node in
+      radar range the leader random-walks (the empty resource delivery reaching
+      `v_transport_route` — previously a stand-still-forever deadlock), and with a node in
+      radar range but outside visibility the radar path delivers it and the leader approaches
+      (previously impossible: every-tick re-arming kept the scan from ever completing, so
+      only the visibility fallback could deliver).
 
 ## Local behavior-library storage (`desynced_toolkit`)
 
