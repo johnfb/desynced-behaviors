@@ -411,14 +411,22 @@ non-structural: parse drops them, the default render never emits them
 instruction's **visual-editor display name** where it differs from the op
 id (`set_reg` displays as "Copy", `check_number` as "Compare Number";
 sourced live from `data.instructions[op].name` via
-`ArgCache.display_name`), plus a blank line before each `label` section.
+`ArgCache.display_name`), each **opaque id literal's in-game display name**
+(`c_radar` is shown as "Long-Range Radar", `v_broken` as "Heavily Damaged";
+scanned from the registrations' own `name` fields via
+`ArgCache.id_display_names` — ids whose name is derivable by inspection,
+like `v_resource` → "Resource", stay unannotated), plus a blank line before
+each `label` section. `python -m desynced_toolkit.bsf ids <query>` looks the
+mapping up in either direction (substring match on id or display name).
 
 The reason annotate mode exists: node ids are decompiler-generated —
-invisible in the game's own editor and unstable across re-exports — so a
-statement addressed to a *person* must never anchor on one. Anchor on what
-the editor shows: display name, argument values, `cmt`, enclosing label
-section, plus a short BSF excerpt for wiring discussions. (Node ids remain
-the right way to write edges *within* BSF text itself.)
+invisible in the game's own editor and unstable across re-exports — and
+internal ids like `c_adv_miner` are exactly as invisible (the user sees
+"Laser Mining Tool"), so a statement addressed to a *person* must never
+anchor on either bare form. Anchor on what the editor shows: display names
+(instruction and id), argument values, `cmt`, enclosing label section, plus
+a short BSF excerpt for wiring discussions. (Node ids and internal ids
+remain the right spelling *within* BSF text itself.)
 
 ### Validation (strict by design)
 

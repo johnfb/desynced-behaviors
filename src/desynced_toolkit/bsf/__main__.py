@@ -73,6 +73,13 @@ def main(argv: list[str] | None = None) -> int:
     p_diff.add_argument("old", type=argparse.FileType("r"), help="path to the earlier .dcs file")
     p_diff.add_argument("new", type=argparse.FileType("r"), help="path to the later .dcs file")
 
+    p_ids = sub.add_parser(
+        "ids",
+        help="look up game ids by internal id or in-game display name (case-insensitive "
+        "substring), e.g. `ids radar` finds c_radar (\"Long-Range Radar\")",
+    )
+    p_ids.add_argument("query", help="substring to match against ids and display names")
+
     p_lint = sub.add_parser(
         "lint",
         help="stdin: BSF text or .dcs string -> warnings for legal-but-suspicious constructs "
@@ -107,6 +114,19 @@ def main(argv: list[str] | None = None) -> int:
         dcs_str = compile_dcs(engine, behavior, args.type)
         args.output.write(dcs_str)
         args.output.write("\n")
+    elif args.command == "ids":
+        q = args.query.lower()
+        names = ArgCache(engine).id_display_names()
+        hits = sorted(
+            (id_, name)
+            for id_, name in names.items()
+            if q in id_.lower() or (name and q in name.lower())
+        )
+        for id_, name in hits:
+            print(f"{id_}\t{name or '(no display name)'}")
+        if not hits:
+            print(f"no ids matching {args.query!r}", file=sys.stderr)
+            return 1
     elif args.command == "lint":
         raw = args.input.read().strip()
         argcache = ArgCache(engine)

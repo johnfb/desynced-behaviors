@@ -111,11 +111,23 @@ class ArgCache:
         a wrong id literal. Scanned once per engine from the Data package's own include files
         (the stubbed Lua runtime only executes `instructions.lua`, so the real registries are
         never populated in-process) and cached on the engine, which tests share session-wide."""
+        return frozenset(self.id_display_names())
+
+    def id_display_names(self) -> dict[str, str | None]:
+        """id -> the in-game display name from its registration's own `name = "..."` field
+        (`v_resource` -> "Resource", `c_radar` -> "Long-Range Radar"), or None when the
+        registration doesn't declare one. Same scan and cache as `known_ids` -- internal ids are
+        exactly as invisible in the game's UI as node ids are, and some are entirely opaque
+        (`c_adv_miner` displays as "Laser Mining Tool"), so any user-facing mention of an id
+        needs this translation available."""
         cached = getattr(self.engine, "_known_ids_cache", None)
         if cached is None:
-            cached = _collect_known_ids(self.engine.source, self.engine.package_id)
+            cached = _scan_registrations(self.engine.source, self.engine.package_id)
             self.engine._known_ids_cache = cached
         return cached
+
+    def id_display_name(self, id_: str) -> str | None:
+        return self.id_display_names().get(id_)
 
 
 # `data.values.v_foo = {...}` / `data.items.metalore = {...}` style direct registrations, and
@@ -124,20 +136,33 @@ class ArgCache:
 _DATA_ID_RE = re.compile(r"\bdata\.[a-z_]+\.([A-Za-z_][A-Za-z0-9_]*)\s*=")
 _REGISTER_ID_RE = re.compile(r'Register(?:Component|Frame)\(\s*"([^"]+)"')
 _INCLUDE_RE = re.compile(r'"([^"]+\.lua)"')
+_NAME_FIELD_RE = re.compile(r'\bname\s*=\s*"([^"]*)"')
 
 
-def _collect_known_ids(source, package_id: str = "Data") -> frozenset[str]:
+def _scan_registrations(source, package_id: str = "Data") -> dict[str, str | None]:
+    """id -> display name (or None). The display name is the first `name = "..."` field between
+    an id's registration and the next registration in the same file -- registrations are
+    sequential table constructions, so that window is the entry's own body (a derived
+    registration that inherits its name simply yields None; acceptable, the fallback is just
+    'no translation available')."""
     pm = get_package_manifest(source, package_id)
     entry_text = source.read_text(pm.entry)
-    ids: set[str] = set()
+    ids: dict[str, str | None] = {}
     for include in _INCLUDE_RE.findall(entry_text):
         path = resolve_include(pm.entry_dir, include)
         if not source.exists(path):
             continue
         text = source.read_text(path)
-        ids.update(_DATA_ID_RE.findall(text))
-        ids.update(_REGISTER_ID_RE.findall(text))
-    return frozenset(ids)
+        matches = sorted(
+            [(m.start(), m.group(1)) for pat in (_DATA_ID_RE, _REGISTER_ID_RE) for m in pat.finditer(text)]
+        )
+        for idx, (pos, id_) in enumerate(matches):
+            end = matches[idx + 1][0] if idx + 1 < len(matches) else len(text)
+            nm = _NAME_FIELD_RE.search(text, pos, end)
+            # first registration wins on duplicates only if it carried a name
+            if id_ not in ids or ids[id_] is None:
+                ids[id_] = nm.group(1) if nm else ids.get(id_)
+    return ids
 
 
 def arg_pin_names(op: str, argcache: "ArgCache") -> list[tuple[int, str, str]]:

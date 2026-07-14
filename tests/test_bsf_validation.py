@@ -329,3 +329,27 @@ def test_annotated_render_parses_to_same_compile(engine, argcache):
     assert "# Copy" in annotated  # set_reg's in-game display name
     b2 = parse_behavior(annotated, argcache)
     assert to_py(compile_behavior(engine, b1, argcache)) == to_py(compile_behavior(engine, b2, argcache))
+
+
+def test_id_display_names_scanned_from_registrations(argcache):
+    names = argcache.id_display_names()
+    assert names["c_radar"] == "Long-Range Radar"
+    assert names["c_adv_miner"] == "Laser Mining Tool"
+    assert names["v_resource"] == "Resource"
+
+
+def test_annotate_translates_opaque_ids_but_not_obvious_ones(engine, argcache):
+    from desynced_toolkit.bsf.parse_text import parse_behavior
+
+    b = parse_behavior(
+        "behavior T():\n\n"
+        "n1: set_reg(Value=c_radar, Target=$A)\n"
+        "n2: set_reg(Value=v_resource, Target=$B)\n",
+        argcache,
+    )
+    text = render_behavior(b, argcache, annotate=True)
+    lines = text.split("\n")
+    n1_line = next(line for line in lines if line.startswith("n1:"))
+    n2_line = next(line for line in lines if line.startswith("n2:"))
+    assert 'c_radar="Long-Range Radar"' in n1_line  # opaque: annotated
+    assert 'v_resource="Resource"' not in n2_line  # derivable by inspection: quiet

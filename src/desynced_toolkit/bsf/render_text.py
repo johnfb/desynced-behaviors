@@ -196,6 +196,33 @@ def _naive_pretty_op(op: str) -> str:
     return op.replace("_", " ").title()
 
 
+def _id_name_obvious(id_: str, name: str) -> bool:
+    """Whether the display name is derivable from the id by inspection (`v_resource` ->
+    "Resource", `v_arrow_up` -> "Arrow Up") -- those need no annotation; `c_radar` ->
+    "Long-Range Radar" or `v_enemy_faction` -> "Enemy" do."""
+    base = id_
+    for prefix in ("v_", "c_", "f_", "t_"):
+        if base.startswith(prefix):
+            base = base[len(prefix) :]
+            break
+    return base.replace("_", " ").lower() == name.lower()
+
+
+def _annotation_parts(node: BsfNode, argcache: ArgCache) -> list[str]:
+    parts = []
+    display = argcache.display_name(node.op)
+    if display and display != _naive_pretty_op(node.op):
+        parts.append(display)
+    seen = set()
+    for v in node.args.values():
+        if isinstance(v, IdLit) and v.id not in seen:
+            seen.add(v.id)
+            name = argcache.id_display_name(v.id)
+            if name and not _id_name_obvious(v.id, name):
+                parts.append(f'{v.id}="{name}"')
+    return parts
+
+
 def _render_into(
     b: BsfBehavior, lines: list[str], keyword: str, argcache: ArgCache, annotate: bool = False
 ) -> None:
@@ -227,14 +254,15 @@ def _render_into(
             lines.append("")
         line = render_node(node, b.params, jump_targets, argcache)
         if annotate:
-            # The visual editor's own display name for this instruction -- the vocabulary the
-            # user sees on the node in-game -- appended wherever it isn't derivable from the
-            # op id by inspection (`set_reg` is displayed as "Copy"; `set_number` as
-            # "Set Number" needs no note). Comments are dropped by parse, so annotated
-            # output still round-trips.
-            display = argcache.display_name(node.op)
-            if display and display != _naive_pretty_op(node.op):
-                line += f"  # {display}"
+            # The in-game vocabulary for everything on this line that isn't derivable by
+            # inspection: the instruction's visual display name (`set_reg` is displayed as
+            # "Copy"; `set_number` as "Set Number" needs no note) and each opaque id
+            # literal's display name (`c_radar` is shown as "Long-Range Radar";
+            # `v_resource` as "Resource" needs no note). Comments are dropped by parse, so
+            # annotated output still round-trips.
+            parts = _annotation_parts(node, argcache)
+            if parts:
+                line += f"  # {' · '.join(parts)}"
         lines.append(line)
     for sub in b.subs:
         lines.append("")
