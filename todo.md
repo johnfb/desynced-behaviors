@@ -322,7 +322,11 @@ Update this file directly as items are picked up/finished.
 - [ ] **Implement Captain and Gunner in BSF** (the closed loop), test against a real bug
       camp; then Healer and Power Provider. Constants table and open items in the spec (§6,
       §7) — staging-point geometry and the gate threshold are the two things most likely to
-      need in-game tuning.
+      need in-game tuning. *First drafts authored 2026-07-14 (Squad Captain ~50 nodes, Squad
+      Gunner ~15; compile+lint clean, strings handed over), with two v1 simplifications
+      chosen deliberately: rally point = the Captain's own position (no staging geometry —
+      the Captain already holds standoff), and no mid-fight spread/trickle detector yet.
+      Pending the first in-game test.*
 - [x] **Confirm the §2.4 self-healing anchor lookup assumption empirically.** Confirmed
       2026-07-11: `for_entities_in_range` scan of a single resource node returned `Result=1`
       before depletion, `Result=0` on an identical rescan right after the node was mined to
