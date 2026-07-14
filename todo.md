@@ -292,25 +292,31 @@ Update this file directly as items are picked up/finished.
 
 ## Combat Squad (`combat_squad_spec.md`)
 
-- [ ] **Rewrite the Beacon/Scout/Gunner/Support pseudocode (§5) directly in real BSF syntax.**
-      Currently a hand-invented, Python-like pseudocode (`loop:`/`->`/`goto loop`), not the
-      actual `behavior_source_format.md` grammar — same category of rewrite as the
-      `hex_expansion_math.md` item below.
-- [ ] **Implement Scout, Gunner, and Support as real, compiled `.dcs` behaviors.** Only Beacon
-      has an actual implementation so far (`beacon.dcs`/`beacon2.dcs`, hand-authored via
-      `instructions_index.md` + `behavior_format.md`) — the other three roles are still
-      spec-only pseudocode.
-- [ ] **Test `beacon.dcs`/`beacon2.dcs` in-game.** Round-trip-verified against the codec, but
-      per `CLAUDE.md`'s own note, "Not yet tested in-game."
+- [x] **Redesign the squad architecture (v2: Captain).** Done 2026-07-14, driven by the
+      user's real squad experiments (v1 squads scattered and trickled into fights one at a
+      time; coordination only worked with coordinator eyes-on). Root cause found in source:
+      a weapon's manual target (its register 1) only becomes the attack target while the
+      faction can *see* it (`c_turret:on_update`'s `faction:IsVisible` gate) — no vision =
+      silent per-gunner auto-acquire = scatter. `combat_squad_spec.md` fully rewritten:
+      unarmed Captain (Mark V + visibility modules = vis 40 = Small Radar range) stands off
+      ≥30 with eyes on the fight, membership = members' `@signal` → Captain entity, commands
+      = Captain's `@signal` read via `read_signal`, rally gate before any advance, focus
+      fire via each gunner's own weapon register 1. v1's Beacon-era items below are
+      superseded; `beacon.dcs`/`beacon2.dcs` stay as test fixtures only.
+- [ ] **Implement Captain and Gunner in BSF** (the closed loop), test against a real bug
+      camp; then Healer and Power Provider. Constants table and open items in the spec (§6,
+      §7) — staging-point geometry and the gate threshold are the two things most likely to
+      need in-game tuning.
 - [x] **Confirm the §2.4 self-healing anchor lookup assumption empirically.** Confirmed
       2026-07-11: `for_entities_in_range` scan of a single resource node returned `Result=1`
       before depletion, `Result=0` on an identical rescan right after the node was mined to
       exactly 0 — destroyed/depleted entities really do drop out of faction-wide scans.
-- [ ] **(Future extension, explicitly out of scope so far)**: grow the Beacon into a
-      multi-slot `c_autobase` building that auto-produces/replenishes squad units, taking
-      advantage of `c_autobase`'s exemption from the ordinary remote-write adjacency
-      restriction to push orders/equipment directly to squad members instead of only
-      broadcasting over Radio.
+- [ ] **(Future extension, explicitly out of scope so far)**: a base-side `c_autobase`
+      building that auto-produces/replenishes squad units and pushes
+      orders/equipment-registers directly to squad members while they're home on the base
+      grid (the same-grid remote-write exception, now fully confirmed live — see the Foreman
+      item). In the field the Captain's signal protocol takes over; the autobase building is
+      the barracks/quartermaster half.
 
 ## Hex Expansion (`hex_expansion_math.md`)
 
