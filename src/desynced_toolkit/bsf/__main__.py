@@ -8,7 +8,8 @@ game's own clipboard, e.g. (with `cb` a wrapper script for `xclip -selection cli
 
 Only handles a top-level behavior/program clipboard item (.dcs type char 'C', the "Copy
 Program" action in the in-game editor) -- a blueprint ('B', with components/frames around it)
-decodes to a different table shape that decompile_behavior does not expect.
+decodes to a different table shape and is rejected with an error (decompile_dcs checks the
+type char); use LupaEngine.decode_dcs directly to inspect one.
 """
 
 from __future__ import annotations
@@ -63,7 +64,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "decompile":
         dcs_str = args.input.read().strip()
-        bsf_text = dcs_to_bsf(engine, dcs_str)
+        try:
+            bsf_text = dcs_to_bsf(engine, dcs_str)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
         args.output.write(bsf_text)
     elif args.command == "compile":
         bsf_text = args.input.read()

@@ -184,5 +184,14 @@ def decompile_behavior(engine, table, argcache: ArgCache | None = None) -> BsfBe
 
 
 def decompile_dcs(engine, dcs_str: str) -> BsfBehavior:
-    _, table = engine.decode_dcs(dcs_str)
+    type_char, table = engine.decode_dcs(dcs_str)
+    if type_char != "C":
+        # A blueprint ('B') decodes to a {frame, components, ...} shape, not a behavior --
+        # decompile_behavior would silently render it as an empty behavior plus whatever
+        # `dependencies` it carries, dropping every frame/component. Fail loudly instead;
+        # use LupaEngine.decode_dcs directly to inspect a non-'C' string.
+        raise ValueError(
+            f"not a behavior clipboard string: wire type {type_char!r} (expected 'C'); "
+            "blueprints and other item types are not decompilable to BSF"
+        )
     return decompile_behavior(engine, table)

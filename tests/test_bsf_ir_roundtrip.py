@@ -242,3 +242,15 @@ def test_written_param_slots_self_recursive_call_does_not_infinite_loop(engine):
     )
     compiled = compile_behavior(engine, behavior, argcache)
     assert list(compiled["parameters"].values()) == [True, True]
+
+
+def test_decompile_dcs_rejects_non_behavior_type_char(engine):
+    """A blueprint ('B') decodes to a {frame, components, ...} shape, not a behavior --
+    decompile_behavior would silently render it as an empty behavior (dropping every
+    frame/component), so decompile_dcs must reject any wire type other than 'C' loudly."""
+    lua = engine.lua
+    t = lua.table()
+    t["frame"] = "f_bot_1m"
+    blueprint_dcs = engine.encode_dcs("B", t)
+    with pytest.raises(ValueError, match="wire type 'B'"):
+        decompile_dcs(engine, blueprint_dcs)
