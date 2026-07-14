@@ -17,7 +17,7 @@ A weapon component (`c_turret` family, `components.lua` `c_turret:on_update`) ta
 
 | Register 1 holds | Weapon behavior |
 |---|---|
-| entity | manual priority target; the unit also **pursues it** (`RequestStateMove` toward it, even while shooting something else in range) |
+| entity | manual priority target; the unit also **pursues it** (`RequestStateMove` toward it, even while shooting something else in range) — and this pursuit **overrides `@goto`** (live-confirmed): an armed unit does not move on GOTO until its weapon register is cleared |
 | coordinate (+ `num`) | attack-move to that point, `num` = approach radius |
 | `v_powereddown` | hold fire (also clears the weapon's own register 2) |
 | id (+ `num == REG_NOT`) | auto-acquire preference filter (inverted when `REG_NOT`) |
