@@ -12,7 +12,6 @@ from pathlib import Path
 
 from desynced_toolkit.bsf.argcache import ArgCache
 from desynced_toolkit.bsf.semantic_diff import semantic_diff_dcs, semantic_diff_behaviors
-from desynced_toolkit.bsf.decompile import decompile_dcs
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -41,12 +40,14 @@ RESAVED_DCS = (
 
 
 def test_no_diff_against_self(engine):
-    raw = (DATA_DIR.parent / "data" / "beacon.dcs").read_text().strip()
+    raw = (DATA_DIR / "beacon.dcs").read_text().strip()
     assert semantic_diff_dcs(engine, raw, raw) == ""
 
 
 def test_magnifier_resave_reports_only_real_edits(engine):
-    original = (Path(__file__).parent.parent / "magnifier_signal.dcs").read_text().strip()
+    # magnifier_signal_original.dcs is the pre-resave export; the live library/ copy is the
+    # re-save itself (identical to RESAVED_DCS), so it can't serve as the "original" side.
+    original = (DATA_DIR / "magnifier_signal_original.dcs").read_text().strip()
     report = semantic_diff_dcs(engine, original, RESAVED_DCS)
 
     # The three real edits must be present.
@@ -65,7 +66,7 @@ def test_added_removed_and_changed_nodes_on_hand_built_ir(engine):
     present only in `old` (removed), and one whose args changed but stayed in the same
     structural position (changed) -- independent of the real-fixture case above, which mixes
     several kinds together."""
-    from desynced_toolkit.bsf.ir import BsfBehavior, BsfNode, BsfParam
+    from desynced_toolkit.bsf.ir import BsfBehavior, BsfNode
     from desynced_toolkit.bsf.values import Num, Var
 
     argcache = ArgCache(engine)
