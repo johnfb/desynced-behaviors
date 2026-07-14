@@ -359,10 +359,13 @@ refuted for stored values** — that ∞ most plausibly came from a different me
 Practical consequences: death-detection by checking the entity part works; a num payload
 riding on an entity reference survives the target's death, so a `check_number` against a
 dangling ref compares its real, preserved num — never assume ∞ appears. `is_empty` on a
-dangling ref with `num≠0` reports NOT empty (the num dominates); the entity-only (`num=0`)
-case is not yet measured — the next release's changelog ("Is Empty will no longer match a
-target reference that has been destroyed") implies it currently reads as empty, and a v3
-probe of exactly that case is authored and pending an in-game run.
+dangling ref with `num≠0` reports NOT empty (the num dominates), while an entity-only
+(`num=0`) dangling ref reports **empty** (measured in-game, v3 probe) — so on the current
+build, `is_empty` works as a death-detector for plain entity references. The next release
+inverts exactly that ("Is Empty will no longer match a target reference that has been
+destroyed"): those liveness checks will silently stop detecting death and must migrate to the
+new destroyed-reference facilities (Target Type Switch's 'Destroyed Object' pin, Signal
+Filter's 'Destroyed References' mode).
 Eager-clear-on-destroy vs. lazy-resolve-on-read for the entity field itself remains
 observationally indistinguishable from inside a behavior, and no longer matters practically
 now that "num survives, entity blanks, all storage classes alike" is established.

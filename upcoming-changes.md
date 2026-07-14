@@ -164,7 +164,11 @@ docs, `behavior_format.md`, and project memory. Ordered by how much of our stuff
 
 - **`is_empty` no longer matches destroyed references** (17919). 25 uses across `library/`.
   Most consume fresh instruction outputs (safe), but any "did my target die" check via
-  `is_empty` silently flips. Related cluster: registers now *display* "Destroyed Object",
+  `is_empty` silently flips. **Baseline measured in-game 2026-07-14 (Dangling Ref Test v3)**:
+  on current stable, an entity-only destroyed reference reads as *empty* (num≠0 refs read
+  non-empty — the num dominates), so today `is_empty` genuinely works as a death-detector and
+  this change breaks it — the audit direction is working → broken. Migration targets: Target
+  Type Switch's new 'Destroyed Object' pin or Signal Filter's 'Destroyed References' mode. Related cluster: registers now *display* "Destroyed Object",
   Signal Filter gains a "Destroyed References" mode, Target Type Switch gains a 'Destroyed
   Object' pin, and the engine now auto-clears GOTO/weapon-target/mining-status registers on
   target destruction (18020) — the dangling-reference story in
