@@ -722,8 +722,8 @@ popped through every enclosing block.
 
 `for_number`'s `Step` arg (`instructions_index.md`: "use -1 or 1 based on
 inputs if left empty") auto-detects direction from `From`/`To` when
-omitted, confirmed by an artifact in both `hexat_test_log.txt` and
-`HexIndexOf_test_1.dcs`'s own harness: for `R == 0`, the inner loop is
+omitted, confirmed by an artifact in a captured in-game log of the HexAt
+test run and in `HexIndexOf_test_1.dcs`'s own harness: for `R == 0`, the inner loop is
 built as `for_number(0, 6*R - 1, ...)` = `for_number(0, -1, ...)` with
 `Step` omitted — since `From (0) > To (-1)`, it silently runs with an
 implicit `Step = -1`, iterating `T = 0` then `T = -1` (two iterations, not
