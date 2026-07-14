@@ -11,8 +11,9 @@ new vocabulary. Referred to as "this format" or "BSF" interchangeably below.
 
 ## Why this format, not tree-structured pseudocode
 
-An earlier direction (`compiler/ast_compiler.py`) targeted Python-like syntax
-(`if`/`else`, `for`). Empirical analysis of 319 real user-created behaviors
+An earlier direction (a Python-subset `AstCompiler`, removed from the tree
+2026-07-14 once BSF fully superseded it — git history only) targeted
+Python-like syntax (`if`/`else`, `for`). Empirical analysis of 319 real user-created behaviors
 (see project memory / `scripts/analyze_corpus.py`) found this is a poor fit
 for a large share of real cases: 20.7% use `jump`/`label` computed dispatch,
 which is indirect goto by construction and cannot be expressed as structured
@@ -940,6 +941,8 @@ implementation plan referenced above for the fuller reasoning):**
   in general, and actively misleading in exactly the cases where it would
   matter). This is separate from whether a pop is visually present at all,
   which the pipeline does handle — see "Visualization" above.
-- Migrating `ast_compiler.py`'s role and rewriting `hex_expansion_math.md`'s
-  compiled `HexIndexOf` example directly in BSF — explicitly separate,
-  later follow-on work, not part of the pipeline build above.
+- Rewriting `hex_expansion_math.md`'s revised `HexIndexOf` directly in BSF —
+  explicitly separate, later follow-on work, not part of the pipeline build
+  above. (The `AstCompiler` whose role this migration retires was removed
+  from the tree 2026-07-14; the revised design's last executable form lives
+  in git history — see `todo.md`'s Hex Expansion item.)

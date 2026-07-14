@@ -295,12 +295,18 @@ Update this file directly as items are picked up/finished.
 
 ## Hex Expansion (`hex_expansion_math.md`)
 
-- [ ] **Rewrite the compiled `HexIndexOf` directly in BSF**, retiring its current
-      `ast_compiler.py`-based Python-like-pseudocode compilation path — explicitly flagged as
-      separate, later, not-yet-started follow-on work in both `CLAUDE.md` and
-      `behavior_source_format.md`. (`ast_compiler.py` itself is slated for retirement in favor
-      of BSF and shouldn't be used as a design reference for this, only possibly as a test
-      oracle.)
+- [ ] **Rewrite the revised `HexIndexOf` directly in BSF and restore its executable
+      validation.** `AstCompiler` was removed outright on 2026-07-14 (user decision: BSF is
+      refined enough that it's unnecessary, possibly harmful as a stray design influence), and
+      `tests/test_hexindexof_compiled.py` went with it — which was the only executable form of
+      the *revised* (post-readability-review) HexIndexOf design and its 217-case validation.
+      The checked-in `HexIndexOf_test_1.dcs` still reflects the original pre-review design, so
+      until this rewrite happens the revised design exists only as `hex_expansion_math.md`
+      prose plus git history (`git show 'HEAD^{/Remove AstCompiler}'^:tests/
+      test_hexindexof_compiled.py` — the `HEXINDEXOF_SRC` constant is the design; use it as
+      the reference to transcribe into BSF, never resurrect the compiler). Validate the BSF
+      version through `Interpreter` against the same closed-form reference cases
+      `tests/test_hex_expansion.py` uses.
 - [ ] **Reconcile `HexIndexOf_test_1.dcs` against the revised/compiled design.** The checked-in
       fixture still reflects the *original* pre-review design (with the dead `ry` branch, the
       4-instruction coordinate split, etc.) — the readability-driven redesign (fewer temps,
@@ -325,9 +331,8 @@ Update this file directly as items are picked up/finished.
 - [ ] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm`** in `interpreter.py` rather
       than its current Python-simulated block stack and simplified `Memory`/mem-slot
       allocation — `for_number`'s own per-iteration decision is already delegated to real Lua,
-      but the block-stack driving itself (`sequence`/`for_number`) and the compiler frontend
-      are not. (Separate from the `ast_compiler.py`-to-BSF retirement above — this is about
-      `interpreter.py`'s own runtime fidelity, which isn't going away.)
+      but the block-stack driving itself (`sequence`/`for_number`) is not. (This is about
+      `interpreter.py`'s own runtime fidelity — unrelated to the removed `AstCompiler`.)
 - [ ] **Add automated test coverage for the corpus/analysis scripts** (`scripts/
       collect_clipboard_corpus.py`, `collect_steam_forum.py`, `analyze_corpus.py`,
       `render_examples.py`). Currently exercised only by direct manual runs and one real live

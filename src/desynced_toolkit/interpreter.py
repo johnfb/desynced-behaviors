@@ -1,5 +1,5 @@
 """Runs a behavior given as a genuine Lua table (the shape `dcs_wire.decode_dcs()` hands back,
-and this package's `compiler` produces directly) by delegating each leaf instruction's execution
+and `bsf.compile_behavior` produces directly) by delegating each leaf instruction's execution
 to the real `data/instructions.lua` via `LupaEngine`, while keeping the branch/block control-flow
 driver in Python (the same model validated against real in-game logs in `sim_common.py` earlier
 in this project -- `sequence`/`for_number`'s block-stack semantics are simulated here rather than
