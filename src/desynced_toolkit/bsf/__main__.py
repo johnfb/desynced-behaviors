@@ -20,7 +20,14 @@ import sys
 from pathlib import Path
 
 from desynced_toolkit import LupaEngine, open_asset_source
-from desynced_toolkit.bsf import bsf_to_dcs, dcs_to_bsf, semantic_diff_dcs
+from desynced_toolkit.bsf import (
+    ArgCache,
+    compile_dcs,
+    dcs_to_bsf,
+    decompile_dcs,
+    lint_behavior,
+    parse_behavior,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 DEFAULT_GAME_DATA_DIR = REPO_ROOT.parent / "desynced-game-data"
@@ -59,6 +66,13 @@ def main(argv: list[str] | None = None) -> int:
     p_diff.add_argument("old", type=argparse.FileType("r"), help="path to the earlier .dcs file")
     p_diff.add_argument("new", type=argparse.FileType("r"), help="path to the later .dcs file")
 
+    p_lint = sub.add_parser(
+        "lint",
+        help="stdin: BSF text or .dcs string -> warnings for legal-but-suspicious constructs "
+        "(unreachable nodes, literal jumps with no matching label, undeclared parameter slots)",
+    )
+    p_lint.add_argument("--input", type=argparse.FileType("r"), default=sys.stdin)
+
     args = parser.parse_args(argv)
     engine = _make_engine(args.game_data)
 
@@ -72,9 +86,37 @@ def main(argv: list[str] | None = None) -> int:
         args.output.write(bsf_text)
     elif args.command == "compile":
         bsf_text = args.input.read()
-        dcs_str = bsf_to_dcs(engine, bsf_text, args.type)
+        argcache = ArgCache(engine)
+        try:
+            behavior = parse_behavior(bsf_text, argcache)
+        except SyntaxError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        # lint warnings on every compile (stderr, non-fatal): the compile step is the natural
+        # moment to catch a suspicious-but-legal construct before it reaches the game
+        for w in lint_behavior(behavior, argcache):
+            print(f"warning: {w}", file=sys.stderr)
+        dcs_str = compile_dcs(engine, behavior, args.type)
         args.output.write(dcs_str)
         args.output.write("\n")
+    elif args.command == "lint":
+        raw = args.input.read().strip()
+        argcache = ArgCache(engine)
+        try:
+            # autodetect: a .dcs string is one long token starting with "DS"; BSF text
+            # always contains a "behavior ...:" header line
+            if raw.startswith("DS") and "\n" not in raw and "(" not in raw:
+                behavior = decompile_dcs(engine, raw)
+            else:
+                behavior = parse_behavior(raw, argcache)
+        except (SyntaxError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        warnings = lint_behavior(behavior, argcache)
+        for w in warnings:
+            print(f"warning: {w}")
+        if not warnings:
+            print("clean: no warnings")
     elif args.command == "semantic-diff":
         old_dcs = args.old.read().strip()
         new_dcs = args.new.read().strip()

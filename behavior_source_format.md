@@ -363,19 +363,70 @@ to one of three cases, per `behavior_format.md`'s documented semantics:
    tooling tries to resolve or label further (see "Loop-type instructions"
    below) — `POP` is rendered exactly as the wire format has it and left at
    that.
-3. **Omitted entirely (nil)** → no annotation at all; implicitly falls
-   through to the physically next instruction. **Not "no decision was made"**
-   — in real decoded data this always represents a genuine wire the visual
-   editor's own compiler chose not to spell out as an integer, since doing
-   so would be redundant with position (user-confirmed real-editor
-   behavior; see `behavior_format.md`'s "Branch and fall-through resolution"
-   for the full detail, including that a truly unconnected pin always
-   compiles to explicit `false`/`POP`, unconditionally, never to omission).
-   BSF still renders no annotation for this case — would be pure noise for
-   the common straight-line sequence — and, deliberately, does **not** try
-   to preserve "this specific wire went to this specific node" across a
-   reorder the way an explicit target does; see "Node identity vs. wire
-   position" below for that trade-off and why it's intentional.
+3. **Omitted entirely (nil)** → falls through to the physically next
+   instruction. **Not "no decision was made"** — in real decoded data this
+   always represents a genuine wire the visual editor's own compiler chose
+   not to spell out as an integer, since doing so would be redundant with
+   position (user-confirmed real-editor behavior; see `behavior_format.md`'s
+   "Branch and fall-through resolution" for the full detail, including that
+   a truly unconnected pin always compiles to explicit `false`/`POP`,
+   unconditionally, never to omission). How BSF text spells this case
+   depends on how many exec pins the op has — see "Explicit-pin rule"
+   directly below. Deliberately, fallthrough does **not** try to preserve
+   "this specific wire went to this specific node" across a reorder the way
+   an explicit target does; see "Node identity vs. wire position" below for
+   that trade-off and why it's intentional.
+
+### Explicit-pin rule and the `NEXT` token
+
+For an op with **two or more** exec pins (declared exec args plus the
+top-level pin when it exists — `check_number`'s three, every loop's
+body+`Done` pair, `sequence`'s stages, `switch`'s cases), **every pin must be
+written**, as one of `>NODE_ID (Pin)`, `>POP (Pin)`, or `>NEXT (Pin)` —
+`NEXT` being the explicit spelling of plain fall-to-physically-next
+(structurally identical to omission; the wire still gets the compact
+omitted encoding where position allows). The renderer emits all of them and
+the parser rejects a multi-pin op with any pin missing, naming the missing
+pins.
+
+Rationale (adopted 2026-07-14, from the agent-ergonomics review): with one
+pin written and others omitted, the line *reads* complete — omitting a
+loop's `Done` pin (which lands control on the loop's own body, an off-by-one
+plus a silent infinite restart) was hit twice in real authoring before this
+rule. It also surfaced pins omission had kept entirely invisible
+(`switch`'s `Default`, `sequence`'s `First`). This is the same design
+conclusion LLVM IR reached for machine-edited control flow (mandatory
+explicit terminators); BSF keeps plain omission for single-pin ops only,
+where there is nothing to forget and sequential code reads best bare.
+`NEXT` is accepted (never required) on single-pin ops too. `POP` and `NEXT`
+are reserved words and cannot be node ids.
+
+### Validation (strict by design)
+
+`parse_text.py` rejects, with line numbers and did-you-mean suggestions:
+unknown op names, unknown argument names (checked against the op's live
+`data.instructions` declaration), unknown exec pin names, duplicate node
+ids / argument names / pins, branch targets naming no node, malformed or
+duplicated header attributes (`desc`/`keepvars`/`keeparrays`, accepted in
+any order), and **bare identifiers that are not registered game ids**
+(checked against an accept-set scanned from the Data package's own include
+files — so a forgotten `$` sigil or a misspelled `v_`/`c_`/item/frame/tech
+id fails at parse time instead of silently compiling to a wrong id
+literal). `compile.py` applies the same checks to hand-built IR
+(`BsfCompileError`), including branch-pin keys that match no declared pin —
+previously *silently dropped*, the worst failure mode the 2026-07-14 review
+probe found. Blank lines between nodes are allowed and carry no structure
+(a block ends only at the next `behavior`/`sub` header).
+
+`lint.py` (also run automatically on every CLI `compile`, warnings to
+stderr; standalone via `python -m desynced_toolkit.bsf lint`) flags the
+legal-but-suspicious tier: nodes unreachable from Program Start or any
+label (labels are never "unreachable" — computed `jump` dispatch can reach
+them), a literal `jump` whose `(id, num)` matches no `label` in the same
+behavior (falls back to Program Start at runtime — usually a typo, not an
+intended restart), and references to undeclared parameter slots (the
+dangling-ref-via-copy-paste hazard, which resolves to empty/0 in-game with
+no error).
 
 ## Dynamic `jump`/`label` dispatch
 

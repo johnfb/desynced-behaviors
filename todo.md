@@ -348,22 +348,23 @@ Update this file directly as items are picked up/finished.
       and new-file node ids render identically, making the message unreadable, and the pin
       lines are redundant with the reported insertion anyway (the retarget is implied by a
       node having been spliced into the fallthrough chain).
-- [ ] **Require explicit pin wiring in BSF text for any op with 2+ declared exec pins** (user
+- [x] **Require explicit pin wiring in BSF text for any op with 2+ declared exec pins** (user
       idea, 2026-07-11, prompted by hitting the loop-`Done`-omission bug twice in one session —
-      see `feedback_bsf_loop_done_pin_omission` memory). Currently an omitted pin silently means
-      "physically next," which is safe/unambiguous for a single-pin op but easy to get wrong for
-      a multi-pin one (forgetting a second pin exists because the first one is visible and looks
-      complete). Proposed design: for any op with only one exec pin, keep today's behavior
-      unchanged (omission still fine, matches how `render_mermaid.py` already only bothers
-      labeling a pin when there's more than one). For any op with 2+ exec pins, require every one
-      of them to be explicitly written as one of `POP` / a label / a new `NEXT` token (meaning
-      "physically next in this behavior's own `order`," spelled out instead of invisible).
-      Touches `render_node`/`parse_node` (a new `NEXT` token in the parser) — real grammar
-      change, not a wire-format change (the wire keeps its own compact-encoding omission
-      regardless, per the earlier "Node identity vs. wire position" decision). Breaks every
-      existing fixture's expected text in `test_bsf_text_roundtrip.py` (mechanically fixable,
-      but every test string changes). Not started — deliberately deferred to keep focus on the
-      ambiguity-survey work in progress.
+      see `feedback_bsf_loop_done_pin_omission` memory). Done 2026-07-14 as designed (single-pin
+      ops keep omission; 2+ exec-pin ops require every pin as `>node`/`>POP`/`>NEXT`), as part
+      of the agent-ergonomics review that also landed strict parse/compile validation (unknown
+      ops/args/pins/ids/targets, duplicates — each previously either a silent miswire or a
+      context-free error; bare ids validated against the real game registries so a forgotten
+      `$` sigil fails loudly) and a `lint` pass/CLI subcommand (unreachable nodes, literal
+      jumps with no matching `(id, num)` label, undeclared param slots; also runs on every CLI
+      compile). A prior-art survey (graph data formats, node-editor serializations, community
+      Desynced compilers, LLVM/MLIR IR) found nothing to adopt wholesale — the two adopted
+      techniques (mandatory explicit successors, a verifier) are exactly what LLVM does for
+      machine-edited control flow. See `behavior_source_format.md` § "Explicit-pin rule" /
+      § "Validation". The feared test breakage didn't materialize (round-trip tests are
+      structural, not golden-string); all fixtures and library exports pass unchanged, and the
+      rule immediately surfaced two previously-invisible pins (`switch`'s `Default`,
+      `sequence`'s `First`).
 - [x] **Investigate `@goto`'s "transport route" option semantics.** Resolved 2026-07-11 via
       source, no in-game test needed: it's not a `@goto` mode at all, it's the separate
       `logistics_transport_route` flag (`enable_transport_route`/`disable_transport_route`

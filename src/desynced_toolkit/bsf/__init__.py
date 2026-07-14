@@ -8,6 +8,7 @@ from .argcache import ArgCache
 from .compile import compile_behavior, compile_dcs
 from .decompile import decompile_behavior, decompile_dcs
 from .ir import BsfBehavior, BsfNode, BsfParam
+from .lint import lint_behavior
 from .parse_text import parse_behavior
 from .render_mermaid import render_mermaid
 from .render_text import render_behavior
@@ -24,6 +25,7 @@ __all__ = [
     "parse_behavior",
     "render_behavior",
     "render_mermaid",
+    "lint_behavior",
     "semantic_diff_behaviors",
     "semantic_diff_dcs",
     "dcs_to_bsf",

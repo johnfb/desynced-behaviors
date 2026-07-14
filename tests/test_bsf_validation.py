@@ -217,3 +217,79 @@ def test_compile_rejects_branch_to_unknown_node_on_ir(engine, argcache):
     n.branches["next"] = "n9"
     with pytest.raises(BsfCompileError, match=r"node 'n1' pin 'next'.*unknown node 'n9'"):
         compile_behavior(engine, _one_node_behavior(n), argcache)
+
+
+# -- lint: legal-but-suspicious ---------------------------------------------------------------
+
+
+def test_lint_flags_unreachable_node(engine, argcache):
+    from desynced_toolkit.bsf.lint import lint_behavior
+    from desynced_toolkit.bsf.parse_text import parse_behavior
+
+    b = parse_behavior(
+        "behavior T():\n\n"
+        "n1: set_reg(Value=1, Target=$B)  >POP (next)\n"
+        "n2: set_reg(Value=2, Target=$C)\n",  # n1 POPs; nothing reaches n2
+        argcache,
+    )
+    warnings = lint_behavior(b, argcache)
+    assert any("'n2' is unreachable" in w for w in warnings)
+
+
+def test_lint_label_sections_are_not_unreachable(engine, argcache):
+    from desynced_toolkit.bsf.lint import lint_behavior
+    from desynced_toolkit.bsf.parse_text import parse_behavior
+
+    # computed dispatch: the label-headed section is only reachable via jump(Label=$State),
+    # which no static walk resolves -- must NOT be flagged
+    b = parse_behavior(
+        "behavior T():\n\n"
+        "n1: jump(Label=$State)  >POP (next)\n"
+        "n2: label(Label=v_arrow_up)\n"
+        "n3: set_reg(Value=1, Target=$B)  >POP (next)\n",
+        argcache,
+    )
+    assert lint_behavior(b, argcache) == []
+
+
+def test_lint_flags_literal_jump_without_matching_label(engine, argcache):
+    from desynced_toolkit.bsf.lint import lint_behavior
+    from desynced_toolkit.bsf.parse_text import parse_behavior
+
+    b = parse_behavior(
+        "behavior T():\n\n"
+        "n1: label(Label=v_arrow_up[num=1])\n"
+        "n2: jump(Label=v_arrow_up[num=2])\n",  # (id, num) mismatch: num=2 has no label
+        argcache,
+    )
+    warnings = lint_behavior(b, argcache)
+    assert any("no matching label" in w for w in warnings)
+
+
+def test_lint_flags_undeclared_param_slot(engine, argcache):
+    from desynced_toolkit.bsf.ir import BsfBehavior, BsfNode
+    from desynced_toolkit.bsf.lint import lint_behavior
+    from desynced_toolkit.bsf.values import Param
+
+    n = BsfNode(id="n1", op="set_reg", args={"Value": Param(5), "Target": Var("B")})
+    n.branches["next"] = "POP"
+    b = BsfBehavior(name="T", nodes={"n1": n}, order=["n1"])  # declares zero params
+    warnings = lint_behavior(b, argcache)
+    assert any("undeclared parameter slot 5" in w for w in warnings)
+
+
+def test_lint_clean_on_all_library_behaviors(engine, argcache):
+    from pathlib import Path
+
+    from desynced_toolkit.bsf.decompile import decompile_dcs
+    from desynced_toolkit.bsf.lint import lint_behavior
+
+    checked = 0
+    for f in sorted((Path(__file__).parent.parent / "library").glob("*.dcs")):
+        try:
+            b = decompile_dcs(engine, f.read_text().strip())
+        except ValueError:
+            continue  # blueprint
+        assert lint_behavior(b, argcache) == [], f.name
+        checked += 1
+    assert checked >= 1
