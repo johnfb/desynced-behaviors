@@ -19,6 +19,8 @@ from .assets import AssetSource, get_package_manifest, resolve_include
 
 class LupaEngine:
     def __init__(self, source: AssetSource, package_id: str = "Data") -> None:
+        self.source = source
+        self.package_id = package_id
         self.lua = lupa.LuaRuntime(unpack_returned_tuples=True)
         stub = (
             resources.files(__package__)

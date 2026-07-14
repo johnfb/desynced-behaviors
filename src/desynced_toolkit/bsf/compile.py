@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 from .argcache import DYNAMIC_ARG_OPS, ArgCache, arg_pin_names, call_arg_positions, written_param_slots
-from .ir import BsfBehavior, BsfNode
+from .ir import BsfBehavior
 from .values import to_lua
+
+
+class BsfCompileError(ValueError):
+    """IR-level validation failure. parse_text.py already rejects most of these for text input;
+    these checks exist so hand-built IR (tests, future tooling) fails just as loudly instead of
+    silently compiling wrong -- notably an unknown branch-pin key, which an earlier version
+    simply never consulted (the compile loop iterates declared pins and checks membership, so a
+    typo'd key was dropped without a trace; demonstrated 2026-07-14, see
+    tests/test_bsf_validation.py)."""
 
 
 def _resolve_branch_target(target, positions: dict[str, int], is_last: bool):
@@ -26,6 +35,8 @@ def _resolve_branch_target(target, positions: dict[str, int], is_last: bool):
         return _OMIT
     if target == "POP":
         return _OMIT if is_last else False
+    if target not in positions:
+        raise BsfCompileError(f"branch targets unknown node {target!r}")
     return positions[target]
 
 
@@ -46,23 +57,52 @@ def _compile_one(engine, b: BsfBehavior, argcache: ArgCache, lua) -> "lupa._LuaT
         t = lua.table()
         t["op"] = node.op
 
+        if not argcache.op_exists(node.op):
+            raise BsfCompileError(f"node {node.id!r}: unknown instruction op {node.op!r}")
+
+        declared_exec: set[str] = set()
         if node.op in DYNAMIC_ARG_OPS:
             arg_positions = call_arg_positions(b, node)
             for name, value in node.args.items():
+                if name not in arg_positions:
+                    raise BsfCompileError(
+                        f"node {node.id!r} ({node.op}): argument {name!r} matches no parameter "
+                        f"of the call target (known: {', '.join(sorted(arg_positions)) or 'none'})"
+                    )
                 t[arg_positions[name]] = to_lua(value, lua)
         else:
             arg_pos = {}
             for i, atype, pin in arg_pin_names(node.op, argcache):
                 if atype != "exec":
                     arg_pos[pin] = i
-                elif pin in node.branches:
-                    resolved = _resolve_branch_target(node.branches[pin], positions, is_last)
+                    continue
+                declared_exec.add(pin)
+                if pin in node.branches:
+                    try:
+                        resolved = _resolve_branch_target(node.branches[pin], positions, is_last)
+                    except BsfCompileError as e:
+                        raise BsfCompileError(f"node {node.id!r} pin {pin!r}: {e}") from None
                     if resolved is not _OMIT:
                         t[i] = resolved
             for name, value in node.args.items():
+                if name not in arg_pos:
+                    raise BsfCompileError(
+                        f"node {node.id!r} ({node.op}): unknown argument {name!r} "
+                        f"(valid: {', '.join(sorted(arg_pos)) or 'none'})"
+                    )
                 t[arg_pos[name]] = to_lua(value, lua)
 
-        next_resolved = _resolve_branch_target(node.branches.get("next"), positions, is_last)
+        for pin in node.branches:
+            if pin != "next" and pin not in declared_exec:
+                raise BsfCompileError(
+                    f"node {node.id!r} ({node.op}): unknown branch pin {pin!r} "
+                    f"(valid: {', '.join(sorted(declared_exec | {'next'}))})"
+                )
+
+        try:
+            next_resolved = _resolve_branch_target(node.branches.get("next"), positions, is_last)
+        except BsfCompileError as e:
+            raise BsfCompileError(f"node {node.id!r} pin 'next': {e}") from None
         if next_resolved is not _OMIT:
             t["next"] = next_resolved
 

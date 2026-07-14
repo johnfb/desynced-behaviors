@@ -45,12 +45,34 @@ docstrings for the symmetric render-side notes:
 
 from __future__ import annotations
 
+import difflib
 import re
 
-from .argcache import ArgCache
+from .argcache import DYNAMIC_ARG_OPS, ArgCache
 from .decompile import HIDDEN_FIELD_TABLE
 from .ir import BsfBehavior, BsfNode, BsfParam
 from .values import BsfValue, Coord, Fr, FrameReg, IdLit, Num, Param, Var
+
+
+class BsfParseError(SyntaxError):
+    """Parse/validation failure with the 1-based source line attached. Every rejection carries
+    enough context to fix the text without reading this module: the offending line, what was
+    expected, and a did-you-mean suggestion where a candidate set exists. Validation here is
+    deliberately strict -- every case it rejects was demonstrated (2026-07-14 probe, see
+    tests/test_bsf_validation.py) to otherwise compile *silently* into a wrong behavior:
+    a typo'd exec pin silently unwired, a forgotten `$` sigil silently became an id literal,
+    a duplicate node id / arg name silently clobbered its predecessor."""
+
+    def __init__(self, msg: str, line_no: int | None = None, line: str | None = None):
+        loc = f"line {line_no}: " if line_no is not None else ""
+        tail = f"\n    {line.strip()}" if line else ""
+        super().__init__(f"{loc}{msg}{tail}")
+        self.line_no = line_no
+
+
+def _suggest(name: str, candidates) -> str:
+    matches = difflib.get_close_matches(name, list(candidates), n=1)
+    return f" -- did you mean {matches[0]!r}?" if matches else ""
 
 _NUM_RE = re.compile(r"^-?\d+(\.\d+)?$")
 _SLOT_UNDECLARED_RE = re.compile(r"^slot(\d+)\(undeclared\)$")
@@ -225,41 +247,98 @@ def _parse_hidden_value(s: str) -> object:
     return s
 
 
-def _parse_branch_notes(s: str, op: str, argcache: ArgCache) -> dict[str, str]:
+def _parse_branch_notes(
+    s: str, op: str, argcache: ArgCache, line_no: int | None = None, line: str | None = None
+) -> dict[str, str]:
     next_pin = argcache.next_pin_name(op)
+    # For a dynamic-arg op (call/load_behavior) the declared exec-arg list is empty by
+    # construction, so the only valid pin is its own next pin -- exec_pin_names covers both
+    # cases uniformly.
+    valid_pins = argcache.exec_pin_names(op)
     branches = {}
     for target, pin in _BRANCH_RE.findall(s):
         pin = pin.strip()
         if pin == "jump→label":
             continue  # display-only annotation, recomputed fresh on every render, not real data
+        if pin not in valid_pins:
+            raise BsfParseError(
+                f"op {op!r} has no exec pin named {pin!r}; valid pins: "
+                f"{', '.join(repr(p) for p in valid_pins) or '(none)'}{_suggest(pin, valid_pins)}",
+                line_no,
+                line,
+            )
         # A pin whose rendered name matches this op's real "next"-pin display name (e.g.
         # check_number's "If Equal") maps back to the structural "next" key -- everything else
         # (a real declared exec arg's own name, e.g. "If Larger") is already its own key.
         key = "next" if (next_pin is not None and pin == next_pin) else pin
+        if key in branches:
+            raise BsfParseError(f"pin {pin!r} wired twice on one node", line_no, line)
         branches[key] = "POP" if target == "POP" else target
     return branches
 
 
-def parse_node(line: str, params: list[BsfParam], argcache: ArgCache) -> BsfNode:
+def parse_node(
+    line: str,
+    params: list[BsfParam],
+    argcache: ArgCache,
+    line_no: int | None = None,
+    known_ids: frozenset[str] | None = None,
+) -> BsfNode:
+    if ":" not in line:
+        raise BsfParseError("expected a node line ('id: op(...)')", line_no, line)
     node_id, rest = line.split(":", 1)
     node_id = node_id.strip()
     rest = rest.strip()
-    op_end = rest.index("(")
+    op_end = rest.find("(")
+    if op_end < 0:
+        raise BsfParseError(
+            f"expected 'op(...)' after node id {node_id!r} (no '(' found)", line_no, line
+        )
     op = rest[:op_end].strip()
+    if not argcache.op_exists(op):
+        raise BsfParseError(
+            f"unknown instruction op {op!r}{_suggest(op, argcache.all_ops())}", line_no, line
+        )
     after = rest[op_end + 1 :]
     close = _find_close_paren(after, 0)
     arg_list_str = after[:close]
     branch_notes_str = after[close + 1 :]
 
     node = BsfNode(id=node_id, op=op)
-    hidden_fields = {f for o, f in HIDDEN_FIELD_TABLE.items() if o == op}
+    hidden_fields = {f for o, f in HIDDEN_FIELD_TABLE.items() if o == op} | {"cmt"}
+    # A dynamic-arg op's value-arg names come from the *target* sub's own parameters, which may
+    # not even be parsed yet -- name validation for those happens at compile time instead.
+    valid_arg_names = None if op in DYNAMIC_ARG_OPS else argcache.value_arg_names(op)
     for arg_str in _split_top_level(arg_list_str, ","):
         name, value_str = _split_first_top_level_eq(arg_str)
-        if name == "cmt" or name in hidden_fields:
+        if name in node.args or name in node.hidden:
+            raise BsfParseError(
+                f"duplicate argument {name!r} -- a repeated declared pin name must use its "
+                f"occurrence suffix ({name}2, {name}3, ...)",
+                line_no,
+                line,
+            )
+        if name in hidden_fields:
             node.hidden[name] = _parse_hidden_value(value_str)
-        else:
-            node.args[name] = parse_value(value_str, params)
-    node.branches.update(_parse_branch_notes(branch_notes_str, op, argcache))
+            continue
+        if valid_arg_names is not None and name not in valid_arg_names:
+            valid = sorted(valid_arg_names | (hidden_fields - {"cmt"})) + ["cmt"]
+            raise BsfParseError(
+                f"op {op!r} has no argument named {name!r}; valid: "
+                f"{', '.join(valid)}{_suggest(name, valid)}",
+                line_no,
+                line,
+            )
+        value = parse_value(value_str, params)
+        if known_ids is not None and isinstance(value, IdLit) and value.id not in known_ids:
+            raise BsfParseError(
+                f"unknown identifier {value.id!r} (not a registered game id; for a local "
+                f"variable write '${value.id}'){_suggest(value.id, known_ids)}",
+                line_no,
+                line,
+            )
+        node.args[name] = value
+    node.branches.update(_parse_branch_notes(branch_notes_str, op, argcache, line_no, line))
     return node
 
 
@@ -277,46 +356,96 @@ def _parse_params(params_str: str) -> list[BsfParam]:
     return result
 
 
+# Header attribute lines (`desc:`/`keepvars:`/`keeparrays:`), accepted in any order between the
+# header and the first node -- an earlier version required this exact order and misparsed an
+# out-of-order attribute as a node line, dying with an unrelated "substring not found".
+_ATTR_KEYWORDS = ("desc", "keepvars", "keeparrays")
+
+
 def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tuple[BsfBehavior, int]:
     m = _HEADER_RE.match(lines[i])
     if not m or m.group(1) != keyword:
-        raise SyntaxError(f"expected {keyword!r} header, got: {lines[i]!r}")
+        raise BsfParseError(f"expected a {keyword!r} header here", i + 1, lines[i])
     name = m.group(2).strip()
     params = _parse_params(m.group(3))
     i += 1
 
-    desc = None
-    if i < len(lines):
-        dm = _DESC_RE.match(lines[i].strip())
-        if dm:
-            desc = dm.group(1)
+    attrs: dict[str, object] = {}
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped == "":
             i += 1
-
-    keepvars = False
-    if i < len(lines) and _KEEPVARS_RE.match(lines[i].strip()):
-        keepvars = True
+            continue
+        key = stripped.split(":", 1)[0].strip() if ":" in stripped else None
+        if key not in _ATTR_KEYWORDS:
+            break
+        if key in attrs:
+            raise BsfParseError(f"duplicate {key!r} attribute", i + 1, lines[i])
+        dm = _DESC_RE.match(stripped)
+        if key == "desc":
+            if not dm:
+                raise BsfParseError('malformed desc line (expected: desc: "...")', i + 1, lines[i])
+            attrs["desc"] = _unescape_string(dm.group(1))
+        elif key == "keepvars":
+            if not _KEEPVARS_RE.match(stripped):
+                raise BsfParseError("malformed keepvars line (expected: keepvars: true)", i + 1, lines[i])
+            attrs["keepvars"] = True
+        else:
+            km = _KEEPARRAYS_RE.match(stripped)
+            if not km:
+                raise BsfParseError(
+                    'malformed keeparrays line (expected: keeparrays: "startup" or "store")', i + 1, lines[i]
+                )
+            attrs["keeparrays"] = km.group(1)
         i += 1
 
-    keeparrays = None
-    if i < len(lines):
-        km = _KEEPARRAYS_RE.match(lines[i].strip())
-        if km:
-            keeparrays = km.group(1)
-            i += 1
-
-    while i < len(lines) and lines[i].strip() == "":
-        i += 1
-
+    known_ids = argcache.known_ids()
     nodes: dict[str, BsfNode] = {}
+    node_lines: dict[str, int] = {}
     order: list[str] = []
-    while i < len(lines) and lines[i].strip() != "" and not lines[i].lstrip().startswith(("sub ", "behavior ")):
-        node = parse_node(lines[i], params, argcache)
+    # Blank lines between nodes are allowed (grouping aids readability; headers are unambiguous,
+    # so blanks carry no structure) -- a block ends only at the next behavior/sub header or EOF.
+    # An earlier version silently ended the node list at the first blank line, so a stray blank
+    # made every following node die with a baffling "expected 'sub' header".
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped == "":
+            i += 1
+            continue
+        if stripped.startswith(("sub ", "behavior ")):
+            break
+        node = parse_node(lines[i], params, argcache, line_no=i + 1, known_ids=known_ids)
+        if node.id in _ATTR_KEYWORDS:
+            raise BsfParseError(
+                f"{node.id!r} is reserved for a header attribute and cannot be a node id "
+                f"(header attributes must appear before the first node)",
+                i + 1,
+                lines[i],
+            )
+        if node.id in nodes:
+            raise BsfParseError(f"duplicate node id {node.id!r}", i + 1, lines[i])
         nodes[node.id] = node
+        node_lines[node.id] = i + 1
         order.append(node.id)
         i += 1
 
+    for node in nodes.values():
+        for pin, target in node.branches.items():
+            if target is not None and target != "POP" and target not in nodes:
+                raise BsfParseError(
+                    f"node {node.id!r} pin {pin!r} targets unknown node {target!r}"
+                    f"{_suggest(target, nodes)}",
+                    node_lines[node.id],
+                )
+
     return BsfBehavior(
-        name=name, params=params, desc=desc, keepvars=keepvars, keeparrays=keeparrays, nodes=nodes, order=order
+        name=name,
+        params=params,
+        desc=attrs.get("desc"),
+        keepvars=attrs.get("keepvars", False),
+        keeparrays=attrs.get("keeparrays"),
+        nodes=nodes,
+        order=order,
     ), i
 
 
@@ -325,6 +454,8 @@ def parse_behavior(text: str, argcache: ArgCache) -> BsfBehavior:
     i = 0
     while i < len(lines) and lines[i].strip() == "":
         i += 1
+    if i >= len(lines):
+        raise BsfParseError("empty input (expected a 'behavior' header)")
     behavior, i = _parse_one(lines, i, keyword="behavior", argcache=argcache)
 
     subs = []

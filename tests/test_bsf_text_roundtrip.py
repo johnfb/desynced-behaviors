@@ -65,8 +65,8 @@ def test_var_name_containing_a_quote_and_fake_syntax_roundtrips(engine):
 
 
 def test_jump_label_annotation_literal_vs_dynamic(engine):
-    label_node = BsfNode(id="n1", op="label", args={"Label": IdLit("v_state_a")})
-    jump_lit = BsfNode(id="n2", op="jump", args={"Label": IdLit("v_state_a")})
+    label_node = BsfNode(id="n1", op="label", args={"Label": IdLit("v_arrow_up")})
+    jump_lit = BsfNode(id="n2", op="jump", args={"Label": IdLit("v_arrow_up")})
     jump_dyn = BsfNode(id="n3", op="jump", args={"Label": Var("Dynamic")})
     behavior = BsfBehavior(
         name="JumpTest",
@@ -84,7 +84,7 @@ def test_jump_label_annotation_literal_vs_dynamic(engine):
     reparsed = parse_behavior(text, argcache)
     # the annotation is display-only -- must not leak into the IR as a real branch
     assert "jump→label" not in reparsed.nodes["n2"].branches
-    assert reparsed.nodes["n2"].args["Label"] == IdLit("v_state_a")
+    assert reparsed.nodes["n2"].args["Label"] == IdLit("v_arrow_up")
     assert reparsed.nodes["n3"].args["Label"] == Var("Dynamic")
 
 

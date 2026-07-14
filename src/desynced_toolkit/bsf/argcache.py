@@ -5,8 +5,11 @@ FROM this same data for humans and is not meant to be parsed by tooling."""
 
 from __future__ import annotations
 
+import re
+
 import lupa.lua54 as lupa
 
+from ..assets import get_package_manifest, resolve_include
 from ..lua_util import to_py
 from .values import Param
 
@@ -70,6 +73,62 @@ class ArgCache:
                 name = "next"
             self._next_pin_cache[op] = name
         return self._next_pin_cache[op]
+
+    def op_exists(self, op: str) -> bool:
+        return self.engine.data.instructions[op] is not None
+
+    def all_ops(self) -> list[str]:
+        """Every op id in the live `data.instructions` table -- used only for typo suggestions."""
+        return [k for k in self.engine.data.instructions.keys() if isinstance(k, str)]
+
+    def exec_pin_names(self, op: str) -> list[str]:
+        """Every branch-pin display name this op can carry in BSF text: the declared exec args
+        (occurrence-suffixed, in declaration order) plus the top-level next pin's display name
+        last (which may be the literal generic "next"), or nothing at all for an op whose
+        `exec_arg` is `false` and that declares no exec args (`exit`/`restart`/`last`)."""
+        pins = [name for _, atype, name in arg_pin_names(op, self) if atype == "exec"]
+        next_pin = self.next_pin_name(op)
+        if next_pin is not None:
+            pins.append(next_pin)
+        return pins
+
+    def value_arg_names(self, op: str) -> set[str]:
+        return {name for _, atype, name in arg_pin_names(op, self) if atype != "exec"}
+
+    def known_ids(self) -> frozenset[str]:
+        """Every registered game id (`v_*` values, `c_*` components, `f_*` frames, items, techs,
+        ...) -- the accept-set a bare identifier in BSF text is validated against, so a forgotten
+        `$` sigil or a misspelled id fails loudly at parse time instead of silently compiling to
+        a wrong id literal. Scanned once per engine from the Data package's own include files
+        (the stubbed Lua runtime only executes `instructions.lua`, so the real registries are
+        never populated in-process) and cached on the engine, which tests share session-wide."""
+        cached = getattr(self.engine, "_known_ids_cache", None)
+        if cached is None:
+            cached = _collect_known_ids(self.engine.source, self.engine.package_id)
+            self.engine._known_ids_cache = cached
+        return cached
+
+
+# `data.values.v_foo = {...}` / `data.items.metalore = {...}` style direct registrations, and
+# the `RegisterComponent("c_foo", ...)`/`RegisterFrame("f_foo", ...)` builder style -- the two
+# registration shapes observed across the whole Data package.
+_DATA_ID_RE = re.compile(r"\bdata\.[a-z_]+\.([A-Za-z_][A-Za-z0-9_]*)\s*=")
+_REGISTER_ID_RE = re.compile(r'Register(?:Component|Frame)\(\s*"([^"]+)"')
+_INCLUDE_RE = re.compile(r'"([^"]+\.lua)"')
+
+
+def _collect_known_ids(source, package_id: str = "Data") -> frozenset[str]:
+    pm = get_package_manifest(source, package_id)
+    entry_text = source.read_text(pm.entry)
+    ids: set[str] = set()
+    for include in _INCLUDE_RE.findall(entry_text):
+        path = resolve_include(pm.entry_dir, include)
+        if not source.exists(path):
+            continue
+        text = source.read_text(path)
+        ids.update(_DATA_ID_RE.findall(text))
+        ids.update(_REGISTER_ID_RE.findall(text))
+    return frozenset(ids)
 
 
 def arg_pin_names(op: str, argcache: "ArgCache") -> list[tuple[int, str, str]]:

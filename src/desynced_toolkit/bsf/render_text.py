@@ -190,7 +190,10 @@ def _render_into(b: BsfBehavior, lines: list[str], keyword: str, argcache: ArgCa
     params_str = ", ".join(p.name + ("*" if (i + 1) in written else "") for i, p in enumerate(b.params))
     lines.append(f"{keyword} {b.name}({params_str}):")
     if b.desc:
-        lines.append(f'  desc: "{b.desc}"')
+        # Escaped like every other quoted string in the grammar -- an earlier version
+        # interpolated raw, and a desc containing a `"` only round-tripped because the parse
+        # regex happens to be greedy; a desc containing a newline broke the line structure.
+        lines.append(f'  desc: "{_escape_string(b.desc)}"')
     if b.keepvars:
         lines.append("  keepvars: true")
     if b.keeparrays:
