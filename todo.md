@@ -242,21 +242,22 @@ Update this file directly as items are picked up/finished.
       fallback match regardless of what entity type got embedded, with no dependency on
       enumerating types at all. Applied and checked in to `library/hauler.dcs` (`n43`, `n79`).
       See `blight_magnifier_mining.md`'s hauler section for the full trace.
-- [ ] **(Idea, not started) Mining Leader/Foreman for slot-less Human Miner Mechs.** User idea
-      2026-07-11: Human Miner Mechs have no Internal socket for a behavior controller, so they
-      can't run a `MinerDrone`-style Program of their own. Mechanism now grounded in source
-      (`instructions.lua:302`, `GetAdjacentFactionEntityOrSelf`): `set_reg_remotely`/
-      `get_reg_remotely` normally require the target to be physically touching, *except* when the
-      calling component's `def.key == "autobase"` — that branch instead only requires the same
-      `GetPowerGridIndexAt` grid index on both ends, no adjacency at all. `c_autobase`
-      (`components.lua:4116`) *is* the "AI Behavior Controller" component (Internal, alien tech).
-      So: a small structure/unit fitted with an AI Behavior Controller plus a Power Field
-      (`c_power_relay`, `components.lua:1007`) extending grid coverage to a squad of Human Miner
-      Mechs could run a Program that scans idle mechs on the same grid and remotely writes mining
-      targets into their registers via `set_reg_remotely` — no physical adjacency needed, only
-      shared grid membership. Not designed in detail or built — just confirmed mechanically
-      plausible. Now more directly relevant: Human Miner Mechs are one of only two practical
-      mobile options for Obsidian/Laterite (see below), both slot-less.
+- [ ] **(Idea, mechanism now confirmed in-game) Mining Leader/Foreman for slot-less Human
+      Miner Mechs.** User idea 2026-07-11: Human Miner Mechs have no Internal socket for a
+      behavior controller, so they can't run a `MinerDrone`-style Program of their own.
+      Mechanism grounded in source (`instructions.lua`, `GetAdjacentFactionEntityOrSelf`):
+      `set_reg_remotely`/`get_reg_remotely` normally require the target to be physically
+      touching, *except* when the calling component's `def.key == "autobase"` — that branch
+      instead only requires the same `GetPowerGridIndexAt` grid index on both ends, no
+      adjacency at all. `c_autobase` *is* the "AI Behavior Controller" component (Internal,
+      alien tech); a Power Field (`c_power_relay`) extends the grid over the squad.
+      **Confirmed live 2026-07-14** with a purpose-built `Remote Write Test` behavior running
+      on the AI Behavior Controller: all four frame registers of a same-grid, NON-adjacent
+      unit accepted remote writes (`Failed` pin never fired). Still open before the design is
+      buildable: remote-writing a *miner component* register (the actual mining-target drive,
+      cf. `reference_cminer_register2` memory), the off-grid negative control, and the actual
+      Foreman behavior design. Directly relevant to Obsidian/Laterite (below): Human Miner
+      Mechs are one of only two practical mobile options for those, both slot-less.
 - [ ] **(Idea, not started) Obsidian/Laterite mining design.** Researched 2026-07-12: neither
       resource is mineable by `c_miner`/`c_adv_miner` at all (absent from both items' own
       `mining_recipe` in `data/items.lua`) — the only options are `c_extractor` (Medium socket,
