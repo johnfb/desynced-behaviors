@@ -152,6 +152,11 @@ registers and return home (member-side fallback, §3's HOLD row).
   allowing auto-acquire self-defense — leaning no; self-defense without pursuit is safe.
 - Overkill management (whole squad dumping into an almost-dead target) — v1's known
   limitation, unaddressed; acceptable for v2, revisit with real fights.
+- **Alien units as squad members**: the Reformation Core (`c_alien_sc` on a Re-Simulator,
+  engineer sacrifice) synthesizes 1 Small + 4 Internal components onto a garage-dockable
+  alien unit without using its native sockets — enough for a Behavior Controller + shields
+  (+ a visibility module), making augmented alien combat units (e.g. Obsidian Soldiers)
+  viable gunners under the same command protocol. Not designed here; noted as real.
 - **Next-release interactions** (see `upcoming-changes.md`): `is_empty`-based death checks
   invert (use the entity-blank check via the settled dangling-ref semantics, and migrate to
   Target Type Switch's 'Destroyed Object' pin when it lands); `compare_unit` is removed

@@ -394,12 +394,21 @@ them:
   behavior controller.** The remote-control ("Foreman") idea below is
   therefore specifically for the free explorable mechs and the slot-less
   alien miners.
-- **`c_alien_miner`**, built into two Alien-race ground units (Alien Unit
-  `f_alienbot`, Drill Spike `f_alien_miner`) — same `Hidden`-attachment,
-  whole-unit-only constraint.
-- **`c_virus_claws`** — Obsidian only, exists only on hostile Virus-faction
-  creatures (e.g. "Mothika," which does fly, `cost_modifier=0`) — not
-  player-buildable or controllable in normal play.
+- **`c_alien_miner`**, built into two Alien-race ground units in the data —
+  but in practice only the Drill Spike (`f_alien_miner`) exists: "Alien
+  Unit" (`f_alienbot`)'s tech unlock is commented out in `tech_alien.lua`
+  (corrections 2026-07-14). The Drill Spike is **not** slot-less: 1 Internal
+  socket (self-hosts a Behavior Controller) plus frame-level
+  `component_boost = 300` — which likely invalidates this doc's later
+  "extractors are much slower" pacing assumption for the alien-miner path;
+  and it's garage-dockable, so Reformation-Core synthesis can add 1 Small +
+  4 Internal more.
+- **`c_virus_claws`** — Obsidian only; carried by the **Ravager**
+  (`f_gastarid1`), which *is* player-buildable via the virus tech tree
+  (hive-spawner recipe) — corrected 2026-07-14 from "not player-usable."
+  Unsuitable for most use though: it auto-converts mined obsidian into
+  infected obsidian (user-observed). (The flying Mothika carrier remains
+  hostile-only.)
 
 **No flying frame can mine either resource** — confirmed by checking every
 frame carrying one of these four components; none has `cost_modifier = 0`

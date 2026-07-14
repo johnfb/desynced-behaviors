@@ -269,8 +269,14 @@ Update this file directly as items are picked up/finished.
       "Miner Mech" (`f_human_adv_miner`) has one Internal socket (plus 3 storage and a
       frame-level `component_boost = 50`), so it can host its own Behavior Controller and
       run a MinerDrone-style program directly — the Foreman is specifically for putting free
-      explorable mechs (and slot-less alien miners) to work, not the only automation path
-      for mobile Obsidian/Laterite mining.**
+      explorable mechs to work, not the only automation path for mobile Obsidian/Laterite
+      mining.** **Second scope refinement (2026-07-14): alien units don't need it either** —
+      the Drill Spike turns out to have 1 Internal socket of its own (self-hosts a
+      controller), and the Reformation Core (`c_alien_sc` on a Re-Simulator; engineer
+      sacrifice) can synthesize 1 Small + 4 Internal further components onto any
+      garage-dockable alien unit without using native sockets. **The explorable Human Miner
+      Mech is the one unit class with no self-hosting path at all — the Foreman's real
+      constituency.**
 - [ ] **(Idea, not started) Obsidian/Laterite mining design.** Researched 2026-07-12: neither
       resource is mineable by `c_miner`/`c_adv_miner` at all (absent from both items' own
       `mining_recipe` in `data/items.lua`) — the only options are `c_extractor` (Medium socket,
@@ -278,9 +284,17 @@ Update this file directly as items are picked up/finished.
       `c_human_miner` (explorable-awarded "Human Miner Mech" `f_human_miner`: slot-less;
       buildable "Miner Mech" `f_human_adv_miner`: **one Internal socket** + frame-level
       `component_boost = 50`, so it can run its own program — correction 2026-07-14, see the
-      Foreman item above) or `c_alien_miner`
-      (Alien Unit / Drill Spike, ground, slot-less) — `c_virus_claws` also mines Obsidian but
-      only exists on hostile Virus creatures, not player-usable. No flying option exists for
+      Foreman item above) or `c_alien_miner` (in practice **only the Drill Spike**
+      `f_alien_miner` — the data's other carrier, "Alien Unit" `f_alienbot`, has its tech
+      unlock commented out in `tech_alien.lua` and is unobtainable, matching the user never
+      having seen one; the Drill Spike has **1 Internal socket** of its own (not slot-less —
+      correction 2026-07-14) plus a frame-level **`component_boost = 300`**, so it
+      self-hosts a Behavior Controller directly and mines far faster than its component
+      alone suggests — a fact that should reopen the sparse-vs-dense layout math below; it's
+      also garage-dockable and therefore Reformation-augmentable on top, see the Foreman
+      item) — `c_virus_claws` also mines Obsidian, on the **Ravager** (`f_gastarid1`,
+      player-buildable via the virus tech tree, hive-spawner recipe) — but unsuitable for
+      most use: it auto-converts mined obsidian into infected obsidian (user-observed). No flying option exists for
       either resource. Also found: the dense 6-big/2-small magnifier lattice built for the
       other four resources badly oversupplies these two (`c_extractor`'s own mining rate is
       much slower than a boosted `c_adv_miner`'s) — regen would run 3-5x faster than 2
