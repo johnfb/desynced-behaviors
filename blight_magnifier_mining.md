@@ -406,8 +406,11 @@ them:
 - **`c_virus_claws`** — Obsidian only; carried by the **Ravager**
   (`f_gastarid1`), which *is* player-buildable via the virus tech tree
   (hive-spawner recipe) — corrected 2026-07-14 from "not player-usable."
-  Unsuitable for most use though: it auto-converts mined obsidian into
-  infected obsidian (user-observed). (The flying Mothika carrier remains
+  Unsuitable for most use though: the conversion of mined obsidian into
+  infected obsidian is done by a *separate* integrated component on the
+  same frame, `c_ravager_virus_converter` (hidden attachment — can't be
+  removed or turned off), not by the claws themselves (user-observed,
+  component confirmed in `f_gastarid1`'s definition). (The flying Mothika carrier remains
   hostile-only.)
 
 **No flying frame can mine either resource** — confirmed by checking every

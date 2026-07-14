@@ -294,7 +294,9 @@ Update this file directly as items are picked up/finished.
       also garage-dockable and therefore Reformation-augmentable on top, see the Foreman
       item) — `c_virus_claws` also mines Obsidian, on the **Ravager** (`f_gastarid1`,
       player-buildable via the virus tech tree, hive-spawner recipe) — but unsuitable for
-      most use: it auto-converts mined obsidian into infected obsidian (user-observed). No flying option exists for
+      most use: the frame also carries `c_ravager_virus_converter` (hidden/integrated, can't
+      be removed or turned off), which auto-converts mined obsidian into infected obsidian
+      (user-observed; component named in the frame's own definition). No flying option exists for
       either resource. Also found: the dense 6-big/2-small magnifier lattice built for the
       other four resources badly oversupplies these two (`c_extractor`'s own mining rate is
       much slower than a boosted `c_adv_miner`'s) — regen would run 3-5x faster than 2
