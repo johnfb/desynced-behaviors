@@ -52,7 +52,7 @@ it is **maintaining the vision lock** that makes coordinated targeting exist at 
 | **Captain** (1) | Mark V (`f_bot_1m_c`: base vis 15, speed 5, 600 HP) | Medium Visibility Module (+15) + 2× Internal Visibility Module (+5 each) → **vis 40 exactly** | Unarmed by default; every remaining socket free for speed/armor |
 | **Gunners** | Mark V or Hauler (`f_bot_1m_b`: speed 4, 350 HP); optionally a tank frame or two | weapons + Portable Shield Generators | Shield generators (`c_shield_generator`/`c_shield_generator2`) are **Internal** — tank frames trade shield capacity for hull, hence "a couple at most" |
 | **Healers** | Hauler or Mark V | AOE Repair Component (`c_repairer_aoe`, Medium socket) | AOE repair works passively in radius — the behavior is mostly positioning |
-| **Power providers** | large tank frame | Power Field (`c_power_relay`, Medium) + Micro Reactor (`c_micro_reactor`, Internal, fuel-rod powered) | No behavior-controller socket needed: every ordinary frame carries the hidden integrated controller (`c_integrated_behavior`); only a few special frames opt out |
+| **Power providers** | Large Tank Frame (`f_human_large_tankframe`: 1400 HP, speed 4, 1 Large + 2 Internal sockets — human tech) | Large Power Field (`c_large_power_relay`, Large socket, unlocked by `t_power_units`) + Micro Reactor (`c_micro_reactor`, Internal, fuel-rod powered); second Internal free (shield or spare reactor) | No behavior-controller socket needed: every ordinary frame carries the hidden integrated controller (`c_integrated_behavior`); only a few special frames opt out. Speed 4 matches Hauler gunners — won't drag the rally gate |
 
 Visibility modules stack additively onto the frame's base `visibility_range`
 (`SumModuleBoosts(owner, "c_modulevisibility", ...)`), so the Captain loadout above is exact,
@@ -146,8 +146,6 @@ registers and return home (member-side fallback, §3's HOLD row).
 
 ## 7. Open items
 
-- Exact robot "large tank frame" id for the power provider, and whether a larger Power Field
-  variant exists (only the Medium `c_power_relay` was found in the current extract).
 - `c_repairer_aoe` radius/power draw — pin when authoring the Healer.
 - Staging-point geometry (threat-side offset math) — work out in BSF, integer-only.
 - Whether RALLY should ever hold fire outright (`v_powereddown` pass-through) instead of
