@@ -347,32 +347,27 @@ resource-count instructions) for how pervasively the real engine treats
 these as meaningful, checkable sentinel values rather than "just very big
 numbers." `engine_stub.lua` has been corrected to match.
 
-**A second, related sentinel behavior — dangling entity references — confirmed by direct
-in-game observation 2026-07-11, mechanism not traceable in Lua source (native/engine-side):**
-when an entity referenced by a register or variable is destroyed, that reference doesn't error
-or silently keep pointing at stale data — the `entity` field reads back `nil` and the `num`
-field reads back `REG_INFINITE`. `GetRegister`/`GetRegisterData` themselves are native (no Lua
-definition anywhere in this extract — confirmed by grep), so unlike the widget-formatter trace
-above, this can't be pinned down to a specific Lua line; it's taken on the user's direct
-gameplay observation, same evidentiary tier as other engine-native mechanics in this project
-(e.g. the DCS clipboard codec before it was cross-checked against the disassembly).
-
-**Working hypothesis (user's, not yet independently tested), stated precisely because it's a
-sharper and more useful claim than "destruction clears registers":** this isn't necessarily an
-eager write-on-destroy pass over every register that happens to reference the dying entity —
-it may instead be what you get whenever something tries to *read* a value whose entity
-reference no longer resolves, regardless of when the entity actually died. Under this framing,
-`entity=nil, num=REG_INFINITE` is a general "this reference no longer resolves" read-time
-result, not a one-time mutation applied at the moment of destruction. Consistent with
-`REG_INFINITE` already being the engine's general "unresolvable/unbounded" sentinel elsewhere
-(see above) — reusing it here means an ordinary `check_number` against a since-destroyed
-target's register resolves as "definitely larger than anything" without needing a dedicated
-is-this-still-alive check. Not yet confirmed which framing (eager-clear-on-destroy vs.
-lazy-resolve-on-read) is actually correct — they're behaviorally identical for the common case
-of reading shortly after destruction, and distinguishing them would need a targeted test (e.g.
-checking whether a *stale, unread* register still reports the entity's last real value if
-queried indirectly some other way before ever being read post-destruction). Flagging the
-distinction here so it isn't accidentally overwritten by the simpler-sounding claim later.
+**A second, related behavior — dangling entity references — settled 2026-07-14 by a targeted
+differential test (mechanism native/engine-side, not traceable in Lua source):** when an
+entity referenced by a register, variable, or memory-array slot is destroyed, the `entity`
+part reads back gone (blank) and the **`num` is preserved verbatim** — a reference stored with
+a deliberate `num=42` payload read back as blank+42, a no-payload copy read back as 0, and a
+memory-array slot behaved identically to a register. An earlier direct-observation claim that
+the `num` reads back `REG_INFINITE` (recorded here 2026-07-11) **did not reproduce and is
+refuted for stored values** — that ∞ most plausibly came from a different mechanism (e.g.
+`get_distance` against a dead target returning ∞-as-distance), not from the stored reference.
+Practical consequences: death-detection by checking the entity part works; a num payload
+riding on an entity reference survives the target's death, so a `check_number` against a
+dangling ref compares its real, preserved num — never assume ∞ appears. `is_empty` on a
+dangling ref with `num≠0` reports NOT empty (the num dominates); the entity-only (`num=0`)
+case is not yet measured — the next release's changelog ("Is Empty will no longer match a
+target reference that has been destroyed") implies it currently reads as empty, and a v3
+probe of exactly that case is authored and pending an in-game run.
+Eager-clear-on-destroy vs. lazy-resolve-on-read for the entity field itself remains
+observationally indistinguishable from inside a behavior, and no longer matters practically
+now that "num survives, entity blanks, all storage classes alike" is established.
+`GetRegister`/`GetRegisterData` are native (no Lua definition in this extract — confirmed by
+grep), so all of this is empirical, from the differential test.
 
 ### Frame registers
 
