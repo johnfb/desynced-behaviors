@@ -80,10 +80,59 @@ def test_branch_to_unknown_node_rejected(argcache):
     with pytest.raises(BsfParseError, match=r"node 'n1' pin 'If Smaller' targets unknown node 'n9'"):
         _parse(
             "behavior T():\n\n"
-            "n1: check_number(Value=$A, Compare=5)  >n9 (If Smaller)\n"
+            "n1: check_number(Value=$A, Compare=5)  >NEXT (If Larger) >n9 (If Smaller) >NEXT (If Equal)\n"
             "n2: set_reg(Value=1, Target=$B)\n",
             argcache,
         )
+
+
+# -- multi-exec-pin ops require every pin written (the loop-Done-omission class) -------------
+
+
+def test_multi_pin_op_with_missing_pins_rejected(argcache):
+    with pytest.raises(BsfParseError, match=r"every one must be written.*missing: 'Done'"):
+        _parse(
+            "behavior T():\n\n"
+            "n1: for_number(From=1, To=3, Value=$N)\n"
+            "n2: set_reg(Value=$N, Target=$B)  >n1 (next)\n",
+            argcache,
+        )
+
+
+def test_multi_pin_op_fully_written_accepted_and_next_is_fallthrough(argcache):
+    b = _parse(
+        "behavior T():\n\n"
+        "n1: for_number(From=1, To=3, Value=$N)  >POP (Done) >NEXT (next)\n"
+        "n2: set_reg(Value=$N, Target=$B)  >n1 (next)\n",
+        argcache,
+    )
+    # NEXT = explicit fallthrough = structurally absent, exactly like single-pin omission
+    assert "next" not in b.nodes["n1"].branches
+    assert b.nodes["n1"].branches["Done"] == "POP"
+
+
+def test_single_pin_op_accepts_explicit_next_token(argcache):
+    b = _parse("behavior T():\n\nn1: set_reg(Value=1, Target=$B)  >NEXT (next)\nn2: unlock()\n", argcache)
+    assert "next" not in b.nodes["n1"].branches
+
+
+def test_render_emits_next_token_for_all_multi_pin_ops(engine, argcache):
+    n1 = BsfNode(id="n1", op="check_number", args={"Value": Num(1), "Compare": Num(2)})
+    n1.branches["If Smaller"] = "POP"
+    n2 = BsfNode(id="n2", op="set_reg", args={"Value": Num(1), "Target": Var("B")})
+    b = BsfBehavior(name="T", nodes={"n1": n1, "n2": n2}, order=["n1", "n2"])
+    text = render_behavior(b, argcache)
+    n1_line = next(line for line in text.split("\n") if line.startswith("n1:"))
+    assert ">NEXT (If Larger)" in n1_line
+    assert ">POP (If Smaller)" in n1_line
+    assert ">NEXT (If Equal)" in n1_line
+    # and the rendered text passes its own completeness rule
+    parse_behavior(text, argcache)
+
+
+def test_pop_and_next_reserved_as_node_ids(argcache):
+    with pytest.raises(BsfParseError, match=r"'POP' is a reserved"):
+        _parse("behavior T():\n\nPOP: set_reg(Value=1, Target=$B)\n", argcache)
 
 
 def test_blank_lines_between_nodes_allowed(argcache):

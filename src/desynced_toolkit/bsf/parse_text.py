@@ -256,6 +256,7 @@ def _parse_branch_notes(
     # cases uniformly.
     valid_pins = argcache.exec_pin_names(op)
     branches = {}
+    seen_pins: set[str] = set()
     for target, pin in _BRANCH_RE.findall(s):
         pin = pin.strip()
         if pin == "jump→label":
@@ -267,13 +268,33 @@ def _parse_branch_notes(
                 line_no,
                 line,
             )
+        if pin in seen_pins:
+            raise BsfParseError(f"pin {pin!r} wired twice on one node", line_no, line)
+        seen_pins.add(pin)
+        # `NEXT` is the explicit spelling of plain fall-to-physically-next (structurally:
+        # the key stays absent, same as omission) -- required for 2+ exec-pin ops (below),
+        # accepted anywhere.
+        if target == "NEXT":
+            continue
         # A pin whose rendered name matches this op's real "next"-pin display name (e.g.
         # check_number's "If Equal") maps back to the structural "next" key -- everything else
         # (a real declared exec arg's own name, e.g. "If Larger") is already its own key.
         key = "next" if (next_pin is not None and pin == next_pin) else pin
-        if key in branches:
-            raise BsfParseError(f"pin {pin!r} wired twice on one node", line_no, line)
         branches[key] = "POP" if target == "POP" else target
+
+    if len(valid_pins) >= 2:
+        # Ops with 2+ exec pins require every pin spelled out (a target node id, `POP`, or
+        # `NEXT`) -- an omitted pin here has repeatedly meant "the author forgot this pin
+        # exists" (a loop's Done pin, twice), and with one pin visibly wired the text reads
+        # complete. render_text.py emits all of them symmetrically.
+        missing = [p for p in valid_pins if p not in seen_pins]
+        if missing:
+            raise BsfParseError(
+                f"op {op!r} has {len(valid_pins)} exec pins and every one must be written "
+                f"(>node_id, >POP, or >NEXT); missing: {', '.join(repr(p) for p in missing)}",
+                line_no,
+                line,
+            )
     return branches
 
 
@@ -415,6 +436,12 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
         if stripped.startswith(("sub ", "behavior ")):
             break
         node = parse_node(lines[i], params, argcache, line_no=i + 1, known_ids=known_ids)
+        if node.id in ("POP", "NEXT"):
+            raise BsfParseError(
+                f"{node.id!r} is a reserved branch-target keyword and cannot be a node id",
+                i + 1,
+                lines[i],
+            )
         if node.id in _ATTR_KEYWORDS:
             raise BsfParseError(
                 f"{node.id!r} is reserved for a header attribute and cannot be a node id "

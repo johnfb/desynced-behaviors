@@ -156,20 +156,33 @@ def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, s
     parts += [f"{name}={render_hidden_value(v)}" for name, v in node.hidden.items()]
     args_str = ", ".join(parts)
     notes = []
-    for pin, target in node.branches.items():
-        if target is None:
-            continue
-        display_pin = pin
-        if pin == "next":
-            # data.instructions[op].exec_arg: `false` means this op has no top-level "next"
-            # pin at all (exit/restart/last -- the real editor draws no pin, wiring anything
-            # after them is nonsensical), a table names it for real (check_number's "If
-            # Equal"), absent keeps the generic "next". Never guessed -- read straight from
-            # live data.
-            display_pin = argcache.next_pin_name(node.op)
-            if display_pin is None:
+    # data.instructions[op].exec_arg (via next_pin_name): `false` means this op has no
+    # top-level "next" pin at all (exit/restart/last -- the real editor draws no pin, wiring
+    # anything after them is nonsensical), a table names it for real (check_number's "If
+    # Equal"), absent keeps the generic "next". Never guessed -- read straight from live data.
+    next_pin = argcache.next_pin_name(node.op)
+    all_pins = argcache.exec_pin_names(node.op)
+    if len(all_pins) >= 2:
+        # An op with 2+ exec pins renders EVERY pin, with the explicit `NEXT` token for
+        # plain fall-to-physically-next -- the "the one visible pin looked complete so I
+        # forgot the second one exists" mistake (a loop's Done pin, twice; see
+        # feedback_bsf_loop_done_pin_omission) is only preventable if absence is never
+        # legal for these ops. Single-pin ops keep compact omission: with one pin there is
+        # nothing to forget, and the text stays close to how sequential code reads.
+        for pin in all_pins:
+            key = "next" if pin == next_pin else pin
+            target = node.branches.get(key)
+            notes.append(f">{'NEXT' if target is None else target} ({pin})")
+    else:
+        for pin, target in node.branches.items():
+            if target is None:
                 continue
-        notes.append(f">{target} ({display_pin})")
+            display_pin = pin
+            if pin == "next":
+                display_pin = next_pin
+                if display_pin is None:
+                    continue
+            notes.append(f">{target} ({display_pin})")
     if node.id in jump_targets:
         notes.append(f">{jump_targets[node.id]} (jump→label)")
     line = f"{node.id}: {node.op}({args_str})"
