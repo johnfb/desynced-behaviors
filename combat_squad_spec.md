@@ -142,8 +142,9 @@ registers and return home (member-side fallback, §3's HOLD row).
   broadcast (§2), and the gate should count fighters anyway. During ENGAGE it parks **just
   behind the gun line** (pursuit stops gunners at their weapon's `attack_radius`, ~15 for
   beam cannons; ~17 for the field), because a Hybrid Beam Cannon charging outside a power
-  field draws more than the frame capacitor delivers and the gunner **cannot move** while
-  charging (live-observed) — power coverage belongs at the firing positions, not at the
+  field draws more than the frame capacitor delivers (100/tick vs the capacitor's 50/tick —
+  data values are per-tick, the UI shows per-second ×5: 500/s vs 250/s) and the gunner
+  **cannot move** while charging (live-observed, numbers reconciled against data) — power coverage belongs at the firing positions, not at the
   Captain's standoff. Otherwise it loiters in the squad cluster.
 - **Gunner self-preservation** (added after live testing): retreat to the Captain's aura on
   battery < 80% or any hull damage, and **panic-disengage when any enemy closes within ~5**
