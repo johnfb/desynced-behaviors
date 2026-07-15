@@ -103,8 +103,12 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
 
 `jump`/`label` computed dispatch off a `$State` register, the house idiom.
 
-- **PATROL/IDLE** — no threat in vis 40. Hold or follow a `Config`-style directive
-  (Observer's movement loop shape). Broadcast: empty (HOLD).
+- **PATROL/IDLE** — no threat in vis 40. Broadcast: empty (HOLD). Listens for enemy
+  broadcasts (Observers, other Captains) and approaches the one whose **reporter is
+  closest** — scan-all-keep-nearest, not take-first, which ping-ponged the squad between
+  Observers on opposite map sides instead of sweeping the local area clean first
+  (live-observed; the local Observer rebroadcasting "one more, just out of range" is
+  exactly the nearby signal that should win).
 - **RALLY** — threat spotted (`get_closest_entity(v_enemy_faction)` — visibility *is* the
   sensor at vis 40; no radar needed). Broadcast **the Captain itself** as a mobile rally
   point (simplification adopted during the first live test — the Captain already holds
