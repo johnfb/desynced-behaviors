@@ -154,7 +154,13 @@ registers and return home (member-side fallback, §3's HOLD row).
   battery < 80% or any hull damage, and **panic-disengage when any enemy closes within ~5**
   — pursuit parks at attack radius and never backs off on its own, and death-explosion
   enemies (Larva) punish adjacency hard. Every retreat clears the weapon register first
-  (weapon target overrides `@goto`).
+  (weapon target overrides `@goto`). The panic destination is **`2×Captain − Enemy`** (the
+  enemy point-reflected through the Captain) — a bounded point behind friendly lines, never
+  a direction: `moveaway_range` is enemy-relative, so a fast chaser (Malacostra) steered
+  fleeing gunners into enemy lines and hundreds of tiles off-map (live-observed); the
+  reflected point instead drags the chaser into massed fire. Degenerate case: an enemy
+  standing on the Captain makes the reflection ≈ the Captain itself — acceptable, standoff
+  has already failed at that point.
 
 ## 6. Tuning constants (initial values, all expected to move)
 
