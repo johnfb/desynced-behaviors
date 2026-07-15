@@ -20,6 +20,7 @@ A weapon component (`c_turret` family, `components.lua` `c_turret:on_update`) ta
 | entity | manual priority target; the unit also **pursues it** (`RequestStateMove` toward it, even while shooting something else in range) — and this pursuit **overrides `@goto`** (live-confirmed): an armed unit does not move on GOTO until its weapon register is cleared |
 | coordinate (+ `num`) | attack-move to that point, `num` = approach radius |
 | `v_powereddown` | hold fire (also clears the weapon's own register 2) |
+| `v_lock_locked` | **Hold Position**: locks movement in place, auto-acquire keeps firing — a firing-line mode, not a kiting one |
 | id (+ `num == REG_NOT`) | auto-acquire preference filter (inverted when `REG_NOT`) |
 
 But the manual target only takes effect through this gate:
@@ -136,10 +137,19 @@ registers and return home (member-side fallback, §3's HOLD row).
 - **Healer**: position just behind the squad (e.g. offset from staging point away from the
   threat); `c_repairer_aoe` repairs passively in radius. Follows RALLY/HOLD like a gunner,
   ignores ENGAGE targets (never writes a weapon register; it has none).
-- **Power provider**: parks at the staging point's rear (it is the slowest member — the
-  rally gate naturally waits for it, which is a feature: shields recharge on grid power
-  before the assault). Monitors fuel rods (`count_item` below a floor → broadcast the
-  delivery demand per §2). The Power Field keeps the assembled squad on grid while staged.
+- **Power provider** (revised after live testing): follows the command channel like a member
+  but **does not enlist in the roster** — its `@signal` is reserved for the fuel-rod demand
+  broadcast (§2), and the gate should count fighters anyway. During ENGAGE it parks **just
+  behind the gun line** (pursuit stops gunners at their weapon's `attack_radius`, ~15 for
+  beam cannons; ~17 for the field), because a Hybrid Beam Cannon charging outside a power
+  field draws more than the frame capacitor delivers and the gunner **cannot move** while
+  charging (live-observed) — power coverage belongs at the firing positions, not at the
+  Captain's standoff. Otherwise it loiters in the squad cluster.
+- **Gunner self-preservation** (added after live testing): retreat to the Captain's aura on
+  battery < 80% or any hull damage, and **panic-disengage when any enemy closes within ~5**
+  — pursuit parks at attack radius and never backs off on its own, and death-explosion
+  enemies (Larva) punish adjacency hard. Every retreat clears the weapon register first
+  (weapon target overrides `@goto`).
 
 ## 6. Tuning constants (initial values, all expected to move)
 
