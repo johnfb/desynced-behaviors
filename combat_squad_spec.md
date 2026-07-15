@@ -77,6 +77,10 @@ itself**.
   deliberate exact-entity matching — the fallback-match hazard from the hauler work applies
   to id-based matching accidentally hitting embedded entities, not to this.
   Multi-squad separation is free by construction: each squad's channel is its own Captain.
+  **The beacon's `num` doubles as a contact flag** (num coexists with the entity — composite
+  semantics): a member sets `Captain[num=1]` while any enemy is within ~20 of it (and while
+  panicking), plain `Captain` otherwise. The Captain reads it with `for_signal_match`'s
+  exact-num mode (`c=2`).
 - **Command (Captain → members)**: the Captain's own `@signal` is the single command
   register. Members read it directly at any range with `read_signal(Unit = Captain)`
   (`data.instructions.read_signal`, works on any owned unit). One value, dispatched by
@@ -125,6 +129,11 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
   reference blanks its entity part (settled semantics: entity goes, num survives verbatim),
   which triggers re-selection. If living members' spread around the target exceeds a
   threshold for too long, drop back to RALLY rather than let a trickle develop.
+  **Victory requires the squad's agreement, not just the Captain's eyes** (live-observed
+  failure: the fight drifted beyond vis 40 and the Captain declared victory and walked off
+  mid-battle): with nothing in its own vision, the Captain first scans for members whose
+  beacon carries the contact flag — any hit means "rally on that member and close in to
+  restore the vision lock," never PATROL.
 - **RETREAT** — live roster below a floor, or the Captain itself pressed under its standoff
   with no escape vector: broadcast RALLY at home.
 
