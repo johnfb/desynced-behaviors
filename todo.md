@@ -308,6 +308,13 @@ Update this file directly as items are picked up/finished.
 
 ## Combat Squad (`combat_squad_spec.md`)
 
+- [ ] **Early-tech squad variant** (user, 2026-07-15): make the squad behavior set work with
+      Cubs/Dashbots/Haulers carrying Small Advanced Turrets or Pulse Lasers (~half the beam
+      cannon's 15 range) — parameterize the range-derived constants (gunner engage/panic
+      distances, provider gun-line offset ~17, Captain vision-lock band 30-38 all assume
+      range-15 weapons). Loadout note at current tech: swapping one gunner shield for a power
+      cell covers the charge deficit without the provider.
+
 - [x] **Redesign the squad architecture (v2: Captain).** Done 2026-07-14, driven by the
       user's real squad experiments (v1 squads scattered and trickled into fights one at a
       time; coordination only worked with coordinator eyes-on). Root cause found in source:
