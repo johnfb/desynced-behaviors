@@ -374,3 +374,29 @@ def test_cli_subcommands_smoke(engine, tmp_path):
     assert main(gd + ["lint", "--input", str(src)]) == 0
     assert main(gd + ["semantic-diff", str(src), str(dcs_out)]) == 0
     assert main(gd + ["ids", "radar"]) == 0
+
+
+def test_lint_flags_constant_jump_with_dead_next_edge(engine, argcache):
+    from desynced_toolkit.bsf.lint import lint_behavior
+    from desynced_toolkit.bsf.parse_text import parse_behavior
+
+    b = parse_behavior(
+        "behavior T():\n\n"
+        "n1: label(Label=v_arrow_up)\n"
+        "n2: jump(Label=v_arrow_up)\n"  # implicit fallthrough to n3 = dead edge
+        "n3: set_reg(Value=1, Target=$B)  >POP (next)\n",
+        argcache,
+    )
+    warnings = lint_behavior(b, argcache)
+    assert any("dead edge" in w for w in warnings)
+
+    # explicit POP: clean; dynamic label: exempt (next is the real no-match path)
+    b2 = parse_behavior(
+        "behavior T():\n\n"
+        "n1: label(Label=v_arrow_up)\n"
+        "n2: jump(Label=v_arrow_up)  >POP (next)\n"
+        "n3: jump(Label=$State)\n"
+        "n4: set_reg(Value=1, Target=$B)  >POP (next)\n",
+        argcache,
+    )
+    assert not any("dead edge" in w for w in lint_behavior(b2, argcache))

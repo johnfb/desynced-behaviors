@@ -67,6 +67,22 @@ def _lint_one(b: BsfBehavior, argcache: ArgCache, prefix: str, warnings: list[st
         if _literal_key(v) not in label_keys:
             warn(f"node {n.id!r} jumps to a literal label with no matching label node in this behavior")
 
+    # A constant-Label jump always dispatches to its label -- its top-level `next` can never
+    # fire, so a wired/fallthrough `next` there is a dead edge cluttering the visual editor
+    # (user style rule, 2026-07-15: constant jumps always POP their next; a dynamic
+    # `jump(Label=$var)`'s next is the real no-match path and is exempt).
+    for n in b.nodes.values():
+        if n.op != "jump":
+            continue
+        v = n.args.get("Label")
+        if not isinstance(v, (IdLit, Num)):
+            continue
+        if _resolve_pin_target(n.id, "next", n, b.order) is not None:
+            warn(
+                f"node {n.id!r}: constant jump never falls through -- its 'next' is a dead "
+                f"edge; write >POP (next)"
+            )
+
     # A parameter-slot reference beyond the declared parameter list resolves to empty/0 at
     # runtime with no error -- the dangling-ref-via-copy-paste hazard (see
     # reference_dangling_param_ref_copy_paste): legal wire data, almost never intended.
