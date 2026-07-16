@@ -182,6 +182,10 @@ registers and return home (member-side fallback, §3's HOLD row).
 | Re-rally spread | ~15 from target | trickle detector |
 | Captain-lost timeout | ~25 ticks (5 s) | member fallback |
 | Fuel-rod floor | TBD | power-provider resupply trigger |
+| Gunner health panic | any hull damage (HP < 100) | retreat trigger; unit/tech-dependent — expose as a parameter (see §7) |
+| Gunner battery floor | 80% | retreat trigger; scales with weapon/frame power draw |
+| Panic-disengage range | ~5 | melee / Larva death-blast adjacency |
+| Rally offset | ~5 | member spacing off the Captain / rally unit |
 
 ## 7. Open items
 
@@ -196,6 +200,17 @@ registers and return home (member-side fallback, §3's HOLD row).
   alien unit without using its native sockets — enough for a Behavior Controller + shields
   (+ a visibility module), making augmented alien combat units (e.g. Obsidian Soldiers)
   viable gunners under the same command protocol. Not designed here; noted as real.
+- **Parameterize the member routines for portability** — one Gunner (and Power-provider)
+  behavior should serve different weapons, frames, and tech levels by exposed parameter, not a
+  hand-edited copy per variant. Weapon range is already derived at runtime (`get_item_info`) —
+  that is the pattern to extend to the rest of the currently-hardcoded knobs. Most important is
+  the **unit health panic level**: today it is "any hull damage" (HP < 100), which is right only
+  for a tanky/shielded unit — a fragile low-tech frame wants a lower floor before it abandons
+  the line, and a heavily-armored one wants to fight through chip damage rather than thrash back
+  to the aura, so the correct threshold is unit- and tech-dependent and must be a parameter.
+  Promote alongside it the battery floor, the panic-disengage distance, and the rally offset
+  (all in §6). The range-derived engage / gun-line / vision-lock constants are the same problem
+  seen from the weapon side — see the early-tech variant item in `todo.md`.
 - **Next-release interactions** (see `upcoming-changes.md`): `is_empty`-based death checks
   invert (use the entity-blank check via the settled dangling-ref semantics, and migrate to
   Target Type Switch's 'Destroyed Object' pin when it lands); `compare_unit` is removed

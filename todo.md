@@ -313,7 +313,11 @@ Update this file directly as items are picked up/finished.
       cannon's 15 range) — parameterize the range-derived constants (gunner engage/panic
       distances, provider gun-line offset ~17, Captain vision-lock band 30-38 all assume
       range-15 weapons). Loadout note at current tech: swapping one gunner shield for a power
-      cell covers the charge deficit without the provider.
+      cell covers the charge deficit without the provider. Extend the same parameterization to
+      the member self-preservation knobs — above all the **unit health panic level** (currently
+      "any hull damage", right only for a tanky/shielded unit; fragile low-tech frames want a
+      lower floor, heavily-armored ones want to fight through chip damage), plus battery floor,
+      panic-disengage distance, and rally offset. See `combat_squad_spec.md` §6/§7.
 
 - [x] **Redesign the squad architecture (v2: Captain).** Done 2026-07-14, driven by the
       user's real squad experiments (v1 squads scattered and trickled into fights one at a
