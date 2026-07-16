@@ -7,7 +7,7 @@ Update this file directly as items are picked up/finished.
 ## Next game release (experimental changelog reviewed 2026-07-14)
 
 - [ ] **Work through `upcoming-changes.md`'s "Impact review" section when the release
-      lands.** The experimental changelog (1.0.17919–1.0.18044) is copied there with a full
+      lands.** The experimental changelog (1.0.17919–1.0.18055) is copied there with a full
       cross-reference against this repo appended: deployed-behavior audits (Observer's
       `value_type` dispatch first, then the `is_empty`-on-destroyed-refs sweep,
       `for_signal_match` num-comparison in Check Avoidance, GOTO semantics), toolkit/wire

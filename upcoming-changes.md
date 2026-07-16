@@ -151,11 +151,22 @@
 - Fix multiplayer state potentially going out of sync when a unit docks/is possessed then undocks/is unpossessed in a different 60x60 map chunk
 - Avoid logging Lua error 'entity isn't placed on the map' when a worm attacks then immediately gets possessed or docked
 - Fix GOTO queueing to multiple dropped items aborting after picking up the first one since ver. 1.0.18020
-
+## Experimental 1.0.18055
+### Changes
+- Behavior instructions 'Loop Signal', 'Switch', 'Memory Sift': Removed separate button to invert condition and added more modes to cover inversions
+- Behavior instructions 'Loop Signal', 'Switch', 'Memory Sift': Experimental branch breaking changes: Due to rearranging of the comparison modes, behaviors that used Fully Equal/Data Equal/Destroyed Reference need to be updated [!]
+- By default start new constructions of non-square buildings rotated to be wider than tall (to match names like 2x1 or 3x2)
+- Behavior instruction 'Get Unit Info': Add options to query width and height of a unit/building
+- Behavior instruction 'Get Unit Info': Return an empty value instead of 0 when querying with an invalid input
+- Show boosted movement speed more exactly in the unit tooltip (rounded to one decimal place)
+### Fixes
+- Fix multiplayer sync check to not falsely report an error after a unit without a weapon component is docked and the garage has moved (regression in 1.0.18044)
+- Fix showing wrong icon on certain stats in the unit tooltip
+- Fix behavior editor changing the initial value of a parameter not getting registered as a change (and the 'Apply' button not becoming available immediately)
 
 ---
 
-# Impact review against this repo (written 2026-07-14, against the changelog above)
+# Impact review against this repo (written 2026-07-14, extended 2026-07-16 for 1.0.18055; against the changelog above)
 
 Cross-referenced against `library/*.dcs` (op-usage counts from decompiled exports), the design
 docs, `behavior_format.md`, and project memory. Ordered by how much of our stuff each touches.
@@ -259,7 +270,44 @@ docs, `behavior_format.md`, and project memory. Ordered by how much of our stuff
   Products') are display-name churn; op ids in wire data appear unaffected except via the
   deprecation conversions above.
 
+## 1.0.18055 addendum (2026-07-16)
+
+- **Comparison modes rearranged on 'Loop Signal'/'Switch'/'Memory Sift'; the separate
+  invert-condition button is gone, folded into the mode list; behaviors that used Fully
+  Equal / Data Equal / Destroyed Reference must be updated [!]**. The comparison mode is a
+  **hidden-literal integer index** on `for_signal_match` (Loop Signal) and `switch` — so a
+  rearrangement silently remaps whatever index a saved node already carries. Concrete
+  exposure across `library/` (decompiled op counts):
+    - `for_signal_match`: `hauler` (×2), `miner_drone` (×2), `mining_leader` (×1).
+      **`miner_drone`'s node-search loop explicitly sets mode `c=2`** (`for_signal_match(Signal=$SeekSig,
+      Unit=$Cand, c=2)`) — the others render no `c` and take the default. That `c=2` is the
+      single most exposed spot: verify mode 2 still means what it did (or that it wasn't one
+      of the three moved modes) the first time the extract updates. Mining Leader's
+      `Check Avoidance` `v_alert[num=range]` match (already flagged for 17925's infinite-as-larger
+      change) is the same op, default mode.
+    - `switch`: `mining_leader` (×1) — `switch(Input=$Tag, Case 1=v_enemy_faction, Case 2=v_resource)`,
+      default comparison mode, direct value cases; low risk but re-check after conversion.
+    - `memory_sift`: unused in `library/`.
+  Because the mode is a hidden literal, the first in-game open+re-save auto-migrates it, so
+  `semantic_diff` will surface the literal change as a conversion, not a user edit — same
+  read-it-right caveat as the mass op-deprecations above. The removed invert flag is a wire
+  change: confirm `behavior_format.md` / the toolkit don't model a now-absent separate invert
+  field for these ops.
+- **'Get Unit Info' returns an empty value instead of 0 on invalid input** (and gains
+  width/height queries). Uses: `mining_leader` (×1), `observer` (×1). Any downstream
+  `is_empty` / `check_number(== 0)` on a `get_unit_info` output flips meaning when the input is
+  invalid — of a piece with the 17919 `is_empty`-on-destroyed-refs sweep; audit both Get Unit
+  Info sites together with that sweep. The new width/height queries pair with **non-square
+  buildings now defaulting to a wider-than-tall placement rotation** — only relevant if the
+  hex-expansion builder or magnifier-lattice placement work ever queries a footprint.
+- **Non-impacts**: boosted-movement tooltip precision, wrong stat-icon fix, the
+  parameter-initial-value Apply-button fix, and the multiplayer sync-check fix (a 1.0.18044
+  regression) are UI/MP-only — no data-definition or wire-format surface. The portable-radar
+  `TICKS_PER_SECOND` bug is still absent from the changelog, so keep expecting it broken
+  (unchanged from the 2026-07-14 note above).
+
 **When the release lands**: update the sibling `desynced-game-data` extract, run
 `uv run pytest tests/` (it exercises the real `instructions.lua`), regenerate
 `instructions_index.md`, then work through the audits above — Observer's `value_type`
-dispatch and the `is_empty`-on-destroyed-refs sweep first.
+dispatch, the `is_empty`-on-destroyed-refs sweep (now including the two Get Unit Info sites),
+and `miner_drone`'s `for_signal_match` `c=2` comparison-mode index first.
