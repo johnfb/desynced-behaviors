@@ -431,6 +431,31 @@ Update this file directly as items are picked up/finished.
       instructions) that makes a unit continuously shuttle between `@goto` (pickup) and
       `@store` (delivery) instead of moving once. See `blight_magnifier_mining.md`.
 
+## Repository split & `blz` namespacing
+
+- [ ] **Split this repo into a shareable toolkit and a me-specific repo, and rename the toolkit
+      under the `blz` namespace** (user, 2026-07-16). Two concerns are currently entangled and
+      should live in separate repositories:
+      - *Shareable* — the `desynced_toolkit` package (wire codec, BSF pipeline, Lua-backed
+        interpreter/runtime), its tests, and the format/spec docs that document the tooling
+        itself (`behavior_format.md`, `behavior_source_format.md`, `instructions_index.md`).
+      - *Me-specific* — the behavior libraries (`library/`), the corpus tooling + `corpus/`
+        (already gitignored), and the behavior *design/plan* docs that are personal creative
+        work rather than tooling docs (`hex_expansion_math.md`, `observer_redesign.md`,
+        `blight_magnifier_mining.md`, `combat_squad_spec.md`). The user is fine sharing these
+        eventually but they should **not** ship as part of the toolkit.
+      Rename the toolkit package to something like **`blz-desynced-toolkit`**, importable under
+      the `blz` **namespace package** prefix (user convention: everything the user authors goes
+      under `blz`/`blz.*` as a PEP 420 namespace package so it never collides with global PyPI /
+      other package-manager names). So `desynced_toolkit` → `blz.desynced_toolkit` (or similar),
+      `python -m desynced_toolkit.bsf` → the `blz`-namespaced module path, and update every
+      internal import + the CLI docs in `CLAUDE.md`.
+      **Open design decision (undecided — user wants to think through options):** how the
+      me-specific repo depends on the toolkit. Candidate considered: toolkit as a git *submodule*
+      of the me-specific repo — user is not sure they like that. Other options to weigh: a plain
+      versioned/`uv` path dependency, a workspace, or a published package. Decide before doing
+      the mechanical split.
+
 ## Dev tooling
 
 - [ ] **Set up `ruff` (format + lint) and `mypy` (type checking) for `desynced_toolkit`.**
