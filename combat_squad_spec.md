@@ -129,6 +129,20 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
   Observers on opposite map sides instead of sweeping the local area clean first
   (live-observed; the local Observer rebroadcasting "one more, just out of range" is
   exactly the nearby signal that should win).
+  **Heal gate**: before approaching the next signal-reported enemy, hold until no member is
+  still recovering. The Captain scans the roster and checks each member's **retreat bit (bit
+  2)**; if any member has it set, it keeps broadcasting HOLD (squad clusters on it and heals)
+  and re-checks next tick instead of advancing. The gate rides the gunner's own retreat latch
+  rather than the Captain independently polling `get_health`, so it respects each member's own
+  (unit/tech-dependent) panic threshold and clears exactly when that member decides it has
+  recovered (bit 2 clears at full health). It sits **only** on the "no enemy in my own vision"
+  branch — an enemy walking into the Captain's vision takes the RALLY path first, so healing
+  never blocks reacting to an immediate threat, only proactive new-fight-seeking. Because the
+  Healer is faction-wide and Observer-driven (§5), a damaged member anywhere gets a healer
+  dispatched to it, so the gate releases without the squad having to carry its own healer;
+  a squad with *no* repair coverage at all will hold in PATROL until damage is cleared some
+  other way (hull has no passive regen), which is a safe failure — it never freezes an active
+  fight (there is no gate in ENGAGE).
 - **RALLY** — threat spotted (`get_closest_entity(v_enemy_faction)` — visibility *is* the
   sensor at vis 40; no radar needed). Broadcast **the Captain itself** as a mobile rally
   point (simplification adopted during the first live test — the Captain already holds
@@ -149,18 +163,9 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
   failure: the fight drifted beyond vis 40 and the Captain declared victory and walked off
   mid-battle): with nothing in its own vision, the Captain first scans for members whose
   beacon carries the **contact bit** (bit 1) — any hit means "rally on that member and close in
-  to restore the vision lock," never PATROL.
-  **Heal gate between targets**: target *selection* (the transition to a new focus target,
-  reached only when the current `Target` is empty — never mid-engagement) is blocked until
-  every live member is back to full health. The Captain walks the roster, `get_health` each
-  member, and if any is under 100% it broadcasts RALLY-on-me (holding the squad in the
-  healer/power aura) and re-checks next tick instead of picking a target. This also gates the
-  *first* engagement, since RALLY clears `Target` on entry: the squad rallies → heals → engages.
-  Known risk: under sustained contact nobody reaches full health, so the gate can stall the
-  squad into passive tanking (gunners still auto-acquire in self-defense, but without focus
-  fire). If that shows up in play, loosen the gate to "no member has the retreat bit (bit 2)
-  set" — looser, and reuses the latch the gunner already maintains — or apply it only when the
-  Captain sees no enemy itself.
+  to restore the vision lock," never PATROL. Target reselection during ENGAGE is deliberately
+  *not* heal-gated — the gate lives in PATROL (above), so recovery happens between fights, not
+  mid-battle.
 - **RETREAT** — live roster below a floor, or the Captain itself pressed under its standoff
   with no escape vector: broadcast RALLY at home.
 
@@ -219,7 +224,7 @@ registers and return home (member-side fallback, §3's HOLD row).
 | Gunner battery floor | 80% | retreat trigger; scales with weapon/frame power draw |
 | Panic-disengage range | ~5 | melee / Larva death-blast adjacency |
 | Rally offset | ~5 | member spacing off the Captain / rally unit |
-| Heal-gate threshold | 100% (full health) | between-target gate; every live member must clear it before the next engagement |
+| Heal-gate criterion | no member's retreat bit set | PATROL gate before new-fight-seeking; rides the gunner's own latch (clears at that member's full health), not a Captain-side health poll |
 
 ## 7. Open items
 
