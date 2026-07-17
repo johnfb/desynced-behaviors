@@ -77,10 +77,26 @@ itself**.
   deliberate exact-entity matching — the fallback-match hazard from the hauler work applies
   to id-based matching accidentally hitting embedded entities, not to this.
   Multi-squad separation is free by construction: each squad's channel is its own Captain.
-  **The beacon's `num` doubles as a contact flag** (num coexists with the entity — composite
-  semantics): a member sets `Captain[num=1]` while any enemy is within ~20 of it (and while
-  panicking), plain `Captain` otherwise. The Captain reads it with `for_signal_match`'s
-  exact-num mode (`c=2`).
+  **The beacon's `num` is a bitfield** carried alongside the entity (num coexists with the
+  entity — composite semantics), maintained with `bitwise_op` (which preserves the entity part:
+  it copies the register and overwrites only `num`):
+
+  | Bit | Value | Meaning | Set when | Cleared when |
+  |---|---|---|---|---|
+  | 1 | 1 | **Contact** — enemy in this member's visual range | member sees any enemy | member sees none |
+  | 2 | 2 | **Retreat latch** — member is disengaging | retreat condition first trips (low battery / hull damage) | back to full health |
+
+  The bitfield replaced an earlier plain `num=1` contact flag once the retreat latch (bit 2)
+  was added: a member retreating *while still in contact* broadcasts `num = 3`, which an
+  exact-num match on `1` would silently reject — losing exactly the reports that matter most.
+  So the Captain **must not** filter on `num`. It enumerates members with plain Match mode
+  (`for_signal_match`, `c=1`, num ignored) and tests the relevant bit per member with
+  `check_bit` (1-based: bit 1 = value 1, bit 2 = value 2; clearing bit *N* is `AND 15−2^(N−1)`,
+  i.e. `AND 14` / `AND 13` for a two-bit field — **not** `16−N`, an off-by-one that looks
+  plausible for two bits). Because Match writes the loop's Unit output on *every* iteration
+  before the bit test runs, "found a member with this bit" needs a **separate found-flag**
+  written only inside the bit-set branch and pre-cleared before the loop — reusing the loop's
+  Unit register as the found indicator reports the last member scanned, never "none."
 - **Command (Captain → members)**: the Captain's own `@signal` is the single command
   register. Members read it directly at any range with `read_signal(Unit = Captain)`
   (`data.instructions.read_signal`, works on any owned unit). One value, dispatched by
@@ -132,8 +148,19 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
   **Victory requires the squad's agreement, not just the Captain's eyes** (live-observed
   failure: the fight drifted beyond vis 40 and the Captain declared victory and walked off
   mid-battle): with nothing in its own vision, the Captain first scans for members whose
-  beacon carries the contact flag — any hit means "rally on that member and close in to
-  restore the vision lock," never PATROL.
+  beacon carries the **contact bit** (bit 1) — any hit means "rally on that member and close in
+  to restore the vision lock," never PATROL.
+  **Heal gate between targets**: target *selection* (the transition to a new focus target,
+  reached only when the current `Target` is empty — never mid-engagement) is blocked until
+  every live member is back to full health. The Captain walks the roster, `get_health` each
+  member, and if any is under 100% it broadcasts RALLY-on-me (holding the squad in the
+  healer/power aura) and re-checks next tick instead of picking a target. This also gates the
+  *first* engagement, since RALLY clears `Target` on entry: the squad rallies → heals → engages.
+  Known risk: under sustained contact nobody reaches full health, so the gate can stall the
+  squad into passive tanking (gunners still auto-acquire in self-defense, but without focus
+  fire). If that shows up in play, loosen the gate to "no member has the retreat bit (bit 2)
+  set" — looser, and reuses the latch the gunner already maintains — or apply it only when the
+  Captain sees no enemy itself.
 - **RETREAT** — live roster below a floor, or the Captain itself pressed under its standoff
   with no escape vector: broadcast RALLY at home.
 
@@ -170,6 +197,12 @@ registers and return home (member-side fallback, §3's HOLD row).
   reflected point instead drags the chaser into massed fire. Degenerate case: an enemy
   standing on the Captain makes the reflection ≈ the Captain itself — acceptable, standoff
   has already failed at that point.
+  The retreat itself is **latched** in the beacon (bit 2, §3): the retreat condition sets the
+  bit, and it clears only at full health — not the moment the trigger stops. Without the latch,
+  a unit whose retreat floor is *current* HP (a tanky frame ignoring chip damage) would
+  re-engage the instant it crossed the floor and flap across it under fire; the latch gives the
+  hysteresis "retreat below X, resume only at full." A member still in contact while retreating
+  broadcasts both bits (`num = 3`) — the reason the Captain can't exact-match the beacon (§3).
 
 ## 6. Tuning constants (initial values, all expected to move)
 
@@ -186,6 +219,7 @@ registers and return home (member-side fallback, §3's HOLD row).
 | Gunner battery floor | 80% | retreat trigger; scales with weapon/frame power draw |
 | Panic-disengage range | ~5 | melee / Larva death-blast adjacency |
 | Rally offset | ~5 | member spacing off the Captain / rally unit |
+| Heal-gate threshold | 100% (full health) | between-target gate; every live member must clear it before the next engagement |
 
 ## 7. Open items
 
@@ -215,7 +249,9 @@ registers and return home (member-side fallback, §3's HOLD row).
   invert (use the entity-blank check via the settled dangling-ref semantics, and migrate to
   Target Type Switch's 'Destroyed Object' pin when it lands); `compare_unit` is removed
   (auto-converts to 'Compare Data'); 'Loop Signal' comparison rework — retest the membership
-  scan after the update.
+  scan after the update. The scan now runs in plain Match mode (`c=1`, num ignored) with a
+  per-member `check_bit`, so it no longer depends on Loop Signal's num-comparison semantics at
+  all — the rework should not affect it, but confirm the Match mode itself is unchanged.
 - Implementation order: Captain and Gunner first (they are the closed loop), in BSF, tested
   against a bug camp; Healer/Power provider after.
 
