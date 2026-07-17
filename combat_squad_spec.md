@@ -188,8 +188,11 @@ registers and return home (member-side fallback, §3's HOLD row).
   unit**, found *both* by direct vision (`get_closest_entity(v_damaged, v_own_faction)`) **and
   by `for_signal_match(v_damaged)`** — this is how it consumes the **Observer's damage
   broadcasts**, so it homes on damaged units far outside its own sight. Infected friendlies
-  (`v_infected`) are serviced the same way. It moves to the chosen target within `Range` and
-  its `c_repairer_aoe` repairs passively in radius; with nothing to do it idle-wanders near
+  (`v_infected`) are serviced the same way. It moves to the chosen target within `Range`,
+  usually **3** — set by the **virus cure's range 3** (the tighter of the healer's two tools),
+  which also keeps the target well inside the **range-5 `c_repairer_aoe`** heal radius, so one
+  standoff distance covers both curing infection and repairing hull. It
+  repairs passively in radius; with nothing to do it idle-wanders near
   Home (a bounded random walk, reset by a tick counter). `Target` is a persistent parameter
   (`keepvars`) so an in-progress heal survives across ticks. **This is what releases the
   Captain's PATROL heal gate**: damaged gunners broadcast via the Observer, roaming healers
@@ -240,13 +243,14 @@ registers and return home (member-side fallback, §3's HOLD row).
 | Panic-disengage range | ~5 | melee / Larva death-blast adjacency |
 | Rally offset | ~5 | member spacing off the Captain / rally unit |
 | Heal-gate criterion | no member's retreat bit set | PATROL gate before new-fight-seeking; rides the gunner's own latch (clears at that member's full health), not a Captain-side health poll |
+| Healer `Range` | 3 | heal/cure standoff = virus cure range 3 (tighter tool); keeps target inside the range-5 AOE heal too |
 
 ## 7. Open items
 
 - ~~`c_repairer_aoe` radius/power draw — pin when authoring the Healer.~~ Healer implemented
   (`library/healer.dcs`) as a standalone Observer-driven repair drone (§5), superseding the
-  squad-follower sketch; `Range` is exposed as a parameter. Its `c_repairer_aoe` radius and the
-  idle-wander tuning are still eyeballed — pin against real numbers if it under/over-shoots.
+  squad-follower sketch; `Range` is exposed as a parameter, usually 3 (virus cure range; keeps
+  targets inside the range-5 AOE heal — §5/§6). Only the idle-wander tuning remains eyeballed.
 - Staging-point geometry (threat-side offset math) — work out in BSF, integer-only.
 - Whether RALLY should ever hold fire outright (`v_powereddown` pass-through) instead of
   allowing auto-acquire self-defense — leaning no; self-defense without pursuit is safe.
