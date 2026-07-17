@@ -5,7 +5,8 @@ hexagonal spiral, one ring at a time, checking each candidate point against the 
 before building. Worked out in conversation. `HexAt` below is implemented and validated in-game
 as a reusable sub-behavior (`hexat_test.dcs`, `tests/data/` — a `HexAt(R, T, Origin, d_half) ->
 Result` sub-behavior plus a test harness that calls it for every `R=0..5, T=0..6R-1` and logs the
-result); `HexIndexOf` also has a `.dcs` now (`HexIndexOf_test_1.dcs`, `tests/data/`), validated by
+result); the living, actively-used copy is `library/hexat.dcs`, a superset of that fixture (see
+"Deployed copy" under the Forward section); `HexIndexOf` also has a `.dcs` now (`HexIndexOf_test_1.dcs`, `tests/data/`), validated by
 running both routines through the real game Lua (`tests/test_hex_expansion.py`), though not yet
 loaded/run in the actual game client itself. Two routines:
 
@@ -148,6 +149,28 @@ Sequence:                     # forks into independent X/Y chains, then combines
 Verified by hand for `R=1, T=0..5` against the original per-side derivation (reproduces
 `dir[4], dir[5], dir[0], dir[1], dir[2], dir[3]` in order, i.e. the six neighbors of the origin);
 then re-verified against all 92 `(R, T)` pairs the in-game test harness actually logged.
+
+### Deployed copy (`library/hexat.dcs`)
+
+The living, in-game copy re-exported to `library/` is the same routine as the `hexat_test.dcs`
+fixture with two additive enhancements — the shared arithmetic core (every `k`-branch, the
+`Sequence` X/Y fork, the round-half-up) is byte-for-byte identical, and lint/round-trip are clean:
+
+- **`Origin` may be a unit *or* a coordinate.** Before the `Separate Coordinate`, a `value_type`
+  switch on `Origin` routes a unit through `get_location` (resolving it to its coordinate — note
+  the multi-tile "center tile, rounds up on ties" semantics that applies) and a coordinate through
+  a plain copy; every other value type dead-ends (`POP`). Both live paths then feed the identical
+  downstream math via a scratch coord, so the fixture's coordinate-only behavior is unchanged and
+  the routine now additionally accepts a unit handle as the origin.
+- **`k` is taken mod 6** (`modulo(k, 6)`) right after `k = floor(T/R)`. For the nominal range
+  `T ∈ 0..6R-1` this is a no-op (`k` is already `0..5`); it only bites for out-of-range `T ≥ 6R`,
+  which it wraps around the ring instead of landing on a non-existent `Label`. Robustness, not a
+  math change.
+
+The coordinate path was re-validated against the closed-form reference for `R=0..8` (the arithmetic
+core, additions stripped, run through the real Lua via `Interpreter`); the unit path can't yet be
+driven by `Interpreter` (`value_type`/`get_location`/`modulo` aren't in its leaf dispatch) but is
+structurally just a coordinate resolution ahead of that same validated math.
 
 ## Inverse: `HexIndexOf(Coord, Origin, d_half) → (R, T)`
 
