@@ -179,9 +179,24 @@ registers and return home (member-side fallback, §3's HOLD row).
   Captain-lost timeout. Auto-acquire covers self-defense during rally/transit without
   creating pursuit (pursuit only comes from an entity in the weapon register — §1.1 — which
   is exactly why RALLY leaves it empty).
-- **Healer**: position just behind the squad (e.g. offset from staging point away from the
-  threat); `c_repairer_aoe` repairs passively in radius. Follows RALLY/HOLD like a gunner,
-  ignores ENGAGE targets (never writes a weapon register; it has none).
+- **Healer** (implemented, `library/healer.dcs` — diverged from the original squad-follower
+  sketch): a **standalone, faction-wide** repair drone, *not* a squad member. It does not
+  enlist on any Captain's channel, follow the command channel, or read ENGAGE targets; it runs
+  independently and services every squad (and every damaged friendly) at once. Loop: if an
+  enemy is in its own vision, flee home (move to Home within `Range`) — the healer never
+  fights and never tanks. Otherwise pick a heal target = the **closest damaged own-faction
+  unit**, found *both* by direct vision (`get_closest_entity(v_damaged, v_own_faction)`) **and
+  by `for_signal_match(v_damaged)`** — this is how it consumes the **Observer's damage
+  broadcasts**, so it homes on damaged units far outside its own sight. Infected friendlies
+  (`v_infected`) are serviced the same way. It moves to the chosen target within `Range` and
+  its `c_repairer_aoe` repairs passively in radius; with nothing to do it idle-wanders near
+  Home (a bounded random walk, reset by a tick counter). `Target` is a persistent parameter
+  (`keepvars`) so an in-progress heal survives across ticks. **This is what releases the
+  Captain's PATROL heal gate**: damaged gunners broadcast via the Observer, roaming healers
+  converge and repair them to full, their retreat bit clears, and the gate opens — no
+  squad-local healer required. (Not audited line-by-line here; deployed and working per the
+  author. The nearest-by-distance accumulation idiom in the two signal-scan loops is the one
+  part worth a careful read if it ever misbehaves.)
 - **Power provider** (revised after live testing): follows the command channel like a member
   but **does not enlist in the roster** — its `@signal` is reserved for the fuel-rod demand
   broadcast (§2), and the gate should count fighters anyway. During ENGAGE it parks **just
@@ -228,7 +243,10 @@ registers and return home (member-side fallback, §3's HOLD row).
 
 ## 7. Open items
 
-- `c_repairer_aoe` radius/power draw — pin when authoring the Healer.
+- ~~`c_repairer_aoe` radius/power draw — pin when authoring the Healer.~~ Healer implemented
+  (`library/healer.dcs`) as a standalone Observer-driven repair drone (§5), superseding the
+  squad-follower sketch; `Range` is exposed as a parameter. Its `c_repairer_aoe` radius and the
+  idle-wander tuning are still eyeballed — pin against real numbers if it under/over-shoots.
 - Staging-point geometry (threat-side offset math) — work out in BSF, integer-only.
 - Whether RALLY should ever hold fire outright (`v_powereddown` pass-through) instead of
   allowing auto-acquire self-defense — leaning no; self-defense without pursuit is safe.
@@ -258,7 +276,8 @@ registers and return home (member-side fallback, §3's HOLD row).
   per-member `check_bit`, so it no longer depends on Loop Signal's num-comparison semantics at
   all — the rework should not affect it, but confirm the Match mode itself is unchanged.
 - Implementation order: Captain and Gunner first (they are the closed loop), in BSF, tested
-  against a bug camp; Healer/Power provider after.
+  against a bug camp — both deployed (`library/squad-captain.dcs`, `squad-gunner.dcs`). Healer
+  deployed too (`library/healer.dcs`, standalone/Observer-driven — §5). Power provider remains.
 
 ## Lineage
 
