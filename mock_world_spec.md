@@ -58,7 +58,7 @@ Established by tracing the func bodies of the squad's instructions (`get_closest
 
 | Kind | Primitives | Mock responsibility |
 |---|---|---|
-| **Map / global** | `Map.FindClosestEntity(owner, range, pred, filter)`, `Map.GetDistance(a,b)`, `Map.GetEntityAt(x,y)`, `Map.Defer(fn)` | spatial iteration + distance over the entity registry |
+| **Map / global** | `Map.FindClosestEntity(owner, range, pred, filter)`, `Map.GetDistance(a,b)`, `Map.GetEntityAt(x,y)`, `Map.Defer(fn)`; tile reads: `Map.GetTileData(x,y)`, `Map.GetPlateauDelta`/`Map.GetBlightnessDelta`, `Map.CountTiles` | spatial iteration + distance over the entity registry; per-tile terrain state (see "Tile model" below) |
 | **Entity fields** | `.location`, `.faction`, `.def`, `.visual_def`, `.health`/`.max_health`, `.visibility_range`, `.exists`, `.is_construction`, `.is_damaged`, `.powered_down`, `.state_custom_1`, … | plain fields on the mock entity table |
 | **Entity methods** | `:GetRegister(n)`/`:SetRegister(n,v)` (already present on the stub's `Owner`), `:MatchFilter(mask, faction)`, `:MoveTo(target, range)`, `:IsTouching(comp)`, `:FindComponent(id)`, `:CountItem(id)`, `:GetLocationXY()`, `:LookAt(t)` | methods on the entity/component metatables |
 | **Component methods** | `comp:RequestStateMove(target, range) -> need_move, repeat_blocked`, component-register `:GetRegister`/`:SetRegister`, `GetComponentFromIndex` | movement resolution + per-component register banks |
@@ -124,8 +124,9 @@ Ordered per step:
    1%, where Manhattan (2.39) and Chebyshev (1.75) metrics are clearly wrong. The same log pins
    `TICKS_PER_SECOND` empirically: 157 ticks over 31.40 s of wall clock = 5.000 ticks/s.
    Effective speed = base `movement_speed` + speed
-   modules + terrain (flying units ignore terrain; pavement adds a bonus; being unpowered subtracts
-   a large penalty except on units with no base power draw). The first-version mock is flat and
+   modules + terrain (flying units ignore terrain; pavement adds a bonus; blight slows units
+   unless the faction or unit has a blight shield — see the Tile model section; being unpowered
+   subtracts a large penalty except on units with no base power draw). The first-version mock is flat and
    powered, so effective = base + modules; terrain/pavement and the unpowered penalty are later
    refinements (the unpowered penalty is what justifies the squad Power Provider, so it lands with
    combat). This discrete tile advance is what makes `need_move` eventually return `false`, so
@@ -136,6 +137,86 @@ Ordered per step:
 
 Each behavior-carrying entity gets its own `Interpreter` instance (its own `state`/`comp`/`Memory`)
 but shares the one `LupaEngine` and the one Lua world registry, so their sensing/commands interact.
+
+## Tile model: biomes, terrain, passability (game-data survey 2026-07-18)
+
+What the Lua layer actually exposes about a tile, surveyed for the mock. Upshot: **biome-linked
+gameplay is real (blight damage/slow, plateau wind boost, blight-only machinery — see the effects
+bullet), but it is all mediated by the continuous per-tile fields and their threshold deltas; no
+discrete biome id per tile exists in the Lua layer, and ground passability is a single
+engine-native bit** — so the mock's tile can still be a tiny record, not a terrain system.
+
+- **The `data.biomes` table itself is render-only.** `data/biomes.lua` is texture blending driven
+  by continuous per-tile noise fields (blightness / elevation / richness / variation + world
+  height); nothing gameplay-side reads `data.biomes`, and gameplay never sees a biome *name* —
+  every biome-correlated effect below keys off the fields/deltas directly. `data/cliffs.lua` is
+  likewise just visual meshes, and `data/landfeatures.lua` is worldgen spawn selection over the
+  same fields.
+- **Continuous per-tile fields.** `Map.GetTileData(x, y)` → `.blightness` / `.elevation` /
+  `.richness` / `.variation` (engine-native; consumed by explorable selection in
+  `data/explorables.lua`), plus `Map.GetHeight`, `Map.GetWaterHeight`, `Map.GetPlateauHeight`, and
+  the `Map.GetSettings()` thresholds (`plateau_level`, `blight_threshold`).
+- **Threshold deltas are the form gameplay actually consumes.** `Map.GetPlateauDelta(…)` and
+  `Map.GetBlightnessDelta(…)` (accept an entity or x,y; sign ≥ 0 means on-plateau / in-blight).
+  Consumers: the instructions `check_altitude` ("Check Altitude") and `check_blightness` ("Check
+  Blightness") — both visibility-gated like `is_passable` below — the filter values
+  `v_plateau`/`v_valley`/`v_blight`/`v_not_blight` inside the real `FilterEntity` (already live
+  since Phase 0), and plenty of component logic (blight power gating, solar-on-plateau,
+  blight-halved work time). A mock tile therefore wants **signed plateau/blight deltas (or just
+  booleans)**, not the raw noise fields, unless a test specifically needs `GetTileData`.
+- **Biome-linked gameplay effects (user-enumerated 2026-07-18, mechanisms verified in source).**
+  All key off the deltas above, mostly the blight one:
+  - **Unprotected units in blight take damage and are slowed.** Protection is two flags the Lua
+    layer *does* expose: `faction.has_blight_shield` (set by tech `on_unlock` — e.g. Blight
+    Protection — and always-on for the alien/bugs/anomaly factions) and per-entity
+    `entity.has_blight_shield` (the equippable `c_blight_shield` "Blight Shield" component). The
+    damage/slow application itself is engine-native (the codex documents the damage; the slow is
+    user-confirmed) — for the mock, the slow is one of the terrain speed modifiers in the
+    effective-speed formula, gated on blight delta ≥ 0 and neither flag set; the damage belongs to
+    the combat phase. The UI *refuses* manual move orders, target lock-on, and build placement
+    into blight for unshielded factions (`LocationBlockedByBlight`, `ui/utilities.lua`) — but
+    that gate is **UI-only (user-confirmed 2026-07-18)**: a *behavior* can move an unshielded
+    unit into blight where the equivalent direct player order is refused (the unit just takes
+    the damage/slow), and the native pathfinder itself will sometimes route a path *through*
+    blight. So the mock's movement resolution must treat blight as fully passable terrain with
+    consequences, never as blocking — only `landscape_blocked` blocks.
+  - **Wind turbines double on the plateau**: `c_wind_turbine:on_update` doubles `max_power` when
+    `Map.GetPlateauDelta(comp, -1) >= -0.1` and zeroes it during a dust storm — real component
+    Lua that would run as-is in the mock if spawned.
+  - **Blight-only machinery**: components with `requires_blight` refuse to work outside blight
+    ("Must be placed inside the blight", with a dust storm counting as blight for this check),
+    and `is_blight_boost` components halve their work time inside it. Placement gating for
+    blight-race buildings rides the same checks plus the UI gate above.
+  - **Blightness is mutable at runtime**: the terraformer family calls the engine-native
+    `Map.StartTerraforming(owner, range, rate)` / `Map.StopTerraforming(id)` — "Purifying
+    Terraformer" (`c_terraformer`, rate −0.001 toward `blight_threshold − 0.3`) vs. "Alien
+    Terraformer" (`c_blight_terraformer`, +0.001 toward `blight_threshold + 0.3`). So a mock
+    blight field is legitimately *static test input* only as long as no terraformer is in play.
+- **Passability = one landscape bit + entity occupancy.** `Map.CountTiles(x, y, 0, true)` returns
+  `blocked_landscape, blocked_entity` (its 3rd/4th returns are area counts — construction logic
+  uses `select(4, Map.CountTiles(e, 1)) > 0` as "any passable tile adjacent"). The one instruction
+  consumer is `is_passable` ("Is Passable"), whose semantics are worth reproducing exactly: on a
+  *visible* tile it merges landscape + entity blocking; on a merely *discovered* tile it uses
+  landscape + last-**seen**-entity blocking only; on an undiscovered tile **neither exec pin fires**
+  (`state.counter` untouched → plain fallthrough to next). *What makes* landscape blocked (water
+  under `water_height`, cliff slope, …) is engine-native and not recoverable from Lua — the mock
+  should take a per-tile `landscape_blocked` boolean as authored test input and route `is_passable`,
+  movement blocking, and the ground occupancy layer through it. The user-stated fact that some tile
+  types are impassable to non-flyers then falls out naturally: `landscape_blocked` gates **ground
+  units only**; flyers ignore it (consistent with flyers also ignoring terrain speed modifiers and
+  ground occupancy).
+- **"Flying" is two different notions — don't conflate them.** (a) The *filter* notion: the real
+  `FilterEntity` computes `v_is_flying` ("Flying") as `e.def.cost_modifier == 0` and
+  `v_is_grounded` as `~= 0` — a pure data convention (every Drone-size frame sets
+  `cost_modifier = 0`). The mock inherits this for free by running the real `FilterEntity`, but it
+  means mock entity defs must carry a faithful `cost_modifier` or Flying/Grounded filters silently
+  misclassify. (b) The *physics* notion (ignores `landscape_blocked`, shares tiles, no terrain
+  speed modifiers): engine-native, and its real test is unknown — a `Flyer` frame flag exists but
+  only on `f_flyer_m` (plus `Space` on satellites), while the visually-flying logistics drones
+  don't carry it. For the mock, make "flies" an explicit per-entity boolean derived from the frame
+  (size `"Drone"`, `slot_type` drone/flyer/satellite, and the `Flyer` flag coincide for every frame
+  that matters); flag it as a modeling choice to revisit only if an in-game test ever needs the
+  engine's exact rule.
 
 ## Phasing (first usable version = Phases 0–3, sensing + movement)
 
