@@ -102,10 +102,24 @@ Ordered per step:
 1. **Advance each behavior-carrying entity's `Interpreter` by one tick** — the existing
    `run_ticks(1)` already honors the real `lock`/`unlock`/`wait` per-tick budget model.
 2. **Resolve movement.** For each entity with a pending `RequestStateMove` goal or a
-   `FRAMEREG_GOTO` target, advance `.location` toward it by `def.movement_speed` (clamped to the
-   goal). This is what makes `need_move` eventually return `false`, so arrival-gated logic (the
-   RALLY assembly gate, `domove`'s "wait then repeat" loop) becomes testable over ticks rather than
-   resolving instantly.
+   `FRAMEREG_GOTO` target, step it toward the goal. **Positions are integer tiles: to behaviors a
+   unit is *always* at an exact integer coordinate and teleports tile-to-tile** — the smooth
+   in-game motion is animation only (user-confirmed; see the `reference_tile_occupancy_model`
+   memory). So the entity `.location` every instruction func reads must stay integer; the mock
+   accumulates fractional sub-tile progress *internally* and advances the logical coordinate one
+   whole tile at a time when that progress crosses a tile boundary — it never exposes a fraction.
+   Per-tick progress is `effective_speed / TICKS_PER_SECOND` tiles: **`def.movement_speed` is
+   tiles-per-*second* stored at face value** (confirmed against the stat-display code and user — the
+   *opposite* of the per-tick power convention; see `reference_movement_speed_model`), so it divides
+   by `TICKS_PER_SECOND` (=5) and is typically fractional (3/5 = 0.6 tile/tick → a unit sits on a
+   tile for a couple ticks, then jumps one tile). Effective speed = base `movement_speed` + speed
+   modules + terrain (flying units ignore terrain; pavement adds a bonus; being unpowered subtracts
+   a large penalty except on units with no base power draw). The first-version mock is flat and
+   powered, so effective = base + modules; terrain/pavement and the unpowered penalty are later
+   refinements (the unpowered penalty is what justifies the squad Power Provider, so it lands with
+   combat). This discrete tile advance is what makes `need_move` eventually return `false`, so
+   arrival-gated logic (the RALLY assembly gate, `domove`'s "wait then repeat" loop) becomes
+   testable over ticks rather than resolving instantly.
 3. **Drain `Map.Defer` callbacks.**
 4. *(Deferred — combat phase, not in first version.)* Resolve weapon `on_update` / damage.
 
@@ -189,13 +203,38 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
 
 - ~~**Phase 0 feasibility is the primary risk.**~~ **Resolved (2026-07-18):** loading the minimal
   subset needed only six small constant/table stubs, no long tail. See the Phase 0 note above.
-- **`faction:IsSeen` fidelity.** The squad design turns entirely on the vision lock; too-simple a
-  vision model could make a test pass for the wrong reason. Start simple, but treat the vision
-  model as a place to invest if squad tests feel unconvincing.
+- **`faction:IsSeen`/`IsVisible` fidelity — the top vision risk, and it has a load-bearing
+  *collective* question.** The squad design turns entirely on the vision lock, and specifically on
+  vision being *shared across the faction*: the turret target gate is `owner_faction:IsVisible(e)`
+  (a faction-level query — `c_turret` target selection, `components.lua`), so the whole Captain
+  concept assumes an unarmed high-`visibility_range` Captain seeing an enemy lets a *different*
+  gunner fire on it even when that gunner can't see the enemy itself. Confirm this **spotter case**
+  in-game before investing in the mock (Captain in vision range of enemy + gunner out of its own
+  vision → does the gunner fire? walk Captain away → does it stop?); it validates the architecture
+  *and* tells the mock exactly what `IsVisible` should compute (union of members' vision bubbles,
+  radius = `visibility_range` in tiles at face value). Too-simple a model could make a test pass for
+  the wrong reason. Related but distinct: does `get_closest_entity`/`Map.FindClosestEntity` gate
+  *sensing* on faction-seen too, or only on the sensing unit's own geometric `visibility_range`?
+- **`RequestStateMove` arrival tolerance (movement speed unit already resolved).** The per-tile
+  advance is now pinned: `def.movement_speed` is tiles/second at face value, so the tick loop
+  moves `effective_speed / TICKS_PER_SECOND` (see the tick-step note and
+  `reference_movement_speed_model` memory). What's still engine-native and unmeasured is *when*
+  `need_move` flips to `false` — the arrival radius, and whether the `range` argument to
+  `RequestStateMove` sets it. One cheap in-game test (domove to a known-distance coord; note the
+  stop distance and whether `range` widens it) closes it; the RALLY gate's testability depends on
+  getting this tolerance right.
 - **`Map.GetDistance` tile semantics.** Real `get_distance` on an entity means closest-tile, and
   center-tile after a `get_location` (rounds up on ties) — see the project memory on this. The mock
   should reproduce at least the single-tile-entity case exactly and document any multi-tile
   simplification.
+- **Tile occupancy (ground-layer only).** Only one ground unit *or* building occupies a tile, but
+  **multiple flyers can share a tile** (user-confirmed) — so occupancy constrains the ground layer
+  only. The first sensing+movement version can skip occupancy (a lone unit approaching an enemy
+  never contends for a tile), but multi-unit **RALLY** geometry needs it for *ground* squads — the
+  anti-scatter gate gathers them onto *adjacent* tiles, not stacked on the rally point — while an
+  all-flyer squad can genuinely converge on one tile. Model it before asserting rally-assembly
+  behavior for ground units. Ties to the integer-tile teleport model in the movement step above
+  (`reference_tile_occupancy_model`).
 - **Reusing the real block stack.** `todo.md` already tracks replacing the Python-simulated
   `sequence`/`for_number` block driver with the real `InstBeginBlock`/`GetFactionBehaviorAsm`. The
   world loops (`for_entities_in_range`/`for_signal_match`) ride that same driver, so that item and
