@@ -165,6 +165,41 @@ Update this file directly as items are picked up/finished.
       Seen live: one in-game edit to `Async Radar Get` propagated into three separate
       `library/` exports (and Observer's export picked up the earlier
       `memory_insert`→`memory_set` fix its checked-in copy had been missing).
+      - **Reviewable git diffs are a second, independent motivator (user, 2026-07-18).** A stored
+        `.dcs` is a single base62 line, so `git diff` on a re-export is meaningless — you can't see
+        what changed. Storing the behavior as **BSF text** makes edits reviewable in `git diff`/PRs
+        and makes import/export a plain decompile/compile. Two design requirements this exposes:
+        - **A canonical decompile that produces stable node assignments, so a diff shows only what
+          actually changed.** The blocker is that the in-game editor recomputes branch encoding
+          *and relative node order* for untouched nodes on every save (the exact reason
+          `semantic_diff` exists — see `feedback_resave_reencodes_unrelated_wiring`). A naive
+          decompile ids nodes by wire position (`n1`,`n2`,…), so that cosmetic reordering renumbers
+          everything and the BSF diff stays noisy. The stored form must normalize the editor's
+          reordering away (canonical traversal order from Program Start) and assign stable
+          ids/names derived from something durable (the node's `label` id/num, or a structural/
+          content hash), not raw position — the same normalization `semantic_diff` does, lifted
+          into the emitted text.
+        - **Make node ids optional — emit one only when a pin actually targets that node (user,
+          2026-07-18).** A node reached solely by positional fallthrough needs no id at all; only
+          genuine connection points (jump/branch/`>node` targets) get one. This both minimizes diff
+          churn (inserting/removing a fallthrough-only node renumbers nothing) and, deliberately,
+          **stops agents from referring to instructions by the unstable node id** — most
+          instructions simply wouldn't have one, forcing references into the stable vocabulary
+          (display name, `cmt`, enclosing `label` section — matches
+          `feedback_node_references_user_vocabulary`). The ids that remain are exactly the
+          meaningful targets, and canonically named per the point above. Needs a decompiler change
+          (suppress ids on non-referenced nodes) and a parser that accepts id-less node lines.
+        - **Quick win that needs none of the above: a git `textconv` diff driver.** A `.gitattributes`
+          rule running `bsf decompile` on `*.dcs` makes `git diff`/`git log -p`/PR views render the
+          BSF diff while still storing the lossless canonical `.dcs` (keeps editor `nx`/`ny` layout,
+          sidesteps the round-trip/layout gap in the "BSF envelope/sidecar layer" item). Reversible,
+          display-only; inherits the reorder-noise until the decompile is canonicalized, but even
+          noisy BSF beats a one-line blob. Offered 2026-07-18; can land independently of the full
+          mirror.
+      - **Layout caveat for a pure-BSF store:** recompiling BSF→`.dcs` currently drops node `nx`/`ny`
+        positions (BSF doesn't model them yet — the "BSF envelope/sidecar layer" item), so a
+        BSF-only source of truth loses the hand-arranged editor layout unless that sidecar lands
+        first, or the layout is kept alongside.
 
 ## Magnifier / drone-swarm design
 
