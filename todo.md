@@ -308,6 +308,20 @@ Update this file directly as items are picked up/finished.
 
 ## Combat Squad (`combat_squad_spec.md`)
 
+- [ ] **Gunner spread on rally (anti-bunch)** (user, 2026-07-18): members currently `@goto` the
+      rally entity directly, so all ground gunners aim at the Captain's single tile and jam under
+      ground occupancy — no pushing; a stopped unit only yields to a mover one at a time — making a
+      large squad's assembly gate fill slowly (arrivals pile on the approach side, shuffle inward as
+      stopped units step aside; live-observed). Fix: give each member a distinct fanned target tile
+      (ring/formation offset, radius from roster count, which the Captain can pack into the rally
+      entity's `num` for free). Design fork captured in `combat_squad_spec.md` §7: self-index even
+      spacing *if* member enumeration order is stable/consistent across members, else emergent
+      (keepvars-latched random ring with collision re-roll, or boids separation). One-value
+      broadcast means the Captain can't assign slots — must be member-side. Testing any fix
+      automatically needs the mock to model ground occupancy + the stopped-unit-yields mechanic
+      (`mock_world_spec.md` open items; exact yield rule still unknown). Ground squads only —
+      flyers stack, so an all-flyer squad converges on one tile.
+
 - [ ] **Early-tech squad variant** (user, 2026-07-15): make the squad behavior set work with
       Cubs/Dashbots/Haulers carrying Small Advanced Turrets or Pulse Lasers (~half the beam
       cannon's 15 range) — parameterize the range-derived constants (gunner engage/panic
