@@ -1,7 +1,7 @@
 # Mock World for Behavior Testing — Design Spec
 
-**Status:** design only, not started. Work state lives in `todo.md` (§ `desynced_toolkit` / BSF
-infrastructure), not here.
+**Status:** Phase 0 done (Data registries load under the stub); Phases 1–4 not started. Work state
+lives in `todo.md` (§ `desynced_toolkit` / BSF infrastructure), not here.
 
 ## Goal
 
@@ -114,15 +114,25 @@ but shares the one `LupaEngine` and the one Lua world registry, so their sensing
 
 ## Phasing (first usable version = Phases 0–3, sensing + movement)
 
-**Phase 0 — spike: load the Data package under the stub.** Today only `instructions.lua` loads.
-`FilterEntity` needs `data.all` plus real `data.frames`/`data.components`/`data.items`/`data.values`.
-Determine the minimal include subset from `data/data.lua`'s `package.includes` (expected around
-`utilities → values → items → components → frames`, plus whatever populates `data.all`) and the
-extra load-time stubs each file needs — `Frame:RegisterFrame`, the recipe helpers
-(`CreateProductionRecipe`, …), etc. These mostly just *store* definitions into `data.*` tables at
-load time (the interesting callbacks like `on_update` are stored, not run), so it is largely
-mechanical. **Deliverable:** `data.frames`/`data.components`/`data.all` populated, existing test
-suite still green. **This is the largest unknown — do it first; it de-risks everything after.**
+**Phase 0 — spike: load the Data package under the stub. DONE (2026-07-18).** The minimal include
+subset turned out to be exactly the expected `utilities → values → items → components → frames`
+(confirmed empirically: the intervening real includes `library/actions/biomes/behaviors/puzzles`
+are *not* needed at load). `Frame:RegisterFrame`/`Comp:RegisterComponent` and the recipe helpers
+are all defined *inside* those files — no stubs needed for them; the only genuinely-missing
+load-time surface was six engine constants/tables. `LupaEngine(load_data_registries=True)` (the
+new default) loads that subset before `instructions.lua` and then builds `data.all` (merge of
+values/items/components/frames, each def tagged `data_name`) exactly as the engine's post-load step
+does. Populated: `data.frames` (177), `data.components` (310), `data.items` (96), `data.values`
+(114), `data.all` (697); `FilterEntity`/`PrepareFilterEntity` live. Stubs added to
+`engine_stub.lua`: the `FF_*` bit flags (layout self-consistent for PrepareFilterEntity↔the future
+mock `MatchFilter`, deliberately *not* reverse-engineered to the engine's exact bits — FilterEntity
+keys off its own `FilterStringToNum`, so only those two agree-with-each-other consumers exist),
+`FRAMEREG_*`, `TICKS_PER_SECOND`, `blight_threshold` in `Map.GetSettings`, empty
+`FactionAction`/`EntityAction`/`UIMsg`/`Delay` handler tables, a no-op `GetFactionBehaviorAsm`, and
+an auto-vivifying `data` table. Cost ~29 ms per construction (once per session test fixture).
+Covered by new `test_lua_runtime.py` tests; `load_data_registries=False` preserves the old
+instructions-only runtime. The predicted long tail of load-time engine calls (see "risks" below)
+did not materialize.
 
 **Phase 1 — engine-native primitives in `world.lua`.** Implement the mock-surface table above as
 Lua metatables over `World.registry`:
@@ -177,10 +187,8 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
 
 ## Open items / risks
 
-- **Phase 0 feasibility is the primary risk.** If loading `components.lua`/`frames.lua` drags in a
-  long tail of load-time engine calls, the minimal-subset approach may need more stubs than
-  expected. Mitigation: it is the first phase, and the failure mode is verbose-but-mechanical, not
-  conceptual.
+- ~~**Phase 0 feasibility is the primary risk.**~~ **Resolved (2026-07-18):** loading the minimal
+  subset needed only six small constant/table stubs, no long tail. See the Phase 0 note above.
 - **`faction:IsSeen` fidelity.** The squad design turns entirely on the vision lock; too-simple a
   vision model could make a test pass for the wrong reason. Start simple, but treat the vision
   model as a place to invest if squad tests feel unconvincing.

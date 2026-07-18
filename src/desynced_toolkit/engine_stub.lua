@@ -185,7 +185,11 @@ end
 -- report "not blocked" since this harness has no map/server-settings concept.
 Map = {}
 function Map.GetSettings()
-	return { block_unlocked_behaviors = false }
+	-- `blight_threshold` (default 0.1, per data/map_settings.lua's `or 0.1` fallback) is read at
+	-- load time by a few blight-terraformer component defs in components.lua
+	-- (`Map.GetSettings().blight_threshold - 0.3`), so it must be a real number for the registry
+	-- load to succeed; its value only feeds a cosmetic `terraforming_target` field.
+	return { block_unlocked_behaviors = false, blight_threshold = 0.1 }
 end
 
 -- `jump`'s func scans `GetCachedBehaviorAsm(state.revid)` for a matching `label` instruction --
@@ -199,9 +203,78 @@ function GetCachedBehaviorAsm(revid)
 end
 
 -- The shared global table every data/*.lua file populates (data.instructions, data.components,
--- ...). Only `instructions` is loaded by this harness so far.
-data = { instructions = {} }
+-- data.frames, data.items, data.values, data.all, ...). The engine pre-creates every one of
+-- these registry tables; model that with an auto-vivifying `__index` so any `data.X.y = ...` at
+-- load time works and any `data.X` read returns a (possibly empty) table -- exactly as the real
+-- engine presents them. `LupaEngine` loads `instructions.lua` alone by default, or the fuller
+-- Data-registry subset (utilities/values/items/components/frames) when asked, which is what
+-- actually populates `data.frames`/`data.components`/`data.all` for the mock world.
+data = setmetatable({}, {
+	__index = function(t, k)
+		local sub = {}
+		rawset(t, k, sub)
+		return sub
+	end,
+})
 
--- Only top-level (non-func-body) call in data/instructions.lua that needs a real stand-in.
+-- Only top-level (non-func-body) call in data/instructions.lua that needs a real stand-in when
+-- loading instructions.lua ALONE. When the Data-registry subset is loaded first, components.lua
+-- redefines `Comp` and `Comp:RegisterComponent` for real (registering into data.components), and
+-- this fallback is harmlessly overwritten.
 Comp = {}
 function Comp:RegisterComponent(...) end
+
+-- Engine-native constants the Data-registry files reference at load time (all genuinely C++-side,
+-- not defined anywhere in this Lua extract).
+--
+-- FF_* are the frametype/faction bit flags PrepareFilterEntity (data/utilities.lua) combines into
+-- a mask, later tested by the mock's `MatchFilter`. Their exact engine bit assignment is NOT
+-- reverse-engineered here and does not need to be: FilterEntity keys entity predicates off its own
+-- `FilterStringToNum` table, not these bits, so the only consumers of the FF_ masks are
+-- PrepareFilterEntity (producer) and the mock MatchFilter (consumer) -- they just have to agree.
+-- This layout is chosen self-consistent with the two constraints the real Lua imposes: (1)
+-- `FF_ALL` must contain every frametype bit, since PrepareFilterEntity clears bits arithmetically
+-- (`FF_ALL - FF_FOUNDATION`, `FF_ALL - (FF_WALL|FF_GATE)`); (2) every faction flag must be
+-- numerically `> FF_ALL`, since PrepareFilterEntity uses `prepf > FF_ALL` to decide a mask is a
+-- faction (not frametype) filter. Frametype bits sit below FF_ALL, faction bits above it.
+FF_OPERATING    = 1
+FF_FOUNDATION   = 2
+FF_CONSTRUCTION = 4
+FF_DROPPEDITEM  = 8
+FF_RESOURCE     = 16
+FF_WALL         = 32
+FF_GATE         = 64
+FF_ALL          = 127 -- OR of every frametype bit above
+FF_OWNFACTION     = 128
+FF_ENEMYFACTION   = 256
+FF_NEUTRALFACTION = 512
+FF_ALLYFACTION    = 1024
+FF_WORLDFACTION   = 2048
+
+-- Frame register indices. Consistent with InstGet's own `comp.owner:GetRegister(-j)` frame-register
+-- addressing (address -1..-4 -> register 1..4) and with instructions that pass a FRAMEREG_* value
+-- straight to `entity:GetRegister(...)` (e.g. read_signal's `ent:GetRegister(FRAMEREG_SIGNAL)`),
+-- and with behavior_format.md's Signal/Visual/Store/Goto ordering.
+FRAMEREG_SIGNAL = 1
+FRAMEREG_VISUAL = 2
+FRAMEREG_STORE  = 3
+FRAMEREG_GOTO   = 4
+FRAMEREG_COUNT  = 4
+
+-- data/components.lua's portable-radar re-arm timing quirk uses this fixed rate (=5, confirmed
+-- in-game -- see reference_portable_radar_tickspersecond_quirk memory).
+TICKS_PER_SECOND = 5
+
+-- Action-dispatcher namespaces. The Data files DEFINE handlers into these at load time
+-- (`function FactionAction.DoFactionCount(...)`, `function Delay.EjectDropPod(...)`, ...), so they
+-- only need to exist as empty tables to be assigned into; none are invoked at load.
+FactionAction = FactionAction or {}
+EntityAction  = EntityAction or {}
+UIMsg         = UIMsg or {}
+Delay         = Delay or {}
+
+-- Read at load time into a `local` alias inside components.lua (`local GetFactionBehaviorAsm =
+-- GetFactionBehaviorAsm`); only ever CALLED from component func bodies (behavior execution /
+-- combat), never at load. The real one lives in data/library.lua (not loaded here). A no-op is
+-- enough for load and for the sensing/movement phases; a faithful version is Phase 4 (combat) work.
+function GetFactionBehaviorAsm(...) end

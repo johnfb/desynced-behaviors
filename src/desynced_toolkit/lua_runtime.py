@@ -17,8 +17,33 @@ from . import dcs_wire
 from .assets import AssetSource, get_package_manifest, resolve_include
 
 
+# The minimal `data/data.lua` include subset whose load populates `data.frames`/`data.components`/
+# `data.items`/`data.values` -- everything `FilterEntity`/`PrepareFilterEntity` and the mock world
+# need. Determined empirically (mock_world_spec.md Phase 0): these load cleanly under the stub in
+# this order, and the intervening real includes (library/actions/biomes/behaviors/puzzles) are not
+# required by any of them at load time, so they're deliberately skipped. `utilities.lua` must come
+# first -- it defines the recipe helpers (`CreateProductionRecipe`, ...) and `FilterEntity` that
+# the later files reference.
+DATA_REGISTRY_INCLUDES = (
+    "utilities.lua",
+    "values.lua",
+    "items.lua",
+    "components.lua",
+    "frames.lua",
+)
+
+# Registries merged into `data.all` post-load, each def tagged with its `data_name` -- the engine's
+# own post-load step, which `FilterEntity`/`PrepareFilterEntity` rely on (`data.all[id].data_name`).
+DATA_ALL_REGISTRIES = ("values", "items", "components", "frames")
+
+
 class LupaEngine:
-    def __init__(self, source: AssetSource, package_id: str = "Data") -> None:
+    def __init__(
+        self,
+        source: AssetSource,
+        package_id: str = "Data",
+        load_data_registries: bool = True,
+    ) -> None:
         self.source = source
         self.package_id = package_id
         self.lua = lupa.LuaRuntime(unpack_returned_tuples=True)
@@ -30,6 +55,16 @@ class LupaEngine:
         self.lua.execute(stub)
 
         pm = get_package_manifest(source, package_id)
+        # Load the real Data-registry definition files (frames/components/items/values) before
+        # instructions.lua, matching the game's own load order, so `data.frames`/`data.components`/
+        # `data.all` are populated with real defs. Off only for callers that explicitly want the
+        # bare instructions-only runtime.
+        if load_data_registries:
+            for include in DATA_REGISTRY_INCLUDES:
+                path = resolve_include(pm.entry_dir, include)
+                self.lua.execute(source.read_text(path), include)
+            self._build_data_all()
+
         instructions_path = resolve_include(pm.entry_dir, "instructions.lua")
         self.lua.execute(source.read_text(instructions_path))
 
@@ -51,6 +86,22 @@ class LupaEngine:
         # plain, explicitly-named Python methods (taking/returning the string directly) rather
         # than bound onto `Tool.GetClipboard`/`SetClipboard` under a misleadingly-identical
         # calling convention.
+
+    def _build_data_all(self) -> None:
+        """Replicate the engine's post-load merge: `data.all[id] = def` for every registered
+        definition, each tagged with `def.data_name = <registry>`. Ids are registry-namespaced
+        (`f_`/`c_`/`v_`/item names), so there are no cross-registry collisions."""
+        self.lua.execute(
+            """
+            for _, name in ipairs({ "%s" }) do
+              for id, def in pairs(data[name]) do
+                def.data_name = name
+                data.all[id] = def
+              end
+            end
+            """
+            % '", "'.join(DATA_ALL_REGISTRIES)
+        )
 
     def decode_dcs(self, s: str):
         """`.dcs` clipboard string -> `(type_char, lua_table)`, matching the shape

@@ -397,6 +397,20 @@ Update this file directly as items are picked up/finished.
       `value_type`/`get_location`/`modulo`); **3** — movement + multi-entity `MockWorld.step`.
       Combat (Phase 4) deferred. Shares the block-stack driver with the item below — sequence them
       together if both are picked up.
+      - [x] **Phase 0 — load the Data registries under the stub.** Done 2026-07-18. `LupaEngine`
+        now loads the real `utilities/values/items/components/frames` (the empirically-determined
+        minimal include subset — the intervening `library/actions/biomes/behaviors/puzzles` aren't
+        needed at load) before `instructions.lua`, and builds `data.all` (merge of
+        values/items/components/frames, each def tagged `data_name`) exactly as the engine does
+        post-load. `data.frames`, `data.components`, `data.items`, `data.values`, and `data.all`
+        are populated, and `FilterEntity`/`PrepareFilterEntity` are live. Load is on by default
+        (~29 ms, once per session fixture); `load_data_registries=False` keeps the bare
+        instructions-only runtime. New engine-native stubs added: `FF_*`/`FRAMEREG_*` constants
+        (FF_ layout self-consistent for PrepareFilterEntity↔mock MatchFilter, not engine-exact —
+        documented why in `engine_stub.lua`), `TICKS_PER_SECOND`, `blight_threshold` in
+        `Map.GetSettings`, empty `FactionAction`/`EntityAction`/`UIMsg`/`Delay` handler tables, a
+        no-op `GetFactionBehaviorAsm`, and an auto-vivifying `data` table. Covered by new tests in
+        `test_lua_runtime.py`; full suite green. Next: Phase 1 (`world.lua` primitives).
 - [ ] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm`** in `interpreter.py` rather
       than its current Python-simulated block stack and simplified `Memory`/mem-slot
       allocation — `for_number`'s own per-iteration decision is already delegated to real Lua,
