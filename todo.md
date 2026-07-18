@@ -384,6 +384,19 @@ Update this file directly as items are picked up/finished.
       blueprint/component wrapping beyond a bare behavior plus its `dependencies`. The pipeline
       round-trips the instruction graph itself; position/comment-adjacent fields outside that
       (`cmt` already works via the hidden-field mechanism; `nx`/`ny` don't yet) aren't modeled.
+- [ ] **Build a mock world for behavior testing (`mock_world_spec.md`)** — extend the
+      `Interpreter` with a populated, steppable environment so multi-unit behaviors (the combat
+      squad, `combat_squad_spec.md`) can be tested end-to-end. Scope of first version:
+      sensing + movement, not combat/damage (decided). Approach: world state in Lua tables
+      (entities carry the real `data.frames`/`data.components` def), Python-orchestrated; reuse the
+      real instruction funcs and `FilterEntity`/`PrepareFilterEntity`, mock only the engine-native
+      leaves (`Map.FindClosestEntity`, `comp:RequestStateMove`, `faction:IsSeen`, entity
+      fields/methods). Phases in the spec: **0** — load the Data package under the stub (biggest
+      unknown, do first); **1** — engine-native primitives in a new `world.lua`; **2** — extend the
+      op dispatch for the world instructions (also unblocks `library/hexat.dcs`'s unit-Origin path:
+      `value_type`/`get_location`/`modulo`); **3** — movement + multi-entity `MockWorld.step`.
+      Combat (Phase 4) deferred. Shares the block-stack driver with the item below — sequence them
+      together if both are picked up.
 - [ ] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm`** in `interpreter.py` rather
       than its current Python-simulated block stack and simplified `Memory`/mem-slot
       allocation — `for_number`'s own per-iteration decision is already delegated to real Lua,
