@@ -162,14 +162,20 @@ fixture with two additive enhancements — the shared arithmetic core (every `k`
   a plain copy; every other value type dead-ends (`POP`). Both live paths then feed the identical
   downstream math via a scratch coord, so the fixture's coordinate-only behavior is unchanged and
   the routine now additionally accepts a unit handle as the origin.
-- **`k` is taken mod 6** (`modulo(k, 6)`) right after `k = floor(T/R)`. For the nominal range
-  `T ∈ 0..6R-1` this is a no-op (`k` is already `0..5`); it only bites for out-of-range `T ≥ 6R`,
-  which it wraps around the ring instead of landing on a non-existent `Label`. Robustness, not a
-  math change.
+- **Out-of-range `T` wraps around the ring** (added 2026-07-18): `k = floor(T/R) mod 6` and
+  `t = (T - k*R) mod R`. For the nominal range `T ∈ 0..6R-1` both modulos are no-ops; any
+  `T ≥ 6R` — e.g. an ever-incrementing counter that never resets — wraps back around the ring
+  instead of landing on a non-existent `Label`. Robustness, not a math change. **The `t` modulo's
+  divisor is `R`, not 6** — `t` is the position *along* a side (`0..R-1`), so only the side index
+  `k` wraps mod 6. A first draft used `modulo(t, 6)`, which passes rings 1–6 coincidentally
+  (`t < 6` there) and breaks from ring 7 on, *including for in-range `T`* — worse than no `t`
+  modulo at all. (Since `%` is floored, negative `T` should also wrap correctly, but only
+  `T ≥ 0` has been verified.)
 
-The coordinate path was re-validated against the closed-form reference for `R=0..8` (the arithmetic
+The coordinate path was re-validated against the closed-form reference with wraparound
+(`T` swept through two full extra ring cycles per `R`, rings 0–9, zero mismatches — the arithmetic
 core, additions stripped, run through the real Lua via `Interpreter`); the unit path can't yet be
-driven by `Interpreter` (`value_type`/`get_location`/`modulo` aren't in its leaf dispatch) but is
+driven by `Interpreter` (`value_type`/`get_location` aren't in its leaf dispatch) but is
 structurally just a coordinate resolution ahead of that same validated math.
 
 The routine was also exercised **in-game 2026-07-18** as the waypoint generator for the
