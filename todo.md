@@ -460,6 +460,21 @@ Update this file directly as items are picked up/finished.
         `Map.GetSettings`, empty `FactionAction`/`EntityAction`/`UIMsg`/`Delay` handler tables, a
         no-op `GetFactionBehaviorAsm`, and an auto-vivifying `data` table. Covered by new tests in
         `test_lua_runtime.py`; full suite green. Next: Phase 1 (`world.lua` primitives).
+      - [x] **Movement-rate model measured in-game.** Done 2026-07-18: an Engineer walked a
+        closed `HexAt`-corner circuit (R=1, d_half=5) under a logging behavior printing each
+        location change with a Simulation Tick stamp. Pins Phase 3's per-tick advance: sub-tile
+        progress accumulates along the *Euclidean* path (a diagonal step costs ≈√2 — the mock
+        must step diagonally, never axis-by-axis), movement is 8-connected single-tile teleports
+        (integer coords only, instrument-confirmed), base `movement_speed` reproduced within 1%
+        (63.3 tiles / 157 ticks → 2.02 tiles/s vs. def 2), and `TICKS_PER_SECOND = 5` confirmed
+        by wall clock. Results in `mock_world_spec.md` (tick-step note) and the
+        `reference_movement_speed_model` memory. Still unmeasured: `need_move`'s arrival
+        radius / `range` tolerance (this test re-issued moves itself on exact tile match, so it
+        deliberately couldn't observe it). The behavior + real log are checked in as
+        `tests/data/movement_circuit_test.dcs` / `movement_circuit_test_ingame.log` — designated
+        (user, 2026-07-18) as Phase 3's golden differential fixture: the mock must reproduce the
+        real log's tile sequence and tick totals from the same `.dcs` (details in
+        `mock_world_spec.md`, Phase 3).
 - [ ] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm`** in `interpreter.py` rather
       than its current Python-simulated block stack and simplified `Memory`/mem-slot
       allocation — `for_number`'s own per-iteration decision is already delegated to real Lua,

@@ -172,6 +172,14 @@ core, additions stripped, run through the real Lua via `Interpreter`); the unit 
 driven by `Interpreter` (`value_type`/`get_location`/`modulo` aren't in its leaf dispatch) but is
 structurally just a coordinate resolution ahead of that same validated math.
 
+The routine was also exercised **in-game 2026-07-18** as the waypoint generator for the
+movement-model measurement (see `mock_world_spec.md`'s tick-step note): a test behavior walked an
+Engineer around all six `R=1` ring corners at `d_half=5` (`T = 0..5` via the `modulo` wrap),
+and every corner in the resulting debug log landed exactly on the closed-form position for the
+ring around origin `(-14, 51)` — E `(-4,51)`, NE `(-9,60)`, NW `(-19,60)`, W `(-24,51)`,
+SW `(-19,42)`, SE `(-9,42)`. First live-navigation use of `HexAt` output, on top of the earlier
+self-test-harness validation.
+
 ## Inverse: `HexIndexOf(Coord, Origin, d_half) → (R, T)`
 
 Converts the input coordinate to fractional axial, rounds to the nearest actual hex lattice point

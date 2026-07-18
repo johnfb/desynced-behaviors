@@ -112,7 +112,18 @@ Ordered per step:
    tiles-per-*second* stored at face value** (confirmed against the stat-display code and user — the
    *opposite* of the per-tick power convention; see `reference_movement_speed_model`), so it divides
    by `TICKS_PER_SECOND` (=5) and is typically fractional (3/5 = 0.6 tile/tick → a unit sits on a
-   tile for a couple ticks, then jumps one tile). Effective speed = base `movement_speed` + speed
+   tile for a couple ticks, then jumps one tile). **Measured in-game 2026-07-18** (an Engineer,
+   base `movement_speed = 2`, driven around a closed waypoint circuit by a logging behavior that
+   printed each location change with a game-tick stamp): the model holds end-to-end, and the
+   sub-tile progress accumulates along the *geometric path* — every observed step was a single
+   tile to one of the 8 neighbors (never a multi-tile jump, so the mock must step diagonally too,
+   not axis-by-axis), orthogonal steps took alternating 2/3 ticks (mean 2.57 ≈ 1/(2/5) = 2.5)
+   while diagonal steps took 3/4 ticks (mean 3.35 ≈ 2.5·√2) — i.e. **a diagonal step costs ≈√2
+   tiles of progress** (√2 vs. exactly 1.4 is below this measurement's resolution). Over the whole
+   circuit: 63.3 Euclidean tiles in 157 ticks → 2.02 tiles/s, reproducing the base speed within
+   1%, where Manhattan (2.39) and Chebyshev (1.75) metrics are clearly wrong. The same log pins
+   `TICKS_PER_SECOND` empirically: 157 ticks over 31.40 s of wall clock = 5.000 ticks/s.
+   Effective speed = base `movement_speed` + speed
    modules + terrain (flying units ignore terrain; pavement adds a bonus; being unpowered subtracts
    a large penalty except on units with no base power draw). The first-version mock is flat and
    powered, so effective = base + modules; terrain/pavement and the unpowered penalty are later
@@ -174,7 +185,18 @@ squad uses: `get_location`, `get_distance`, `get_health`, `get_closest_entity`, 
 **Phase 3 — movement + multi-entity stepping.** Implement `RequestStateMove`/`MoveTo`/`@goto`
 resolution in the tick loop and `MockWorld.step(n)` driving all interpreters plus movement together.
 First real test targets: a `for_signal_match` membership scan resolving a live roster, and a
-`get_closest_entity`-driven RALLY broadcast.
+`get_closest_entity`-driven RALLY broadcast. **Golden differential fixture (user-designated):**
+the 2026-07-18 movement-measurement behavior and its real in-game debug log are checked in as
+`tests/data/movement_circuit_test.dcs` / `movement_circuit_test_ingame.log` — the behavior walks
+an Engineer around the six `HexAt` R=1 ring corners, printing each location change with a
+Simulation Tick stamp. Phase 3's acceptance test: run the same `.dcs` in the mock (Engineer def,
+origin `(-14, 51)`, start on the NW corner `(-19, 60)`) and diff the mock's print stream against
+the real log — same tile sequence, same per-step tick deltas (modulo the poll-aliasing jitter of
+±1 tick on individual steps; the closed-circuit total of 157 ticks should match near-exactly).
+This exercises the whole stack at once: `domove`/arrival re-issue, the Euclidean sub-tile
+accumulation, 8-connected stepping, `simulation_tick`, `value_type`/`get_location`/`modulo`
+(the `HexAt` unit-Origin path `Interpreter` can't currently drive), `sequence` cascade polling,
+and `wait`.
 
 **Phase 4 (deferred, not first version) — combat fidelity.** Optionally run the real weapon
 `c_turret:on_update` (`data/components.lua`) plus a minimal HP-decrement/damage model, so ENGAGE
@@ -215,9 +237,10 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   radius = `visibility_range` in tiles at face value). Too-simple a model could make a test pass for
   the wrong reason. Related but distinct: does `get_closest_entity`/`Map.FindClosestEntity` gate
   *sensing* on faction-seen too, or only on the sensing unit's own geometric `visibility_range`?
-- **`RequestStateMove` arrival tolerance (movement speed unit already resolved).** The per-tile
-  advance is now pinned: `def.movement_speed` is tiles/second at face value, so the tick loop
-  moves `effective_speed / TICKS_PER_SECOND` (see the tick-step note and
+- **`RequestStateMove` arrival tolerance (movement rate now measured, not just pinned).** The
+  per-tile advance is settled empirically: `def.movement_speed` is tiles/second at face value,
+  progress accumulates along the Euclidean path (diagonal step ≈√2), and the 2026-07-18 Engineer
+  circuit test reproduced the base speed within 1% (see the tick-step note and
   `reference_movement_speed_model` memory). What's still engine-native and unmeasured is *when*
   `need_move` flips to `false` — the arrival radius, and whether the `range` argument to
   `RequestStateMove` sets it. One cheap in-game test (domove to a known-distance coord; note the
