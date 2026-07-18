@@ -1,5 +1,5 @@
 """Confirms the lupa-backed engine correctly drives the *real* `data/instructions.lua` funcs
-(add/sub/mul/div/check_number/set_reg/separate_coordinate/combine_coordinate/jump/label),
+(add/sub/mul/div/modulo/check_number/set_reg/separate_coordinate/combine_coordinate/jump/label),
 including the real `REG_INFINITE` handling in `check_number` -- see engine_stub.lua's module
 docstring for the `Get`/`Set`/`InstGet`/`InstSet`/`GetStack` discovery this all depends on.
 """
@@ -39,6 +39,15 @@ def test_arithmetic(engine):
     res4 = mem.var("res4")
     engine.call("div", comp, state, c, a, res4)
     assert mem.read(res4).num == 3  # floor division
+
+    res5 = mem.var("res5")
+    engine.call("modulo", comp, state, c, a, res5)
+    assert mem.read(res5).num == 1  # 10 % 3
+
+    neg = mem.literal(num=-1)
+    res6 = mem.var("res6")
+    engine.call("modulo", comp, state, neg, a, res6)
+    assert mem.read(res6).num == 2  # -1 % 3: floored (Lua `%`), not truncated
 
 
 def test_coordinate_roundtrip(engine):

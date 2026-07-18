@@ -341,7 +341,7 @@ class Interpreter:
                 return "continue"
             self._i = target
             return "continue"
-        elif op in ("add", "sub", "mul", "div"):
+        elif op in ("add", "sub", "mul", "div", "modulo"):
             a = self._translate_arg(instr[1])
             b = self._translate_arg(instr[2])
             res_slot = (

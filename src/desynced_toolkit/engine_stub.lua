@@ -92,12 +92,12 @@ function Value:Init(val)
 	return self
 end
 
--- Confirmed rules (add/sub, empirically tested in-game -- see behavior_format.md's "Composite
--- values and the `num` field"): coordinate+coordinate combines both parts; coordinate+bare-number
--- broadcasts the number onto both axes and preserves the coordinate's own `num`; entity/item+
--- bare-number adds `num` normally, the reference passes through. mul/div are NOT confirmed to
--- follow the same rules (behavior_format.md flags this explicitly) -- this stub applies the same
--- broadcast logic to them too as the best available guess; treat that part as unverified.
+-- Confirmed rules (add/sub AND mul/div, each empirically tested in-game -- see
+-- behavior_format.md's "Composite values and the `num` field"): coordinate+coordinate combines
+-- both parts; coordinate+bare-number broadcasts the number onto both axes and preserves the
+-- coordinate's own `num`; entity/item+bare-number adds `num` normally, the reference passes
+-- through. modulo's composite behavior is NOT separately confirmed -- this stub applies the
+-- same broadcast logic to it as the best available guess; treat that part as unverified.
 local function combine(a, b, numOp, coordOp)
 	a, b = coerce(a), coerce(b)
 	local a_data, b_data = a.coord or a.id or a.entity or a.item, b.coord or b.id or b.entity or b.item
@@ -132,6 +132,7 @@ Value.__add = function(a, b) return combine(a, b, function(x, y) return x + y en
 Value.__sub = function(a, b) return combine(a, b, function(x, y) return x - y end, function(x, y) return x - y end) end
 Value.__mul = function(a, b) return combine(a, b, function(x, y) return x * y end, function(x, y) return x * y end) end
 Value.__idiv = function(a, b) return combine(a, b, function(x, y) return x // y end, function(x, y) return x // y end) end
+Value.__mod = function(a, b) return combine(a, b, function(x, y) return x % y end, function(x, y) return x % y end) end
 
 function InstError(comp, state, err)
 	error("InstError: " .. tostring(err))
