@@ -316,8 +316,21 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   vision → does the gunner fire? walk Captain away → does it stop?); it validates the architecture
   *and* tells the mock exactly what `IsVisible` should compute (union of members' vision bubbles,
   radius = `visibility_range` in tiles at face value). Too-simple a model could make a test pass for
-  the wrong reason. Related but distinct: does `get_closest_entity`/`Map.FindClosestEntity` gate
-  *sensing* on faction-seen too, or only on the sensing unit's own geometric `visibility_range`?
+  the wrong reason. The related-but-distinct *sensing* question is now **answered (source +
+  in-game observation, 2026-07-18)**: instruction sensing is strictly the sensing unit's own
+  radius and never consults faction vision. `get_closest_entity` ("Closest Unit") searches
+  `math.min(override_range or visibility_range, visibility_range)` — a Max Range filter can only
+  *shrink* the radius — and `for_entities_in_range` ("Loop Units in Range") clamps its Range arg
+  to `visibility_range` (Infinite = exactly `visibility_range`). Observed live: a Scout
+  (visibility 10) parked next to an alien Observer building (visibility 80) does **not** return
+  an enemy nest that the building plainly reveals on screen — faction vision feeds the player's
+  view and (per the spec's premise, still to confirm) weapon targeting, not sensing instructions.
+  The radar *component* path is different again: `c_portable_radar:on_update` scans with the
+  radar's own `range` field (Scout Radar 30, Small Radar 40), deliberately beyond vision — it
+  even reveals the found entity's area afterward — so radar-register reads (the Async Radar
+  path) are the only way a behavior senses past its own visibility bubble. Mock consequence:
+  `Map.FindClosestEntity`'s mock needs no faction-vision gating for the instruction callers, and
+  a mocked radar must use the component def's `range`, not `visibility_range`.
 - **`RequestStateMove` arrival tolerance (movement rate now measured, not just pinned).** The
   per-tile advance is settled empirically: `def.movement_speed` is tiles/second at face value,
   progress accumulates along the Euclidean path (diagonal step ≈√2), and the 2026-07-18 Engineer
