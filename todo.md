@@ -507,7 +507,26 @@ Update this file directly as items are picked up/finished.
         explicit payoff `test_hexat_unit_origin_runs_via_mock_world` in `test_bsf_end_to_end.py`
         (deployed `library/hexat.dcs`'s value_type→get_location Unit path, previously unrunnable).
         Full suite green. Next: Phase 3 (movement + `MockWorld.step`, against the golden
-        `movement_circuit_test` fixture).
+        `movement_circuit_test` fixture). *(The MockBeginBlock upvalue patch described here was
+        retired the next day when Phase 3 adopted the real block-stack driver outright.)*
+      - [x] **Phase 3 — movement + multi-entity stepping.** Done 2026-07-19, with a user-chosen
+        scope expansion: the golden fixture needs `call`, and rather than teach the Python tier
+        call frames, the whole simulated tier was replaced by the **real machinery** (see the
+        interpreter item below, closed the same day). Movement in `world.lua` (per-rule
+        provenance in its movement-section header): integer tiles + fractional internal progress
+        at `movement_speed/TICKS_PER_SECOND` per tick, √2 per diagonal step, diagonal-first-
+        then-straight direction (read off the golden log), no pathfinding (blocked step ⇒
+        `repeat_blocked`/Path Blocked pin, flagged), PROVISIONAL arrival gate
+        (`get_distance ≤ range`, floored at 1 for entity targets) pending the ArrivalProbe run,
+        `@goto` as persistent native move-to, ground occupancy shared with `Map.CountTiles`
+        (flyers stack/overfly), frame-derived `flying` bit. `MockWorld`: `attach_behavior`
+        (accepts table or raw `.dcs`), `step(n)` = tick++ → behaviors → movement → deferred,
+        `prints` capture stream (tick+entity attributed, values snapshotted — storing live
+        register boxes was a real bug this work caught). **Acceptance test green**
+        (`test_movement_circuit_golden.py`): exact 56/56 tile sequence, deltas ±1 (±2 only on
+        direction-change steps), 4 of 5 legs tick-exact, total 157+3 decomposed in the test
+        docstring. Unit tests in `test_mock_world_movement.py`. Next: run the ArrivalProbe
+        in-game (item below), then Phase 4 (combat).
       - [x] **Movement-rate model measured in-game.** Done 2026-07-18: an Engineer walked a
         closed `HexAt`-corner circuit (R=1, d_half=5) under a logging behavior printing each
         location change with a Simulation Tick stamp. Pins Phase 3's per-tick advance: sub-tile
@@ -523,6 +542,14 @@ Update this file directly as items are picked up/finished.
         (user, 2026-07-18) as Phase 3's golden differential fixture: the mock must reproduce the
         real log's tile sequence and tick totals from the same `.dcs` (details in
         `mock_world_spec.md`, Phase 3).
+- [ ] **Run the ArrivalProbe in-game to settle the sync-move arrival tolerance.** The instrument
+      is `tests/data/arrival_probe.bsf` (paste-ready `.dcs` alongside; protocol in its header
+      comment: clear area, 12+ open tiles east, optionally bind Target to a nearby unit, read the
+      debug log's marker/distance/coordinate triples). `tests/test_arrival_probe.py` currently
+      pins the PROVISIONAL model (arrived ⟺ `get_distance ≤ range`, entity targets floored at 1)
+      — swap in the measured numbers as goldens, and fix `world.lua`'s
+      `arrival_tolerance`/`arrived` if the game disagrees. Settles `mock_world_spec.md`'s last
+      open movement item; the squad RALLY gate depends on it.
 - [x] **Run the RangeProbe in-game to settle the range-gate metric.** Done 2026-07-19, same
       day: measured minimal detecting ranges (3,0)=3, (2,2)=2, (3,2)=3, (3,3)=4, (4,3)=5,
       (6,3)=6 — **floored Euclidean** exactly (in range R ⟺ floor(dist) ≤ R); Chebyshev,
@@ -535,11 +562,23 @@ Update this file directly as items are picked up/finished.
       (one distance function now), the pinned tests (both probe columns are in-game golden
       values), `mock_world_spec.md`, `blight_magnifier_mining.md`, and the
       `reference_distance_metrics` memory all updated.
-- [ ] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm`** in `interpreter.py` rather
-      than its current Python-simulated block stack and simplified `Memory`/mem-slot
-      allocation — `for_number`'s own per-iteration decision is already delegated to real Lua,
-      but the block-stack driving itself (`sequence`/`for_number`) is not. (This is about
-      `interpreter.py`'s own runtime fidelity — unrelated to the removed `AstCompiler`.)
+- [x] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm` in `interpreter.py`.** Done
+      2026-07-19, folded into mock-world Phase 3 (user chose this over Python-simulated `call`
+      frames when the golden fixture forced the question): the real `data/library.lua` now loads
+      with the Data registries (before components.lua/instructions.lua — both capture load-time
+      local aliases of these globals), behaviors install through the real `UploadBehavior`
+      (dependency unpack with `call.sub` remapping, content-hash dedup into
+      `faction.extra_data.library`, `SetBehavior` state init — parameters are component
+      registers, the real `state.stk` model), and execution is `behavior_runtime.lua`'s port of
+      the `c_behavior:on_update` dispatch loop delegating every dead end to the real
+      `c_behavior_on_end` (extracted from the real function's upvalue). The whole simulated tier
+      — per-instruction arg translation, Python block stack, `Memory` slot allocation for
+      programs, the `CurrentAsm`/`MockBeginBlock` shims — is gone; `Interpreter` is now
+      activation scheduling only. `call` works for the first time (by-reference params, shared
+      arrays, depth cap — pinned in `test_interpreter_call.py`), and `wait`'s sleep semantics
+      were corrected off the dispatcher's own source (sleep N = resume N ticks later; the old
+      model was off by one). One deliberate harness deviation retained and documented: top-level
+      fall-off halts ("restart") instead of looping forever.
 - [ ] **Add automated test coverage for the corpus/analysis scripts** (`scripts/
       collect_clipboard_corpus.py`, `collect_steam_forum.py`, `analyze_corpus.py`,
       `render_examples.py`). Currently exercised only by direct manual runs and one real live

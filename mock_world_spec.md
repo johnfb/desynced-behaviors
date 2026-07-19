@@ -1,10 +1,16 @@
 # Mock World for Behavior Testing — Design Spec
 
-**Status:** Phases 0–2 done (Data registries load under the stub; `world.lua` supplies the
-engine-native sensing primitives + entity graph, driven by `desynced_toolkit.MockWorld`; the
-`Interpreter` op dispatch runs the world/sensing ops + both block-producing sensing loops
-end-to-end); Phases 3–4 not started. Work state lives in `todo.md` (§ `desynced_toolkit` / BSF
-infrastructure), not here.
+**Status:** Phases 0–3 done — the first usable version exists. Phase 3 (2026-07-19) went further
+than planned: rather than extending the Python op dispatch, the whole simulated interpreter tier
+was replaced by the **real game machinery** (`GetFactionBehaviorAsm`/`UploadBehavior` from
+`data/library.lua`, the real `c_behavior:on_update` dispatch loop, real
+`InstBeginBlock`/`call`/return — see `behavior_runtime.lua`), which closed the previously-deferred
+block-stack-reuse item as a side effect and made `call` work for the first time. Movement +
+`MockWorld.step` landed on top, and the golden differential acceptance test below passes (exact
+tile sequence; totals/deltas within the documented tolerance). Phase 4 (combat) not started. The
+arrival-tolerance probe (`tests/data/arrival_probe.bsf`) is authored and suite-wired but **not yet
+run in-game** — the arrival model is provisional until it is. Work state lives in `todo.md`
+(§ `desynced_toolkit` / BSF infrastructure), not here.
 
 ## Goal
 
@@ -266,7 +272,27 @@ squad uses: `get_location`, `get_distance`, `get_health`, `get_closest_entity`, 
 `value_type`/`get_location`/`modulo` are exactly the currently-unhandled ops (see
 `hex_expansion_math.md`, "Deployed copy").
 
-**Phase 3 — movement + multi-entity stepping.** Implement `RequestStateMove`/`MoveTo`/`@goto`
+**Phase 3 — movement + multi-entity stepping. DONE (2026-07-19), with a scope expansion:** the
+user chose to satisfy the fixture's `call` requirement by adopting the **real behavior machinery**
+outright instead of extending the Python-simulated tier — real compiler (`GetFactionBehaviorAsm`),
+real import (`UploadBehavior`, including `call.sub` dependency remapping), and a port of the real
+`c_behavior:on_update` dispatch loop delegating every dead end to the real `c_behavior_on_end`
+(`behavior_runtime.lua`; the Python `Interpreter` is now only activation scheduling). That closed
+todo.md's separate block-stack-reuse item, corrected the `wait` sleep semantics off the
+dispatcher's own source (sleep N = resume N ticks later, not N skipped ticks), and gave `call`
+by-reference parameters/shared arrays for free (pinned in `test_interpreter_call.py`). Movement
+landed as designed below (`world.lua`'s movement section documents each rule's provenance; the
+step-direction rule — diagonal while both axes differ, then straight — was read directly off the
+golden log's legs). The acceptance test passes: exact tile sequence (56/56 records), per-step
+deltas within ±1 except ±2 exactly on direction-change steps, four of five clean legs
+tick-exact, closed-circuit total 157+3 with the excess decomposed in
+`test_movement_circuit_golden.py`'s docstring (+1 uniform print-phase offset; ~+2 pre-log
+residual sub-tile progress the real Engineer carried into the log — its first two intervals are
+2,2 against the 2,3 steady state; real leg 3 finishing in 27 < ⌈27.68⌉ ticks proves the real
+engine carries fractional progress across move orders, which the mock reproduces). Original plan
+follows; the fixture description remains accurate.
+
+Implement `RequestStateMove`/`MoveTo`/`@goto`
 resolution in the tick loop and `MockWorld.step(n)` driving all interpreters plus movement together.
 First real test targets: a `for_signal_match` membership scan resolving a live roster, and a
 `get_closest_entity`-driven RALLY broadcast. **Golden differential fixture (user-designated):**
@@ -335,15 +361,17 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   path) are the only way a behavior senses past its own visibility bubble. Mock consequence:
   `Map.FindClosestEntity`'s mock needs no faction-vision gating for the instruction callers, and
   a mocked radar must use the component def's `range`, not `visibility_range`.
-- **`RequestStateMove` arrival tolerance (movement rate now measured, not just pinned).** The
-  per-tile advance is settled empirically: `def.movement_speed` is tiles/second at face value,
-  progress accumulates along the Euclidean path (diagonal step ≈√2), and the 2026-07-18 Engineer
-  circuit test reproduced the base speed within 1% (see the tick-step note and
-  `reference_movement_speed_model` memory). What's still engine-native and unmeasured is *when*
-  `need_move` flips to `false` — the arrival radius, and whether the `range` argument to
-  `RequestStateMove` sets it. One cheap in-game test (domove to a known-distance coord; note the
-  stop distance and whether `range` widens it) closes it; the RALLY gate's testability depends on
-  getting this tolerance right.
+- **`RequestStateMove` arrival tolerance — probe authored, awaiting its in-game run.** The
+  per-tile advance is settled empirically (see the tick-step note), but *when* `need_move` flips
+  `false` — the arrival radius, and whether the `range` argument widens it — is still
+  engine-native and unmeasured. The mock ships a **provisional** model (`world.lua`:
+  arrived ⟺ `get_distance(unit, target) ≤ range`, floored at 1 for an entity target whose tile
+  can't be entered). The measuring instrument now exists: `tests/data/arrival_probe.bsf`
+  (paste-ready `.dcs` alongside) sync-moves to a coordinate at ranges 0/2/5 and to a bound
+  Target unit at ranges 0/2/5, printing case marker + `get_distance` readout + stop coordinate
+  per case; `tests/test_arrival_probe.py` pins the provisional model's predictions and is where
+  the in-game numbers drop in as goldens (fixing `world.lua`'s `arrival_tolerance` if they
+  disagree). The RALLY gate's testability depends on this tolerance being right.
 - **Distance metrics — settled 2026-07-19 (in-game RangeProbe run + user observations).**
   - **`Map.FindClosestEntity`'s range gate is floored Euclidean**: in range `R` ⟺
     `floor(dist) ≤ R`, equivalently `dist < R+1`. Settled by the in-game RangeProbe run
@@ -386,9 +414,8 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   all-flyer squad can genuinely converge on one tile. Model it before asserting rally-assembly
   behavior for ground units. Ties to the integer-tile teleport model in the movement step above
   (`reference_tile_occupancy_model`).
-- **Reusing the real block stack.** `todo.md` already tracks replacing the Python-simulated
-  `sequence`/`for_number` block driver with the real `InstBeginBlock`/`GetFactionBehaviorAsm`. The
-  world loops (`for_entities_in_range`/`for_signal_match`) ride that same driver, so that item and
-  this one touch the same code — sequence them together if both are picked up.
+- ~~**Reusing the real block stack.**~~ **Resolved (2026-07-19), folded into Phase 3:** the real
+  `InstBeginBlock`/`GetFactionBehaviorAsm`/`c_behavior_on_end` machinery now runs everything (see
+  the Phase 3 note and `behavior_runtime.lua`); the world loops ride the real driver.
 - **Combat (Phase 4)** is explicitly out of the first version; revisit once sensing/movement tests
   exist and it is clear how much of ENGAGE they already cover.
