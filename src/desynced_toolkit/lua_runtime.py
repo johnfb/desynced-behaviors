@@ -20,12 +20,17 @@ from .assets import AssetSource, get_package_manifest, resolve_include
 # The minimal `data/data.lua` include subset whose load populates `data.frames`/`data.components`/
 # `data.items`/`data.values` -- everything `FilterEntity`/`PrepareFilterEntity` and the mock world
 # need. Determined empirically (mock_world_spec.md Phase 0): these load cleanly under the stub in
-# this order, and the intervening real includes (library/actions/biomes/behaviors/puzzles) are not
+# this order, and the intervening real includes (actions/biomes/behaviors/puzzles) are not
 # required by any of them at load time, so they're deliberately skipped. `utilities.lua` must come
 # first -- it defines the recipe helpers (`CreateProductionRecipe`, ...) and `FilterEntity` that
-# the later files reference.
+# the later files reference. `library.lua` (added for the real-dispatcher work, in its real
+# relative position) must precede components.lua AND instructions.lua: both capture load-time
+# local aliases of `GetFactionBehaviorAsm`/`GetCachedBehaviorAsm` (components.lua's dispatcher
+# locals; instructions.lua's "Local references for shorter names") -- load it later and those
+# closures would be permanently bound to nothing.
 DATA_REGISTRY_INCLUDES = (
     "utilities.lua",
+    "library.lua",
     "values.lua",
     "items.lua",
     "components.lua",
@@ -64,20 +69,27 @@ class LupaEngine:
                 path = resolve_include(pm.entry_dir, include)
                 self.lua.execute(source.read_text(path), include)
             self._build_data_all()
+        else:
+            # Bare instructions-only mode still gets the real library.lua (it defines only
+            # functions and depends on nothing at load) so instructions.lua's load-time local
+            # aliases of GetCachedBehaviorAsm/GetFactionBehaviorAsm bind the real ones.
+            path = resolve_include(pm.entry_dir, "library.lua")
+            self.lua.execute(source.read_text(path), "library.lua")
 
         instructions_path = resolve_include(pm.entry_dir, "instructions.lua")
         self.lua.execute(source.read_text(instructions_path))
 
-        # Repoint the shared `BeginBlock` upvalue (a local alias for the real InstBeginBlock
-        # block-stack driver) to `MockBeginBlock`, so the Python interpreter's own block driver can
-        # enter the sensing loops (for_entities_in_range/for_signal_match): their func builds the
-        # iterator via real sensing and returns BeginBlock(it), and the stub just hands `it` back.
-        # Anchored on any block-loop func (all block funcs share the one upvalue cell). Inert for the
-        # existing for_number/sequence paths, which never reach BeginBlock. See engine_stub.lua.
-        self.lua.execute(
-            "local f = data.instructions.for_entities_in_range\n"
-            "if f and f.func then PatchBeginBlock(f.func) end"
-        )
+        # The behavior runtime (real GetFactionBehaviorAsm compilation + a port of the real
+        # c_behavior:on_update dispatch loop -- see behavior_runtime.lua). Needs the Data
+        # registries: it extracts `c_behavior_on_end` from the real c_behavior component def.
+        # Without registries the Interpreter is unavailable (BehaviorRuntime stays nil).
+        if load_data_registries:
+            runtime_src = (
+                resources.files(__package__)
+                .joinpath("behavior_runtime.lua")
+                .read_text(encoding="utf-8")
+            )
+            self.lua.execute(runtime_src, "behavior_runtime.lua")
 
         self.data = self.lua.globals().data
         self._new_state = self.lua.globals().NewState

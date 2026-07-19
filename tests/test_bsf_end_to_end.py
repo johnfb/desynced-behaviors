@@ -124,9 +124,15 @@ def test_hexat_unit_origin_runs_via_mock_world(engine):
 
     # R > 0 so it takes the get_location path rather than n1's R==0 "return Origin" shortcut.
     for R, T in [(3, 5), (5, 29), (8, 40)]:
-        interp = Interpreter(engine, prog, params={1: R, 2: T, 5: D_HALF}, comp=comp)
-        # Origin (param slot 4) is a live UNIT entity -> value_type routes to the Unit branch.
-        interp.state.mem[4] = new_value(0, None, None, unit)
+        # Origin (param 4) is a live UNIT entity -> value_type routes to the Unit branch.
+        # Parameters are component registers under the real dispatcher, so the entity value is
+        # just another param (a Lua Value passes through Interpreter's params coercion).
+        interp = Interpreter(
+            engine,
+            prog,
+            params={1: R, 2: T, 4: new_value(0, None, None, unit), 5: D_HALF},
+            comp=comp,
+        )
         interp.run()
         result = interp.read_param(3)
         assert (result.coord.x, result.coord.y) == _ref_hexat(R, T, origin=(ux, uy))

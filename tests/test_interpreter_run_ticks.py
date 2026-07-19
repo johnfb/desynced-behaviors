@@ -1,11 +1,12 @@
-"""`Interpreter.run_ticks`: tick-accurate stepping honoring the real lock/unlock/wait model
-(data.instructions.unlock/.lock/.wait's own `explain` text, confirmed against a real user
-2026-07-10) -- by default (no `unlock()` reached yet) a behavior runs exactly one instruction
-per tick (`state.limit == 1`, an implicit `wait(1)` after every step); `unlock()` raises the
-per-tick budget to 10000, checked fresh after every instruction so it can take effect within the
-same tick it runs in; `lock()` resets it to 1; an explicit `wait(t)` stops the current tick
-immediately and counts down `t` ticks before instructions resume. `run()` (unchanged) still just
-runs to completion ignoring all of this.
+"""`Interpreter.run_ticks`: tick-accurate stepping honoring the real lock/unlock/wait model,
+now implemented by the real dispatcher itself (`BehaviorRuntime.Activate`, a port of
+`c_behavior:on_update`'s loop -- see behavior_runtime.lua): by default (no `unlock()` reached
+yet) a behavior runs exactly one instruction per tick (`state.limit == 1`, the dispatcher's own
+`SetStateSleep(1)` after every step); `unlock()` raises the per-activation budget to 10000,
+checked fresh after every instruction so it can take effect within the same tick it runs in;
+`lock()` resets it to 1; an explicit `wait(t)` stops the current tick immediately and resumes
+`t` ticks later (see the sleep-semantics note in the wait test below). `run()` still just runs
+to completion ignoring all of this.
 
 `tests/data/adversarial_text_stress.dcs` -- a real, deliberately adversarial fixture the user
 hand-crafted to break the BSF text pipeline (see test_bsf_text_roundtrip.py/test_bsf_ir_
@@ -42,20 +43,21 @@ def test_fibonacci_fixture_via_run_ticks(engine):
 
 
 def test_literal_mem_slots_dont_grow_unboundedly(engine):
-    """Regression test for a real inefficiency found reviewing this same fixture: `Memory.literal`
-    used to allocate a brand-new `state.mem[]` slot on every single translation of a literal-
-    valued arg, even when re-translating the exact same literal on every pass of an infinite loop
-    (this fixture's `Index=v_color_green` arg, re-read fresh on every `_step()` call). Caching by
-    content in `lua_runtime.py`'s `Memory.literal` caps this."""
+    """`state.mem` must stay at its compiled size across loop iterations. Under the old
+    Python-simulated tier this guarded `Memory.literal`'s content cache (per-translation slot
+    leaks); under the real machinery, constants/locals are interned exactly once by the real
+    compiler (`GetFactionBehaviorAsm`'s mem image) and only `call` ever appends (popped again on
+    return), so a call-free infinite loop must leave mem's size untouched no matter how long it
+    runs."""
     raw = (DATA_DIR / "adversarial_text_stress.dcs").read_text().strip()
     _, table = engine.decode_dcs(raw)
     interp = Interpreter(engine, table)
 
     interp.run_ticks(6 * 5)
-    slots_after_5 = interp.mem._next_slot
+    slots_after_5 = len(interp.state.mem)
     interp.run_ticks(6 * 15)
-    assert interp.mem._next_slot == slots_after_5  # unchanged after 15 more iterations
-    assert interp.read_param(1).num == 17711  # 20th term -- caching didn't change the result
+    assert len(interp.state.mem) == slots_after_5  # unchanged after 15 more iterations
+    assert interp.read_param(1).num == 17711  # 20th term -- the loop itself still computes
 
 
 def test_memory_array_push_is_an_independent_copy(engine):
@@ -94,16 +96,20 @@ def test_wait_pauses_the_tick_it_runs_on_and_counts_down(engine):
     )
     interp = Interpreter(engine, compile_behavior(engine, behavior))
 
+    # Sleep semantics, pinned by the real dispatcher's own source (data/components.lua): a locked
+    # behavior re-arms with SetStateSleep(1) after every instruction, and locked mode is one
+    # instruction per tick -- so sleep N means "resume N ticks later", and wait(1) is exactly the
+    # locked default's implicit wait. (The old Python-simulated tier read wait(t) as "skip t full
+    # ticks", i.e. resume at T+t+1 -- off by one; wait(1) would have been SLOWER than no wait at
+    # all, contradicting the dispatcher code.)
     interp.run_ticks(1)
     assert interp.read_param(1).num == 1  # tick 1: n1
     interp.run_ticks(1)
     assert interp.read_param(1).num == 1  # tick 2: n2 (wait 2) -- sleep = 2, stops immediately
     interp.run_ticks(1)
-    assert interp.read_param(1).num == 1  # tick 3: sleeping (1 left)
+    assert interp.read_param(1).num == 1  # tick 3: sleeping (sleep 2 -> 1)
     interp.run_ticks(1)
-    assert interp.read_param(1).num == 1  # tick 4: sleeping (0 left)
-    interp.run_ticks(1)
-    assert interp.read_param(1).num == 2  # tick 5: n3 finally runs
+    assert interp.read_param(1).num == 2  # tick 4: sleep hits 0 -- the resume tick; n3 runs
 
 
 def test_default_locked_one_instruction_per_tick_unlock_takes_effect_same_tick(engine):

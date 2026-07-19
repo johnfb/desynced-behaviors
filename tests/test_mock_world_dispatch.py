@@ -274,8 +274,10 @@ def test_range_probe_fixture_against_mock_model(engine, offset, min_range, dista
     owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=15)
     comp = w.add_component(owner, "c_behavior")
     w.spawn("f_bot_1m_b", "player", offset[0], offset[1])  # the probe target (a Hauler)
-    interp = Interpreter(engine, prog, comp=comp)
-    interp.state.mem[1] = engine.new_value(0, id_="f_bot_1m_b")  # Probe param = Hauler frame id
+    # Probe param = Hauler frame id (params are component registers under the real dispatcher)
+    interp = Interpreter(
+        engine, prog, params={1: engine.new_value(0, id_="f_bot_1m_b")}, comp=comp
+    )
     interp.run()
     assert owner.registers[4].num == min_range  # @signal (wire -4)
     assert owner.registers[2].num == distance  # @store (wire -2)

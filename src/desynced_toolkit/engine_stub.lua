@@ -177,14 +177,46 @@ Value.__mul = function(a, b) return combine(a, b, function(x, y) return x * y en
 Value.__idiv = function(a, b) return combine(a, b, function(x, y) return x // y end, function(x, y) return x // y end) end
 Value.__mod = function(a, b) return combine(a, b, function(x, y) return x % y end, function(x, y) return x % y end) end
 
-function InstError(comp, state, err)
-	error("InstError: " .. tostring(err))
-end
-
 Tool = {}
 function Tool.NewRegisterObject(v)
 	if v == nil then return NewValue(0) end
 	return coerce(v)
+end
+
+-- Engine-native content hash, used by the library-import path (`LibraryHashItem`/
+-- `LibraryPerformImport`, data/library.lua) purely as a table key for same-content dedup -- the
+-- real hash's numeric value is never compared against anything external, so any deterministic,
+-- content-equal => key-equal mapping works. This stub returns a canonical string serialization
+-- (sorted keys, type-tagged scalars) AS the hash; strings are perfectly good table keys, and the
+-- serialization is trivially collision-free. Behavior/blueprint tables are pure data (no
+-- functions/userdata/cycles), which is all this ever hashes.
+local function hash_serialize(v, out)
+	if type(v) ~= "table" then
+		out[#out + 1] = type(v):sub(1, 1) .. tostring(v)
+		return
+	end
+	out[#out + 1] = "{"
+	local keys = {}
+	for k in pairs(v) do keys[#keys + 1] = k end
+	table.sort(keys, function(a, b)
+		local ta, tb = type(a), type(b)
+		if ta ~= tb then return ta < tb end
+		if ta == "number" then return a < b end
+		return tostring(a) < tostring(b)
+	end)
+	for _, k in ipairs(keys) do
+		hash_serialize(k, out)
+		out[#out + 1] = "="
+		hash_serialize(v[k], out)
+		out[#out + 1] = ";"
+	end
+	out[#out + 1] = "}"
+end
+
+function Tool.Hash(v)
+	local out = {}
+	hash_serialize(v, out)
+	return table.concat(out)
 end
 
 -- Engine-native deep copy. Used by instruction funcs to snapshot values (for_signal_match's
@@ -204,35 +236,6 @@ function Tool.Copy(v)
 	local c = {}
 	for k, val in pairs(v) do c[k] = Tool.Copy(val) end
 	return setmetatable(c, mt)
-end
-
--- A block-loop instruction func (for_entities_in_range/for_signal_match) builds an iterator table
--- and hands it to `BeginBlock`, which in the real engine (`InstBeginBlock`, defined in
--- instructions.lua) drives the loop via a `state.blocks` stack + the compiled asm. The Python
--- Interpreter simulates the block stack itself (same tier as its for_number driver) and only needs
--- the iterator table back. `BeginBlock` is a file-local alias for `InstBeginBlock` inside
--- instructions.lua (like Get/Set), so it can't be shadowed by a global; instead `PatchBeginBlock`
--- (called once after instructions.lua loads) repoints that shared upvalue cell to `MockBeginBlock`,
--- which just returns `it`. Every block-loop func shares the one upvalue cell, so a single patch
--- covers them all. Nothing in the current interpreter reaches BeginBlock any other way, so this is
--- inert for for_number/sequence. Reusing the real InstBeginBlock/block stack is separate deferred
--- work (see todo.md).
-function MockBeginBlock(comp, state, it)
-	return it
-end
-
-function PatchBeginBlock(fn)
-	if not (debug and debug.getupvalue) then return false end
-	local i = 1
-	while true do
-		local name = debug.getupvalue(fn, i)
-		if name == nil then return false end
-		if name == "BeginBlock" then
-			debug.setupvalue(fn, i, MockBeginBlock)
-			return true
-		end
-		i = i + 1
-	end
 end
 
 -- Frame registers (Goto=1, Store=2, Visual=3, Signal=4 -- see the FRAMEREG_* block below; InstGet
@@ -324,6 +327,15 @@ function Map.GetSettings()
 	return { block_unlocked_behaviors = false, blight_threshold = 0.1 }
 end
 
+-- The save object -- the library-import path stores its global behavior-id counter on it
+-- (`Map.GetSave().library_id_count`, data/library.lua's LibraryPerformImport). One table per
+-- engine: ids stay unique across every faction/world sharing the runtime, exactly like one
+-- running save.
+Map.save = {}
+function Map.GetSave()
+	return Map.save
+end
+
 -- Deferred-callback queue (`Map.Defer` schedules engine work for end-of-tick -- SetBehavior's
 -- event-listener spawn rides it). This bare queue is never drained automatically; the mock world
 -- (world.lua, loaded on top) REPLACES Defer with its own World-owned queue that MockWorld.step
@@ -331,16 +343,6 @@ end
 Map.deferred = {}
 function Map.Defer(fn)
 	Map.deferred[#Map.deferred + 1] = fn
-end
-
--- `jump`'s func scans `GetCachedBehaviorAsm(state.revid)` for a matching `label` instruction --
--- the real compiled-asm array shape isn't reused here (that lives in `GetFactionBehaviorAsm`,
--- data/library.lua, not yet integrated); this harness just needs `asm[i][1] == "label"` and
--- `asm[i][3]` (the label's own arg) to work, so `CurrentAsm` is built by the Python-side driver
--- to satisfy exactly that shape: `{op_name, nil, arg0, arg1, ...}` per instruction, 1-based.
-CurrentAsm = nil
-function GetCachedBehaviorAsm(revid)
-	return CurrentAsm
 end
 
 -- The shared global table every data/*.lua file populates (data.instructions, data.components,
@@ -420,8 +422,9 @@ EntityAction  = EntityAction or {}
 UIMsg         = UIMsg or {}
 Delay         = Delay or {}
 
--- Read at load time into a `local` alias inside components.lua (`local GetFactionBehaviorAsm =
--- GetFactionBehaviorAsm`); only ever CALLED from component func bodies (behavior execution /
--- combat), never at load. The real one lives in data/library.lua (not loaded here). A no-op is
--- enough for load and for the sensing/movement phases; a faithful version is Phase 4 (combat) work.
-function GetFactionBehaviorAsm(...) end
+-- NOTE: `GetFactionBehaviorAsm`/`GetCachedBehaviorAsm`/`GetFactionBehaviorAsmById` are NOT
+-- stubbed here (an earlier version had a no-op/CurrentAsm scheme): the REAL data/library.lua is
+-- loaded before components.lua and instructions.lua (`lua_runtime.py`), because both capture
+-- load-time local aliases of these globals (components.lua's dispatcher locals, instructions.lua's
+-- "Local references for shorter names" block) -- a stub loaded first would be permanently baked
+-- into those closures.

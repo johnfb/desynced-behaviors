@@ -1,65 +1,48 @@
 """Runs a behavior given as a genuine Lua table (the shape `dcs_wire.decode_dcs()` hands back,
-and `bsf.compile_behavior` produces directly) by delegating each leaf instruction's execution
-to the real `data/instructions.lua` via `LupaEngine`, while keeping the branch/block control-flow
-driver in Python (the same model validated against real in-game logs in `sim_common.py` earlier
-in this project -- `sequence`/`for_number`'s block-stack semantics are simulated here rather than
-routed through the real `InstBeginBlock`, which would require also reusing the real per-tick
-dispatcher in data/library.lua; a later phase, not done yet). `jump`/`label` and every arithmetic/
-branch/coordinate instruction run as the genuine, unmodified game Lua.
+and `bsf.compile_behavior` produces directly) through the REAL game behavior machinery -- see
+`behavior_runtime.lua` for the full inventory. In short: the real `GetFactionBehaviorAsm`
+(data/library.lua) compiles it, the real `UploadBehavior`/`SetBehavior` install and start it on a
+component, and a port of the real `c_behavior:on_update` dispatch loop executes it, so block
+stacks (`InstBeginBlock`), `call`/return (`state.returns` + genuine by-reference parameters via
+`state.stk`), `jump` label scans, memory interning, and every branch decision are the game's own
+code. This class is only *activation scheduling*: deciding on which tick the component wakes,
+exactly the part that is engine-native C++ in the real game.
 
-Indexing throughout is genuine 1-based Lua (`instr[1]`, `instr[2]`, ...), matching exactly what
-the game itself stores and what `Tool.GetClipboard()` would hand a real Lua caller -- there is no
-Python-dict 0-based rendering step anywhere in this module (that convention only ever existed as
-`dsc_codec.py`'s -- now retired -- own choice for JSON/Python display, per `dcs_wire.py`'s module
-docstring).
+An earlier version of this module simulated the block stack, `sequence`/`for_number` driving, and
+per-instruction argument translation in Python (with `call` unsupported); that tier is gone --
+git history only.
+
+Parameters are component registers (the real model: `SetBehavior` sets `state.stk = #parameters`,
+so the real `GetStack` routes addresses 1..N to `comp:GetRegister(n)`). `params=` writes them
+before the first tick; `read_param` reads them back.
+
+Timing model (all from the real dispatcher's own source, data/components.lua): a locked behavior
+(the default) runs one instruction per activation and re-arms with `SetStateSleep(1)` -- which
+pins the sleep semantics as "resume N ticks later": `wait(1)` is exactly the locked default, so
+`wait(N)`/`SetStateSleep(N)` at tick T resumes at tick T+N. (An earlier `run_ticks` treated
+sleep N as "skip N full ticks", i.e. resume at T+N+1 -- off by one, corrected when the real
+dispatcher was adopted.)
 
 One DELIBERATE deviation from real engine semantics (documented so nobody "fixes" tests into
 infinite loops, or mistakes this for the game's behavior): a dead end that pops through the entire
-block stack ends the run (`_finished = True`). The real engine instead falls back to Program Start
-without yielding and keeps going forever -- `exit` is the only genuine halt (behavior_format.md
-"Stopping a behavior"; `reference_stop_deadend_semantics`). A test harness needs termination, so
-top-level fall-off means "one full pass completed" here; drive `run_ticks` in a loop with a fresh
-counter reset if a test ever genuinely needs the restart-forever shape.
+block and call stacks ends the run (`BehaviorRuntime.Activate` returns "restart" instead of
+executing the next pass). The real engine instead falls back to Program Start without yielding
+and keeps going forever -- `exit` is the only genuine halt (behavior_format.md "Stopping a
+behavior"; `reference_stop_deadend_semantics`). A test harness needs termination, so top-level
+fall-off means "one full pass completed" here; note the real restart bookkeeping (clearing
+non-keepvars locals) HAS already run when this fires, because it is the real `c_behavior_on_end`
+that decided.
 """
 
 from __future__ import annotations
 
 import lupa.lua54 as lupa
 
-from .lua_runtime import LupaEngine, Memory
+from .lua_runtime import LupaEngine
 
 
 def _is_table(v) -> bool:
     return lupa.lua_type(v) == "table"
-
-
-def _field(instr, key, default=None):
-    v = instr[key]
-    return default if v is None else v
-
-
-def _resolve_next(instr, key, default):
-    raw = instr[key] if key is not None else instr["next"]
-    if raw is None:
-        return default
-    if raw is False:
-        return None
-    return raw - 1
-
-
-def _seq_targets(instr, i: int):
-    targets = []
-    for key in (1, 2, 3, 4):
-        v = instr[key]
-        if v is False:
-            continue
-        t = _resolve_next(instr, key, i + 1)
-        targets.append(lambda t=t: t)
-    v5 = instr[5]
-    if v5 is not False:
-        t = _resolve_next(instr, 5, i + 1)
-        targets.append(lambda t=t: t)
-    return targets
 
 
 class Interpreter:
@@ -71,529 +54,99 @@ class Interpreter:
         comp=None,
     ) -> None:
         self.engine = engine
-        self.prog = prog
-        self.n = 0
-        while prog[self.n + 1] is not None:
-            self.n += 1
-        self.state = engine.new_state()
-        # `comp` defaults to the bare engine stub (fake Owner). Pass a MockWorld component
-        # (comp.owner is a real mock entity, comp.faction set) to run sensing/movement ops that
-        # read the world -- get_location/get_closest_entity/read_signal/domove/... .
+        runtime = engine.lua.globals().BehaviorRuntime
+        if runtime is None:
+            raise RuntimeError(
+                "Interpreter needs the Data registries loaded "
+                "(LupaEngine(..., load_data_registries=True), the default)"
+            )
+        self._activate = runtime.Activate
+        # `comp` defaults to the bare engine stub (fake owner/faction). Pass a MockWorld
+        # component (comp.owner a real mock entity) to run sensing/movement ops against a world.
         self.comp = comp if comp is not None else engine.new_comp()
-        self.mem = Memory(engine, self.state)
-        # reserve mem slots 1..N for declared parameters (matching the source format's own
-        # convention of plain positive ints for parameter references) -- every slot needs a
-        # real Value object up front (even output params with no initial value), since InstSet
-        # mutates the existing slot in place via `:Init()` rather than replacing it
-        parameters = prog["parameters"]
-        n_params = 0
-        if parameters is not None:
-            while parameters[n_params + 1] is not None:
-                n_params += 1
-        for idx in range(1, n_params + 1):
-            self.state.mem[idx] = self.engine.new_value(0)
-        self.mem._next_slot = n_params + 1
+        self.main_id = runtime.Install(self.comp, prog)
+        if self.main_id is None:
+            raise RuntimeError("behavior failed to install (not a valid 'C' program table?)")
+        self.state = self.comp.extra_data
         for idx, value in (params or {}).items():
-            self.state.mem[idx] = self._value_for(value)
-        self._build_current_asm()
-        self._i = 0
-        self._blocks: list[dict] = []
+            self.comp.SetRegister(self.comp, idx, self._value_for(value))
         self._finished = False
-        self._arg_dir_cache: dict[str, list[str]] = {}
 
     def _value_for(self, py_value):
+        if _is_table(py_value):
+            return py_value  # already a Lua value (a register object / Value table)
         if isinstance(py_value, tuple):
             return self.engine.new_value(0, coord=py_value)
         return self.engine.new_value(py_value)
 
-    def _translate_arg(self, v):
-        """Lua arg value -> Lua-callable arg (a mem slot int, or a negative frame-register int)."""
-        if _is_table(v):
-            num = _field(v, "num", 0)
-            coord_t = v["coord"]
-            coord = (coord_t["x"], coord_t["y"]) if coord_t is not None else None
-            id_ = v["id"]
-            return self.mem.literal(num=num, coord=coord, id_=id_)
-        if isinstance(v, str):
-            return self.mem.var(v)
-        if isinstance(v, bool):
-            raise ValueError(f"unexpected bool value arg: {v}")
-        if isinstance(v, int):
-            return v  # already a mem slot (param) or frame register
-        if v is None:
-            return self.mem.literal(num=0)
-        raise ValueError(f"unrecognized arg: {v!r}")
+    # -- wake conditions ------------------------------------------------------------------------
 
-    def _instr_args(self, instr):
-        """All present positional (integer-keyed) values on an instruction, in order --
-        includes exec-target ints/False for instructions like check_number/sequence, which is
-        fine: only `jump`'s asm-scan (matching by value equality) ever reads these back, and it
-        only ever matches against a `label` instruction's own single arg."""
-        args = []
-        k = 1
-        while True:
-            v = instr[k]
-            if v is None and instr[k + 1] is None and k > 1:
-                # allow a single gap (mirrors dcs_wire's own array/hash boundary tolerance)
-                break
-            if v is None and k == 1:
-                break
-            args.append(v)
-            k += 1
-        return args
+    def _waiting_on_move(self) -> bool:
+        """True while a sync move issued by this comp is still resolving (the mock world's
+        RequestStateMove marks the comp; its movement step clears the mark and re-arms sleep on
+        arrival). Always False on the bare stub comp -- it has no movement."""
+        return bool(self.comp["waiting_move"])
 
-    def _build_current_asm(self) -> None:
-        """`jump`'s func scans GetCachedBehaviorAsm(state.revid) -- build the matching array
-        (1-based, `{op, nil, arg0, arg1, ...}` per instruction) using the SAME mem-slot
-        translation that instruction execution itself uses, so Get()-equality in `jump` lines up
-        with the slots instructions actually read/write."""
-        t = self.engine.lua.table
-        rows = []
-        for i in range(self.n):
-            instr = self.prog[i + 1]
-            raw_args = self._instr_args(instr)
-            args = [self._translate_arg(a) for a in raw_args if not isinstance(a, bool)]
-            op = instr["op"]
-            rows.append(t("label" if op == "label" else op, None, *args))
-        self.engine.lua.globals().CurrentAsm = t(*rows)
-
-    def _enter_for_number(self, instr, i: int, blocks: list[dict]):
-        """`for_number`'s block-stack driving is simulated in Python (same tier as `sequence`,
-        per this module's docstring -- reusing the real `InstBeginBlock`/per-tick dispatcher is
-        deferred, see CLAUDE.md), but the per-iteration advance/termination decision -- including
-        the documented `Step` auto-direction quirk (behavior_format.md) and `REG_INFINITE`
-        wraparound -- is genuinely delegated to the real `data.instructions.for_number.next`/
-        `.last`, the same way `check_number`/`jump` delegate their own branch decisions above.
-        Returns a 0-based instruction index to jump to, or None (caller should call dead_end())."""
-        from_a = self._translate_arg(instr[1])
-        to_a = self._translate_arg(instr[2])
-        step_raw = instr[3]
-        step_a = self._translate_arg(step_raw) if step_raw is not None else False
-        val_raw = instr[4]
-        val_a = self.mem.var(val_raw) if isinstance(val_raw, str) else val_raw
-        done_0based = _resolve_next(instr, 5, i + 1)
-        exec_done_raw = False if done_0based is None else done_0based + 1
-
-        instr_def = self.engine.data.instructions["for_number"]
-        reg_infinite = self.engine.lua.globals().REG_INFINITE
-
-        def call_last():
-            instr_def.last(self.comp, self.state, it, from_a, to_a, step_a, val_a, exec_done_raw)
-            return None if self.state.counter is False else int(self.state.counter) - 1
-
-        nfrom = self.engine.get_num(self.comp, self.state, from_a)
-        nto = self.engine.get_num(self.comp, self.state, to_a)
-        nstep = self.engine.get_num(self.comp, self.state, step_a) if step_a is not False else None
-        if nfrom == reg_infinite or nstep == 0:
-            it = None  # never touched -- func's own early-exit skips BeginBlock entirely
-            self.state.counter = exec_done_raw
-            return None if self.state.counter is False else int(self.state.counter) - 1
-
-        # Port of `for_number.func`'s own initial-offset formula (behavior_format.md's "Step
-        # auto-direction"): `.next` always advances by step before checking/writing, so the seed
-        # value is one step before the first real iteration.
-        initial = nfrom + (
-            -nstep if nstep is not None else (-1 if (nfrom <= nto or nto == reg_infinite) else 1)
-        )
-        it = self.engine.lua.table(initial)
-        body_start = i + 1
-
-        def advance():
-            finished = instr_def.next(
-                self.comp, self.state, it, from_a, to_a, step_a, val_a, exec_done_raw
-            )
-            if not finished:
-                return False, body_start
-            return True, call_last()
-
-        finished, target = advance()
-        if finished:
-            return target
-        blocks.append({"kind": "loop", "advance": advance, "break_": call_last})
-        return target  # == body_start
-
-    def _arg_dirs(self, op: str) -> list[str]:
-        """Direction ('in'/'out'/'exec') of each declared arg for `op`, from the real
-        `data.instructions[op].args`, in declaration order -- the func's params after `cause` map
-        1:1 to these. Cached (static per engine)."""
-        cached = self._arg_dir_cache.get(op)
-        if cached is not None:
-            return cached
-        d = self.engine.data.instructions[op]
-        dirs: list[str] = []
-        meta = d.args if d is not None else None
-        if meta is not None:
-            k = 1
-            while meta[k] is not None:
-                dirs.append(meta[k][1])
-                k += 1
-        self._arg_dir_cache[op] = dirs
-        return dirs
-
-    def _hidden_args(self, op: str, instr) -> list:
-        """Leading hidden arg(s) some funcs take before their declared args -- produced by the real
-        `make_asm(inst)` (the `c` combo field: domove's Sync/Async, bitwise_op's operation,
-        for_signal_match's match mode). Not in `args` metadata, so the generic dispatcher must
-        prepend them. Reuses the real `make_asm` so the default (`inst.c or N`) is the game's own."""
-        d = self.engine.data.instructions[op]
-        if d is None or d.make_asm is None:
-            return []
-        r = d.make_asm(instr)
-        return list(r) if isinstance(r, tuple) else [r]
-
-    def _marshal_positional(self, instr, i: int, dirs: list[str]) -> list:
-        """Marshal an instruction's positional args to Lua-callable form per their declared
-        direction: 'in'/'out' value args -> a mem slot (or nil for absent / bare-bool, which the
-        compiler treats as absent); 'exec' args -> a raw 1-based branch target (or False for a
-        genuine dead end), with an omitted pin defaulting to the next instruction -- the same
-        3-way resolution `check_number`'s hand-written arm uses."""
-        out = []
-        for k, direction in enumerate(dirs, start=1):
-            if direction == "exec":
-                tgt = _resolve_next(instr, k, i + 1)
-                out.append(False if tgt is None else tgt + 1)
-            else:
-                raw = instr[k]
-                if raw is None or isinstance(raw, bool):
-                    out.append(None)
-                else:
-                    out.append(self._translate_arg(raw))
-        return out
-
-    def _is_block_loop(self, op: str) -> bool:
-        """A block-producing loop op (its definition carries `.next`/`.last` iteration funcs, like
-        `for_number`): `for_entities_in_range`/`for_signal_match`. `for_number` itself is matched by
-        its own earlier arm, so this only ever catches the sensing loops."""
-        d = self.engine.data.instructions[op]
-        return d is not None and d.next is not None and d.last is not None
-
-    def _enter_block_loop(self, op: str, instr, i: int):
-        """Drive a sensing loop (`for_entities_in_range`/`for_signal_match`) the same way as
-        `_enter_for_number`, but let the real `func` build the iterator table (it populates it via
-        real `Map.FindClosestEntity`/`GetEntitiesWithRegister` + `FilterEntity` -- real sensing);
-        `BeginBlock` (engine_stub) just hands that table back. Per-iteration `.next` and completion
-        `.last` are the genuine game funcs. Returns a 0-based target, or None for a dead end."""
-        d = self.engine.data.instructions[op]
-        dirs = self._arg_dirs(op)
-        args = self._hidden_args(op, instr) + self._marshal_positional(instr, i, dirs)
-        self.state.lastcounter = i + 1
-        self.state.counter = None
-        it = d.func(self.comp, self.state, None, *args)
-        # Body entry = the loop's own top-level `next` pin (normally the physically-next node via
-        # an omitted/`>NEXT` pin, hence the i+1 default; honored here in case it's retargeted).
-        bs = _resolve_next(instr, None, i + 1)
-        body_start = i + 1 if bs is None else bs
-
-        def resolve_counter():
-            return None if self.state.counter is False else int(self.state.counter) - 1
-
-        def advance():
-            self.state.counter = None
-            finished = d.next(self.comp, self.state, it, *args)
-            if not finished:
-                return False, body_start
-            d.last(self.comp, self.state, it, *args)
-            return True, resolve_counter()
-
-        def break_():
-            self.state.counter = None
-            d.last(self.comp, self.state, it, *args)
-            return resolve_counter()
-
-        finished, target = advance()
-        if finished:
-            return target
-        self._blocks.append({"kind": "loop", "advance": advance, "break_": break_})
-        return target
-
-    def _dead_end(self):
-        blocks = self._blocks
-        while blocks:
-            block = blocks[-1]
-            if block["kind"] == "loop":
-                finished, target = block["advance"]()
-                if not finished:
-                    return target
-                blocks.pop()
-                if target is not None:
-                    return target
-                continue
-            if block["thunks"]:
-                return block["thunks"].pop(0)()
-            blocks.pop()
-            if block["done"] is not None:
-                return block["done"]
-        return None
-
-    def _step(self) -> str:
-        """Executes exactly one real instruction (matching one `steps += 1` unit from this
-        method's pre-refactor single-shot form) and returns one of `"finished"` / `"waited"` /
-        `"continue"`. Resolving a dead end (an out-of-range `i`, chasing block pops via
-        `_dead_end`) is free -- it never consumes a step itself, only whatever real instruction
-        it eventually lands on does -- matching [[reference_sequence_unconnected_stages_free]].
-        Position (`self._i`) and the block stack (`self._blocks`) persist across calls so a
-        caller (`run`/`run_ticks`) can resume execution rather than restart it."""
-        if self._finished:
-            return "finished"
-        i = self._i
-        while not (0 <= i < self.n):
-            # Falling off the true end of the instruction array without ever hitting an
-            # explicit `next=false` still has to pop any enclosing block (a loop body whose
-            # last instruction is also the program's last instruction, e.g.) -- matching
-            # behavior_format.md's "next: false means... pops back to the enclosing block",
-            # which applies to any dead end, not just an explicit `false`.
-            nxt = self._dead_end()
-            if nxt is None:
-                self._finished = True
-                return "finished"
-            i = nxt
-        instr = self.prog[i + 1]
-        op = instr["op"]
-        nexti = i + 1
-        slept = False
-
-        if op == "unlock":
-            self.engine.call("unlock", self.comp, self.state)
-        elif op == "lock":
-            self.engine.call("lock", self.comp, self.state)
-        elif op in ("label", "nop"):
-            pass
-        elif op == "wait":
-            time_arg = self._translate_arg(instr[1])
-            slept = bool(self.engine.call("wait", self.comp, self.state, time_arg))
-        elif op == "sequence":
-            self._blocks.append({"kind": "sequence", "thunks": _seq_targets(instr, i), "done": None})
-            nxt = self._dead_end()
-            if nxt is None:
-                self._finished = True
-                return "finished"
-            self._i = nxt
-            return "continue"
-        elif op == "exit":
+    def _dispatch(self, status: str) -> bool:
+        """Handle one Activate() result; returns True when the run is over."""
+        if status == "restart":
             self._finished = True
-            return "finished"
-        elif op == "check_number":
-            value_arg = self._translate_arg(instr[3])
-            compare_arg = self._translate_arg(instr[4])
-            # Genuinely delegate the branch decision to the real func (matching `jump`,
-            # below) rather than re-deriving it in Python: resolve If Larger/If Smaller to
-            # raw 1-based asm targets (or `False`) ourselves, pass those straight through as
-            # the func's own `if_larger`/`if_smaller` args, and let its actual logic --
-            # including the real `REG_INFINITE` handling -- decide `state.counter`.
-            larger_target = _resolve_next(instr, 1, i + 1)
-            smaller_target = _resolve_next(instr, 2, i + 1)
-            larger_raw = False if larger_target is None else larger_target + 1
-            smaller_raw = False if smaller_target is None else smaller_target + 1
-            self.state.counter = None
-            self.engine.call(
-                op,
-                self.comp,
-                self.state,
-                larger_raw,
-                smaller_raw,
-                value_arg,
-                compare_arg,
+            return True
+        if status == "limit":
+            raise RuntimeError(
+                "unlocked behavior exceeded the per-tick instruction limit (real InstError ran)"
             )
-            if self.state.counter is False:
-                nxt = self._dead_end()
-                if nxt is None:
-                    self._finished = True
-                    return "finished"
-                self._i = nxt
-                return "continue"
-            if self.state.counter is not None:
-                self._i = int(self.state.counter) - 1
-                return "continue"
-            # neither branch fired (Value == Compare, per the real func's own comparison) --
-            # it leaves state.counter untouched for this case, so resolve the instruction's
-            # own fallthrough/`next` ("Equal") ourselves, same as `jump`'s fallback below
-            nexti = _resolve_next(instr, None, i + 1)
-            if nexti is None:
-                nxt = self._dead_end()
-                if nxt is None:
-                    self._finished = True
-                    return "finished"
-                self._i = nxt
-                return "continue"
-            self._i = nexti
-            return "continue"
-        elif op == "jump":
-            label_arg = self._translate_arg(instr[1])
-            self.state.lastcounter = i + 1
-            self.state.counter = None
-            self.engine.call(op, self.comp, self.state, label_arg)
-            if self.state.counter is not None:
-                self._i = int(self.state.counter) - 1
-                return "continue"
-            nexti = _resolve_next(instr, None, i + 1)
-        elif op == "for_number":
-            target = self._enter_for_number(instr, i, self._blocks)
-            if target is None:
-                nxt = self._dead_end()
-                if nxt is None:
-                    self._finished = True
-                    return "finished"
-                self._i = nxt
-                return "continue"
-            self._i = target
-            return "continue"
-        elif self._is_block_loop(op):
-            target = self._enter_block_loop(op, instr, i)
-            if target is None:
-                nxt = self._dead_end()
-                if nxt is None:
-                    self._finished = True
-                    return "finished"
-                self._i = nxt
-                return "continue"
-            self._i = target
-            return "continue"
-        elif op == "last":
-            if not self._blocks or self._blocks[-1]["kind"] != "loop":
-                raise RuntimeError("last (Break) requires an enclosing loop")
-            block = self._blocks.pop()
-            target = block["break_"]()
-            if target is None:
-                nxt = self._dead_end()
-                if nxt is None:
-                    self._finished = True
-                    return "finished"
-                self._i = nxt
-                return "continue"
-            self._i = target
-            return "continue"
-        elif op in ("add", "sub", "mul", "div", "modulo"):
-            a = self._translate_arg(instr[1])
-            b = self._translate_arg(instr[2])
-            res_slot = (
-                self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
-            )
-            self.engine.call(op, self.comp, self.state, a, b, res_slot)
-        elif op == "set_reg":
-            a = self._translate_arg(instr[1])
-            target_slot = (
-                self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
-            )
-            self.engine.call("set_reg", self.comp, self.state, a, target_slot)
-        elif op == "memory_insert":
-            idx_arg = self._translate_arg(instr[1])
-            val_arg = self._translate_arg(instr[2])
-            self.engine.call(op, self.comp, self.state, idx_arg, val_arg)
-        elif op == "memory_remove":
-            idx_arg = self._translate_arg(instr[1])
-            out_slot = (
-                self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
-            )
-            self.engine.call(op, self.comp, self.state, idx_arg, out_slot)
-        elif op == "combine_coordinate":
-            a = self._translate_arg(instr[1])
-            b = self._translate_arg(instr[2])
-            res_slot = (
-                self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
-            )
-            self.engine.call(op, self.comp, self.state, a, b, res_slot)
-        elif op == "separate_coordinate":
-            a = self._translate_arg(instr[1])
-            x_slot = (
-                self.mem.var(instr[2]) if isinstance(instr[2], str) else instr[2]
-            )
-            y_slot = (
-                self.mem.var(instr[3]) if isinstance(instr[3], str) else instr[3]
-            )
-            self.engine.call(op, self.comp, self.state, a, x_slot, y_slot)
-        elif op == "debug_print":
-            # No real log to write to here -- just surface it on stdout so a script driving
-            # the Interpreter directly (as opposed to a pytest assertion reading `mem` back)
-            # can observe it, matching what the in-game log would show.
-            val = self.engine.get_value(self.comp, self.state, self._translate_arg(instr[1]))
-            print(f"[debug_print] num={val.num} coord={val.coord} id={val.id}")
-        else:
-            # Generic metadata-driven dispatch for every other real instruction: marshal the
-            # declared args (in/out/exec) + any hidden make_asm arg, call the genuine func, and
-            # resolve its branch decision uniformly -- the same shape as `check_number`, generalized.
-            # Covers the world/sensing ops (get_location/get_distance/get_health/get_closest_entity/
-            # read_signal/set_comp_reg/get_comp_reg/value_type/match/check_bit/bitwise_op/domove/...).
-            d = self.engine.data.instructions[op]
-            if d is None or d.func is None:
-                raise RuntimeError(f"unhandled op {op}")
-            dirs = self._arg_dirs(op)
-            args = self._hidden_args(op, instr) + self._marshal_positional(instr, i, dirs)
-            # `state.lastcounter` must be this instruction's 1-based position before the call --
-            # domove's sync-move "repeat me next tick" sets `state.counter = state.lastcounter`.
-            self.state.lastcounter = i + 1
-            self.state.counter = None
-            ret = self.engine.call(op, self.comp, self.state, *args)
-            slept = bool(ret)  # a func returning true yielded the tick (domove sync-move, etc.)
-            counter = self.state.counter
-            if counter is False:
-                nxt = self._dead_end()
-                if nxt is None:
-                    self._finished = True
-                    return "finished"
-                self._i = nxt
-                return "continue"
-            if counter is not None:
-                self._i = int(counter) - 1
-                return "waited" if slept else "continue"
-            # counter untouched -> no branch decision; fall through to the shared next/fallthrough
-            # tail below (nexti defaults to i+1, or the instruction's own `next`).
+        if status == "no_asm":
+            raise RuntimeError("behavior disappeared from the faction library mid-run")
+        if status == "waiting":
+            # waiting on component state: an armed sleep or a pending sync move will wake it;
+            # with neither, nothing ever will (`exit`'s forever-wait) -- the run is over
+            if (self.comp.sleep or 0) <= 0 and not self._waiting_on_move():
+                self._finished = True
+                return True
+        return False
 
-        if instr["next"] is not None:
-            nexti2 = _resolve_next(instr, None, None)
-            if nexti2 is None:
-                nxt = self._dead_end()
-                if nxt is None:
-                    self._finished = True
-                    return "finished"
-                self._i = nxt
-                return "continue"
-            nexti = nexti2
-        self._i = nexti
-        return "waited" if slept else "continue"
+    # -- driving --------------------------------------------------------------------------------
 
     def run(self, max_steps: int = 20000) -> None:
-        """Runs to completion (or `exit`), ignoring tick/lock-state timing entirely -- a `wait`
-        along the way doesn't pause this, it's just one more step. For tick-accurate stepping
-        (respecting `state.limit`/lock/unlock and honoring `wait` as a real per-tick pause), use
-        `run_ticks` instead."""
+        """Runs to completion (or `exit`), ignoring tick/lock-state timing entirely -- sleeps are
+        discarded and every activation happens back-to-back. A behavior genuinely blocked on
+        world state (a sync move with no `MockWorld.step` driving movement) will spin its
+        repeat-instruction until `max_steps`. For tick-accurate stepping use `run_ticks`."""
         steps = 0
-        while True:
-            result = self._step()
-            if result == "finished":
+        while not self._finished and self.comp.is_active:
+            self.comp.sleep = 0
+            if self._dispatch(self._activate(self.comp, None)):
                 return
             steps += 1
             if steps > max_steps:
                 raise RuntimeError("runaway")
 
     def run_ticks(self, n: int, max_steps: int = 100000) -> None:
-        """Simulates `n` real game ticks, honoring the actual lock/unlock/wait model (see
-        data.instructions.unlock/.lock/.wait's own `explain` text, confirmed 2026-07-10): by
-        default (no `unlock()` reached yet) `state.limit == 1`, so each tick executes exactly one
-        instruction -- an implicit `wait(1)` after every step. `unlock()` raises the per-tick
-        budget to 10000 (checked fresh after every instruction, so it can take effect within the
-        same tick it runs in); `lock()` resets it to 1. An explicit `wait(t)` stops the current
-        tick immediately (via `comp.sleep`, set by the real `wait` func's `comp:SetStateSleep`),
-        counting down `t` ticks (executing nothing) before instructions resume."""
+        """Simulates `n` real game ticks, honoring the real lock/unlock/wait model exactly as the
+        real dispatcher implements it (data/components.lua): a locked behavior executes one
+        instruction per tick (each activation ends in the dispatcher's own `SetStateSleep(1)`);
+        `unlock` raises the per-activation budget to 10000 (taking effect within the same tick);
+        an explicit `wait(t)` yields the tick and resumes `t` ticks later; a sync move yields
+        until the mock world's movement step wakes the component."""
         steps = 0
         for _ in range(n):
-            if self._finished:
+            if self._finished or not self.comp.is_active:
                 return
-            sleep = self.comp["sleep"] or 0
+            sleep = self.comp.sleep or 0
             if sleep > 0:
-                self.comp["sleep"] = sleep - 1
-                continue
-            executed = 0
-            while True:
-                limit = self.state["limit"] or 1
-                if executed >= limit:
-                    break
-                result = self._step()
-                executed += 1
-                steps += 1
-                if steps > max_steps:
-                    raise RuntimeError("runaway")
-                if result in ("finished", "waited"):
-                    break
+                sleep -= 1
+                self.comp.sleep = sleep
+                if sleep > 0:
+                    continue  # still sleeping through this tick
+                # slept out: this is the resume tick
+            elif self._waiting_on_move():
+                continue  # movement wake pending; MockWorld.step's movement phase re-arms sleep
+            if self._dispatch(self._activate(self.comp, None)):
+                return
+            steps += 1
+            if steps > max_steps:
+                raise RuntimeError("runaway")
 
     def read_param(self, idx: int):
-        return self.engine.get_value(self.comp, self.state, idx)
+        return self.comp.GetRegister(self.comp, idx)

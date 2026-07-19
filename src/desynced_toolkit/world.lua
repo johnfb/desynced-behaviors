@@ -159,6 +159,7 @@ function World.MakeFaction(name, is_world)
 	if f then return f end
 	f = setmetatable({
 		name = name,
+		meta_type = "faction", -- GetFactionBehaviorAsm's faction-or-comp dispatch keys on this
 		is_world_faction = is_world or false,
 		trust = {},
 		-- The saved-behavior store the real GetFactionBehaviorAsm/SetBehavior (data/library.lua)
