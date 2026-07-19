@@ -33,7 +33,10 @@ end
 -- a coordinate is a plain `{x=,y=}` (the shape InstGetCoord / a Value's `.coord` hands back). Extra
 -- args (some real Map.* signatures take a threshold/radius after the target) are ignored.
 local function xy_of(target)
-	if target == nil then return nil end
+	-- non-table (nil, or a bare number when a caller uses an (x, y, ...) signature like
+	-- Map.CountTiles) -> nil, so those callers' own numeric fallback can take over; indexing a
+	-- number would otherwise error before the fallback ran
+	if type(target) ~= "table" then return nil end
 	local loc = target.location
 	if loc ~= nil then return loc.x, loc.y end
 	if target.x ~= nil then return target.x, target.y end

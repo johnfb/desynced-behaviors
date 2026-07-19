@@ -84,6 +84,35 @@ def test_distance_metrics_through_real_funcs(engine):
     assert interp.read_param(2).num == 11
 
 
+def test_is_passable_through_real_func(engine):
+    """is_passable end-to-end over the mock tile model: open tile -> Passable, landscape-blocked
+    tile -> Impassable, entity-occupied tile -> Impassable (visible-tile path: landscape + entity
+    blocking merge -- mock_world_spec.md's tile model). Also regression-guards Map.CountTiles'
+    numeric (x, y, ...) call shape, which the real func uses directly."""
+    w = MockWorld(engine)
+    owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=15)
+    w.set_tile(2, 0, landscape_blocked=True)
+    w.spawn("f_bot_1m_c", "player", 3, 0)  # occupies (3,0)
+
+    def probe(x, y):
+        interp = _run(
+            engine,
+            w,
+            owner,
+            "behavior T(Out*):\n"
+            # the top-level `next` pin is is_passable's undiscovered-tile outcome (neither exec
+            # pin fires); unreachable here since the mock has no fog model (all discovered)
+            f"n1: is_passable(Coordinate=coord({x}, {y}))  >n2 (Impassable) >n3 (Passable) >POP (next)\n"
+            "n2: set_reg(Value=1, Target=Out)  >POP (next)\n"
+            "n3: set_reg(Value=2, Target=Out)  >POP (next)\n",
+        )
+        return interp.read_param(1).num
+
+    assert probe(1, 0) == 2  # open tile: passable
+    assert probe(2, 0) == 1  # landscape-blocked
+    assert probe(3, 0) == 1  # occupied by an entity
+
+
 def test_read_signal_of_found_unit(engine):
     w = MockWorld(engine)
     owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
