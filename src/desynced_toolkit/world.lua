@@ -15,7 +15,7 @@
 -- State lives in Lua, orchestration in Python (mock_world.py). World.Reset() clears it so a
 -- session-scoped engine can host many independent MockWorld instances.
 
-World = { registry = {}, factions = {}, deferred = {}, tiles = {}, next_id = 1 }
+World = { registry = {}, factions = {}, deferred = {}, tiles = {}, next_id = 1, tick = 0 }
 
 function World.Reset()
 	World.registry = {}
@@ -23,6 +23,14 @@ function World.Reset()
 	World.deferred = {}
 	World.tiles = {}
 	World.next_id = 1
+	World.tick = 0
+end
+
+-- The simulation tick counter (`simulation_tick`'s func reads it). MockWorld.step advances it
+-- once per world tick; the absolute value is arbitrary (the real game's is a huge running count),
+-- only deltas mean anything.
+function Map.GetTick()
+	return World.tick
 end
 
 --------------------------------------------------------------------------------------------------
@@ -372,10 +380,112 @@ function Entity:MatchFilter(mask, faction)
 	return true
 end
 
--- Movement (Phase 3 completes resolution in MockWorld.step). For Phase 1 these record the goal and
--- report "still moving" -- enough for the structure to exist; NOT yet a faithful arrival model.
+--------------------------------------------------------------------------------------------------
+-- Movement (Phase 3). Model, in one place:
+--
+-- * Positions are integer tiles; a unit accumulates fractional progress internally and teleports
+--   one 8-connected tile at a time (user-confirmed; reference_tile_occupancy_model).
+-- * Per-tick progress = def.movement_speed / TICKS_PER_SECOND tiles (movement_speed is
+--   tiles-per-SECOND at face value -- reference_movement_speed_model); a diagonal step costs
+--   sqrt(2) tiles of progress (measured in-game 2026-07-18: diagonal steps averaged 2.5*sqrt(2)
+--   ticks against 2.5 orthogonal at speed 2).
+-- * Step direction: diagonal while both axes differ, then straight -- read directly off the
+--   golden movement-circuit log (every leg is N diagonal steps then M straight, e.g.
+--   (-9,60)->(-4,55) five diagonals then (-4,54)..(-4,51) four straight; never interleaved).
+--   No pathfinding: the mock walks the unobstructed octile line and BLOCKS if a step is blocked,
+--   it never routes around (a real-engine divergence, flagged; fine for flat test worlds).
+-- * ARRIVAL (PROVISIONAL -- the one part not yet pinned by an in-game measurement; the arrival
+--   probe instrument exists to close it, see mock_world_spec.md): arrived iff
+--   `Map.GetDistance(unit, target) <= tolerance`, tolerance = the `range` argument, floored at 1
+--   for an entity target (its tile can't be entered by a ground unit). Whether the real
+--   `need_move` uses this gate, and whether `range` widens it exactly like this, is unmeasured.
+-- * Flying units ignore landscape blocking, ground occupancy, and (later) terrain modifiers.
+-- * Effective speed = base movement_speed only, for now: speed modules, pavement/blight terrain
+--   modifiers, and the unpowered penalty are explicitly later refinements (mock_world_spec.md's
+--   tick-step section) -- the first-version world is flat, unpaved, unblighted, powered.
+--------------------------------------------------------------------------------------------------
+
+local SQRT2 = math.sqrt(2)
+
+local function target_is_entity(target)
+	local mt = getmetatable(target)
+	return mt ~= nil and rawget(mt, "__is_entity") ~= nil
+end
+
+local function arrival_tolerance(target, range)
+	local tol = math.max(range or 0, 0)
+	if target_is_entity(target) and tol < 1 then tol = 1 end
+	return tol
+end
+
+local function arrived(ent, goal)
+	return Map.GetDistance(ent, goal.target) <= arrival_tolerance(goal.target, goal.range)
+end
+
+-- The non-flying occupant of tile (x, y), excluding `exclude` -- the ground layer's one-per-tile
+-- invariant (flyers stack and never occupy; user-confirmed). Shared by movement blocking and
+-- Map.CountTiles' entity-blocked count.
+local function ground_occupant(x, y, exclude)
+	for _, o in pairs(World.registry) do
+		if o ~= exclude and o.exists and not o.flying and o.location.x == x and o.location.y == y then
+			return o
+		end
+	end
+	return nil
+end
+
+-- Whether `e` (a ground unit) can step onto tile (x, y): landscape must be open and the ground
+-- layer unoccupied. Flyers skip this check entirely (they stack and ignore landscape).
+local function ground_step_blocked(e, x, y)
+	if World:tile(x, y).landscape_blocked then return true end
+	return ground_occupant(x, y, e) ~= nil
+end
+
+-- The next 8-connected step toward (tx, ty): diagonal-first (see the model note above).
+local function next_step(e, tx, ty)
+	local dx = tx - e.location.x
+	local dy = ty - e.location.y
+	local sx = dx > 0 and 1 or dx < 0 and -1 or 0
+	local sy = dy > 0 and 1 or dy < 0 and -1 or 0
+	local cost = (sx ~= 0 and sy ~= 0) and SQRT2 or 1
+	return sx, sy, cost
+end
+
+-- Record an ASYNC move goal on the entity (domove's c=2 path and remote moves: `ent:MoveTo`).
+-- No component waits on it; completion just clears it.
 function Entity:MoveTo(target, range)
-	self.move_goal = { target = target, range = range or 0 }
+	local goal = { target = target, range = range or 0 }
+	if arrived(self, goal) then
+		self.move_goal, self.is_moving = nil, false
+		return
+	end
+	self.move_goal = goal
+	self.move_progress = self.move_progress or 0
+	self.is_moving = true
+end
+
+-- Advance one entity by one tick of movement toward `goal`. Returns "moving", "arrived" or
+-- "blocked". Progress accumulates every tick INCLUDING the one the goal was issued on (the
+-- phase that reproduces the golden circuit log's step timing).
+local function step_entity_toward(e, goal)
+	local speed = (e.def.movement_speed or 0)
+	if speed <= 0 then return "blocked" end
+	e.move_progress = (e.move_progress or 0) + speed / TICKS_PER_SECOND
+	while true do
+		if arrived(e, goal) then return "arrived" end
+		local tx, ty = xy_of(goal.target)
+		if tx == nil then return "blocked" end -- target gone (dangling entity ref)
+		local sx, sy, cost = next_step(e, tx, ty)
+		if e.move_progress < cost then return "moving" end
+		local nx, ny = e.location.x + sx, e.location.y + sy
+		if not e.flying and ground_step_blocked(e, nx, ny) then
+			e.state_path_blocked = true
+			return "blocked"
+		end
+		e.move_progress = e.move_progress - cost
+		e.location.x, e.location.y = nx, ny
+		e.state_path_blocked = false
+	end
 end
 
 --------------------------------------------------------------------------------------------------
@@ -402,11 +512,73 @@ function Component:SetStateSleep(t) self.sleep = t or 1 end
 function Component:Activate() self.is_active = true end
 function Component:Shutdown() self.is_active = false end
 
--- Records a move goal on the OWNER and reports (need_move, repeat_blocked). Phase 3 replaces the
--- always-"need_move=true" with real per-tick tile advance so arrival-gated loops terminate.
-function Component:RequestStateMove(target, range)
-	self.owner.move_goal = { target = target, range = range or 0 }
+-- The SYNC move request (domove's default path and the scout/dropoff funcs). Two real call
+-- shapes: `(target, range)` with an entity/coord target, and a bare `(x, y)` pair. Returns
+-- `(need_move, repeat_blocked)`; while need_move is true the calling component is in the waiting
+-- state (`waiting_move`) and MockWorld.step's movement phase wakes it on arrival or blockage --
+-- the mock half of the engine's "activated again once that finishes" contract.
+function Component:RequestStateMove(a, b)
+	local target, range
+	if type(a) == "number" then
+		target, range = { x = a, y = math.floor(b or 0) }, 0
+	else
+		target, range = a, b or 0
+	end
+	local e = self.owner
+	local goal = { target = target, range = range, wake_comp = self }
+	if arrived(e, goal) then
+		e.move_goal, e.is_moving, self.waiting_move = nil, false, false
+		return false, false
+	end
+	-- No pathfinding: an immediately-blocked next step reports repeat_blocked (domove then takes
+	-- its Path Blocked pin), rather than routing around. Flagged in the movement model note.
+	local tx, ty = xy_of(target)
+	if tx ~= nil and not e.flying then
+		local sx, sy = next_step(e, tx, ty)
+		if ground_step_blocked(e, e.location.x + sx, e.location.y + sy) then
+			e.state_path_blocked = true
+			return true, true
+		end
+	end
+	e.move_goal = goal
+	e.move_progress = e.move_progress or 0
+	e.is_moving = true
+	self.waiting_move = true
 	return true, false
+end
+
+-- One world tick of movement for every entity (MockWorld.step's movement phase, run after the
+-- behavior phase). Explicit move goals (RequestStateMove/MoveTo) take priority; otherwise a
+-- non-empty GOTO frame register drives a persistent native move-to (reference_goto_register_
+-- semantics: distinct from domove, re-evaluated every tick, the register is never cleared --
+-- which also makes an entity target self-tracking). Which of the two the real engine prefers
+-- when both are set is unmeasured; explicit-first is the mock's modeling choice.
+function World.StepMovement()
+	for _, e in pairs(World.registry) do
+		if e.exists then
+			local goal, transient = e.move_goal, nil
+			if goal == nil then
+				local reg = e.registers[FRAMEREG_GOTO]
+				local target = reg and (reg.entity or reg.coord)
+				if target ~= nil then
+					transient = { target = target, range = math.max(reg.num or 0, 0) }
+					goal = transient
+					e.move_progress = e.move_progress or 0
+				end
+			end
+			if goal ~= nil then
+				local result = step_entity_toward(e, goal)
+				if result == "moving" then
+					e.is_moving = true
+				else
+					e.is_moving = false
+					if transient == nil then e.move_goal = nil end -- @goto re-derives next tick
+					local comp = goal.wake_comp
+					if comp then comp.waiting_move = false end -- reactivates next tick
+				end
+			end
+		end
+	end
 end
 
 function Component:FindComponent(id) return self.owner:FindComponent(id) end
@@ -436,6 +608,17 @@ function World.Spawn(def_id, faction, x, y, overrides)
 		inventory = {},
 		exists = true,
 		is_construction = false,
+		-- The PHYSICS flying notion (shares tiles, ignores landscape/terrain) -- an explicit
+		-- per-entity boolean derived from the frame, per the spec's tile-model note: size
+		-- "Drone", the drone/flyer/satellite slot_types, and the rare Flyer frame flag coincide
+		-- for every frame that matters. Distinct from FilterEntity's v_is_flying (cost_modifier
+		-- == 0), which stays the real predicate. Overridable per spawn like any field.
+		flying = def.size == "Drone"
+			or def.slot_type == "drone"
+			or def.slot_type == "flyer"
+			or def.slot_type == "satellite",
+		move_goal = nil,
+		move_progress = 0,
 		health = def.health_points or 100,
 		max_health = def.health_points or 100,
 		visibility_range = def.visibility_range or 0,
@@ -548,7 +731,9 @@ function Map.CountTiles(a, b, layer, single)
 	if x == nil then x, y = a, b end -- called as (x, y, ...)
 	local t = World:tile(x, y)
 	local bl = t.landscape_blocked and 1 or 0
-	local be = Map.GetEntityAt(x, y) and 1 or 0
+	-- entity blocking is the GROUND layer only (flyers stack, never block -- same rule movement
+	-- uses via ground_occupant)
+	local be = ground_occupant(x, y, nil) and 1 or 0
 	local passable = (bl == 0 and be == 0) and 1 or 0
 	return bl, be, 1, passable
 end

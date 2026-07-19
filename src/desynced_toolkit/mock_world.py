@@ -1,8 +1,9 @@
 """Python facade over ``world.lua`` -- the mock world for behavior testing (mock_world_spec.md).
 
-Phase 1 scope: construct factions/entities/tiles and expose the engine-native sensing primitives
+Phases 1-3: construct factions/entities/tiles, expose the engine-native sensing primitives
 (``Map.FindClosestEntity``, ``:MatchFilter``, ``faction:IsSeen``) that the real instruction funcs
-call. Movement resolution and multi-entity stepping (``step``) are Phase 3.
+call, and step the whole world tick by tick (``attach_behavior`` + ``step``: every attached
+behavior's interpreter advances, then movement resolves, then deferred callbacks drain).
 
 Doctrine (CLAUDE.md): world *state* lives in Lua tables whose ``.def`` is the real
 ``data.frames``/``data.components`` def; Python only *orchestrates* (spawn, mutate, assert). Nothing
@@ -11,9 +12,22 @@ here reimplements an instruction or a filter decision -- those stay in the reuse
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import resources
 
+from .interpreter import Interpreter
 from .lua_runtime import LupaEngine
+
+
+@dataclass
+class DebugPrint:
+    """One captured debug_print: the world tick it fired on, the printing entity's ``eid`` (None
+    when unattributable), and the printed register Value (a live Lua table -- read ``.num``/
+    ``.coord``/``.id``/``.entity`` off it)."""
+
+    tick: int
+    eid: int | None
+    value: object
 
 _WORLD_LUA = (
     resources.files(__package__).joinpath("world.lua").read_text(encoding="utf-8")
@@ -39,6 +53,55 @@ class MockWorld:
         self._World = self.lua.globals().World
         self._Map = self.lua.globals().Map
         self._World.Reset()
+        self.interpreters: list[Interpreter] = []
+        #: every debug_print fired while stepping this world, in order (see DebugPrint)
+        self.prints: list[DebugPrint] = []
+        self._install_print_sink()
+
+    def _install_print_sink(self) -> None:
+        """Route the real debug_print func's global `print` into `self.prints` with tick/entity
+        attribution (behavior_runtime.lua's sink; one sink per engine, so the most recently
+        constructed MockWorld on a shared engine owns it -- fine for one-world-per-test use)."""
+
+        def sink(comp, *args):
+            # the real func prints ("[DEBUGPRINT]", reg) -- the register value is the last arg
+            value = args[-1] if args else None
+            eid = None
+            if comp is not None and comp.owner is not None:
+                eid = comp.owner.eid
+            self.prints.append(DebugPrint(tick=self.tick, eid=eid, value=value))
+
+        self.engine.lua.globals().BehaviorRuntime.print_sink = sink
+
+    # -- stepping -------------------------------------------------------------------------------
+
+    @property
+    def tick(self) -> int:
+        return int(self._World.tick)
+
+    def attach_behavior(self, entity, prog, params: dict[int, object] | None = None):
+        """Attach a Behavior Controller (`c_behavior`) running ``prog`` (a decoded/compiled
+        behavior table, or a raw `.dcs` string) to ``entity``. The behavior starts on the next
+        `step`. Returns the Interpreter (its ``comp`` is the attached component)."""
+        if isinstance(prog, str):
+            type_char, prog = self.engine.decode_dcs(prog.strip())
+            if type_char != "C":
+                raise ValueError(f"not a behavior clipboard string (type {type_char!r})")
+        comp = self.add_component(entity, "c_behavior")
+        interp = Interpreter(self.engine, prog, params=params, comp=comp)
+        self.interpreters.append(interp)
+        return interp
+
+    def step(self, n: int = 1) -> None:
+        """Advance the world ``n`` ticks. Per tick (mock_world_spec.md's tick order): the tick
+        counter advances, every attached behavior's interpreter runs one tick, movement resolves
+        (waking components whose sync move completed or blocked), deferred callbacks drain."""
+        for _ in range(n):
+            self._World.tick = self._World.tick + 1
+            for interp in self.interpreters:
+                interp.run_ticks(1)
+            self._World.StepMovement()
+            self._World.DrainDeferred()
 
     # -- factions -------------------------------------------------------------------------------
 
