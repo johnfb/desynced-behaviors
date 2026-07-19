@@ -169,8 +169,13 @@ def test_filter_helpers_available(engine):
 
 
 def test_frameregs_defined(engine):
+    # Corrected 2026-07-19: wire -j resolves to native register j, and the true wire mapping is
+    # -1 Goto .. -4 Signal (confirmed from deployed in-game-working behaviors' raw wire data --
+    # see behavior_format.md "Frame registers"), so the native indices are Goto=1..Signal=4.
+    # An earlier version asserted the reverse, copied from the comp-reg instructions' POSITIVE
+    # selector order (1 Signal..4 Goto) -- a different address space.
     g = engine.lua.globals()
-    assert (g.FRAMEREG_SIGNAL, g.FRAMEREG_VISUAL, g.FRAMEREG_STORE, g.FRAMEREG_GOTO) == (
+    assert (g.FRAMEREG_GOTO, g.FRAMEREG_STORE, g.FRAMEREG_VISUAL, g.FRAMEREG_SIGNAL) == (
         1,
         2,
         3,

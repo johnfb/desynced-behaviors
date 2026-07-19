@@ -375,16 +375,36 @@ grep), so all of this is empirical, from the differential test.
 ### Frame registers
 
 Exactly 4 exist (hardcoded bound in `library.lua`), addressed as negative
-integers. Mapping confirmed from `data/instructions.lua` (`GetRegisterOrComponentRegister`):
+integers. **Corrected 2026-07-19 — an earlier version of this table was
+exactly reversed:**
 
 | Value | Register |
 |---|---|
-| `-1` | Signal |
-| `-2` | Visual |
-| `-3` | Store |
-| `-4` | Goto |
+| `-1` | Goto |
+| `-2` | Store |
+| `-3` | Visual |
+| `-4` | Signal |
 
-(`observer.dcs` clears both at reset: `set_reg` with target `-3` and `-4`.)
+Confirmed from deployed, in-game-working behaviors' raw wire data (not from
+source reading): `library/magnifier_signal.dcs`'s drone-invitation broadcast
+— live-confirmed in-game, drones respond to it — writes `@signal` as wire
+`-4`, and `library/miner_drone.dcs`'s travel write — live-confirmed, the
+drone moves — puts `@goto` at wire `-1`. `desynced_toolkit.bsf` has always
+used this mapping (`values.py`/`parse_text.py`/`render_text.py`), which is
+why BSF-authored behaviors worked in-game while this table sat wrong.
+
+**The trap that produced the original error:** `data/instructions.lua`'s
+`GetRegisterOrComponentRegister` really does map `1 → FRAMEREG_SIGNAL,
+2 → VISUAL, 3 → STORE, 4 → GOTO` — but those are the **positive selector
+numbers** used by the component-register instructions ("Set to Component"
+etc.), a *different address space* from the negative wire encoding. The wire
+address `-j` resolves via `InstGet` to native register index `j`, and the
+native indices run Goto=1..Signal=4 — i.e. `native index = 5 − selector
+number`. Reading the selector mapping and assuming the wire followed the
+same order is exactly how the reversed table got written.
+
+(`observer.dcs` clears Visual and Signal at reset: `set_reg` with target
+`-3` and `-4`.)
 
 ### Faction (shared) registers
 
@@ -874,8 +894,8 @@ the rest as a genuine Lua table — the 0-based dict keys below are the retired
   "4": 11,                                        //   No Result -> jump to instruction 11 - 1 = key "10" (next scan attempt)
   "op": "scan"
 },
-"3": { "0": { "id": "v_enemy_faction" }, "1": -3, "op": "set_reg" },  // Store <- enemy faction id (unused marker)
-"4": { "0": "A", "1": -4, "op": "set_reg" },      // Goto <- found enemy (var A): move to attack it
+"3": { "0": { "id": "v_enemy_faction" }, "1": -3, "op": "set_reg" },  // Visual <- enemy faction id (status icon)
+"4": { "0": "A", "1": -4, "op": "set_reg" },      // Signal <- found enemy (var A): the Observer telemetry broadcast
 "5": {                                            // check_number: IfLarger(exec), IfSmaller(exec), Value(in), Compare(in)
   "0": 8,                                         //   If Larger -> jump to 8 - 1 = key "7" (add)
   "2": "CNT", "3": { "num": 0 },                  //   comparing CNT > 0

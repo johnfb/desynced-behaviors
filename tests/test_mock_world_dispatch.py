@@ -84,6 +84,27 @@ def test_distance_metrics_through_real_funcs(engine):
     assert interp.read_param(2).num == 11
 
 
+def test_frame_register_wire_mapping_signal(engine):
+    """A wire write to @signal must land on the same slot the real read_signal func reads
+    (ent:GetRegister(FRAMEREG_SIGNAL)). Guards the corrected frame-register wire mapping
+    (-1 Goto .. -4 Signal -- behavior_format.md "Frame registers"): under the old reversed
+    FRAMEREG constants this cross-wired, @signal writes landing on the Goto slot."""
+    w = MockWorld(engine)
+    owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=15)
+    interp = _run(
+        engine,
+        w,
+        owner,
+        "behavior T(Out*):\n"
+        "n1: set_reg(Value=7, Target=@signal)\n"
+        "n2: get_self(Unit Reference=$me)\n"
+        "n3: read_signal(Unit=$me, Result=Out)\n",  # read_signal has no self-default: nil Unit
+    )                                               # writes nil through Set (the Init-nil path)
+    assert interp.read_param(1).num == 7
+    assert owner.registers[4].num == 7  # FRAMEREG_SIGNAL = 4 = wire -4
+    assert owner.registers[1] is None  # nothing leaked onto Goto (wire -1)
+
+
 def test_is_passable_through_real_func(engine):
     """is_passable end-to-end over the mock tile model: open tile -> Passable, landscape-blocked
     tile -> Impassable, entity-occupied tile -> Impassable (visible-tile path: landscape + entity
@@ -117,7 +138,7 @@ def test_read_signal_of_found_unit(engine):
     w = MockWorld(engine)
     owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
     mate = w.spawn("f_bot_1m_c", "player", 8, 0)
-    mate.SetRegister(mate, 1, engine.new_value(num=42))  # FRAMEREG_SIGNAL = 1
+    mate.SetRegister(mate, 4, engine.new_value(num=42))  # FRAMEREG_SIGNAL = 4 (wire -4)
 
     interp = _run(
         engine,
@@ -179,13 +200,21 @@ def test_for_entities_in_range_counts_bots(engine):
         engine,
         w,
         owner,
-        "behavior T(Count*):\n"
+        "behavior T(Count*, Last*):\n"
         "n1: set_reg(Value=0, Target=Count)\n"
-        "n2: for_entities_in_range(Range=50, Filter=v_bot, Unit=$u)  >n4 (Done) >NEXT (next)\n"
-        "n3: add(To=Count, Num=1, Result=Count)  >POP (next)\n"
-        "n4: exit()\n",
+        "n2: for_entities_in_range(Range=50, Filter=v_bot, Unit=$u)  >n5 (Done) >NEXT (next)\n"
+        "n3: add(To=Count, Num=1, Result=Count)\n"
+        "n4: set_reg(Value=$u, Target=Last)  >POP (next)\n"
+        "n5: exit()\n",
     )
     assert interp.read_param(1).num == 3
+    # The loop's Unit output must carry the ENTITY, not a field-stripped rendering of it --
+    # guards the coerce fix for bare mock-entity tables (the real .next passes a raw entity,
+    # which is userdata in the real engine but a table here; without the metatable marker the
+    # entity's own frame-id field got misread as an id literal and the entity itself dropped).
+    last = interp.read_param(2)
+    assert last.entity is not None
+    assert last.id is None
 
 
 def test_for_signal_match_membership_scan(engine):
@@ -196,9 +225,9 @@ def test_for_signal_match_membership_scan(engine):
     owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=50)
     for x in (5, 10):
         m = w.spawn("f_bot_1m_c", "player", x, 0)
-        m.SetRegister(m, 1, engine.new_value(0, None, "v_transport_route"))
+        m.SetRegister(m, 4, engine.new_value(0, None, "v_transport_route"))  # FRAMEREG_SIGNAL = 4
     odd = w.spawn("f_bot_1m_c", "player", 7, 0)
-    odd.SetRegister(odd, 1, engine.new_value(0, None, "v_idle"))
+    odd.SetRegister(odd, 4, engine.new_value(0, None, "v_idle"))
 
     interp = _run(
         engine,

@@ -150,6 +150,15 @@ sockets more than compensate for its worse area-to-footprint ratio.
 
 ### Range is Chebyshev distance, confirmed in-game
 
+> **Precision caveat (2026-07-19):** what's confirmed is the *square shape* at
+> radius 2. That rules out round/ceil/real-valued Euclidean, but radius 2 is
+> exactly the degenerate size where Chebyshev and a floored-Euclidean compare
+> produce the identical square (corner at 2√2 ≈ 2.83 floors to 2) — the user
+> expects the engine measures everything in the Euclidean family. The two only
+> separate at range ≥ 3; the RangeProbe in-game test (`range_probe.bsf`, see
+> `todo.md`) decides. Everything below that depends only on the radius-2
+> square itself (the tiling math, node spacing) is unaffected either way.
+
 User-confirmed: Magnifier `range = 2` means a square region extending 2
 tiles in *every* direction from the building's footprint (a 5×5 square
 centered on a 1×1 building) — Chebyshev/king-move distance, not Euclidean. A

@@ -49,14 +49,16 @@ end
 
 -- Distance model -- THREE different measures, deliberately (see mock_world_spec.md "Open items"):
 --
--- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below) are CHEBYSHEV. This half is
---   confirmed in-game, not a modeling choice: the Blight Magnifier's range=2 coverage is a
---   user-confirmed square (blight_magnifier_mining.md, "Range is Chebyshev distance"), and its
---   implementation is literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)`
---   (components.lua, c_blight_magnifier's on_update; the Virus Duplicator's min-spacing check rides
---   the same call) -- so the native FindClosestEntity's range test is a Chebyshev square, and every
---   sensing instruction routed through it (get_closest_entity, for_entities_in_range) inherits that
---   square sensing area.
+-- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below): modeled CHEBYSHEV, exact
+--   metric PENDING an in-game probe. What is actually confirmed in-game is that the Blight
+--   Magnifier's range=2 coverage is a full 5x5 SQUARE (blight_magnifier_mining.md), and its
+--   implementation is literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)` -- but
+--   radius 2 is exactly the degenerate size where Chebyshev and floor(Euclidean) produce the
+--   identical square (the corner sits at 2*sqrt(2)~2.83, which floors to 2): the square only RULES
+--   OUT round/ceil/real-valued Euclidean, and the user expects the Euclidean family engine-wide.
+--   The metrics first separate at range 3 ((3,3): Chebyshev 3 vs floor-Euclid 4) -- the RangeProbe
+--   behavior (range_probe.bsf, workspace root) measures exactly this in-game; switch this gate to
+--   floor(Euclidean) if it reports (3,3) undetected at Range 3.
 -- * "Closest" ordering among gate-passing candidates (get_closest_entity's winner) is EUCLIDEAN --
 --   user-observed in-game (2026-07-19). So candidacy is a square; the winner inside it is the
 --   straight-line-nearest.
@@ -286,8 +288,17 @@ end
 
 local Entity = {}
 Entity.__index = Entity
+-- Marker for engine_stub's `coerce`: in the REAL engine an entity is USERDATA, and code like
+-- for_entities_in_range's `.next` (`if type(elem) == "table" then Set(out, elem) else
+-- Set(out, { entity = elem })`) relies on that to tell a raw entity from a value-shaped wrapper
+-- table. Mock entities are Lua tables, so they'd fall into the wrong branch and get field-stripped
+-- (the `.id` frame-id field misread as an id literal -- found 2026-07-19 via a loop-output entity
+-- read-back). The marker lets coerce wrap a bare mock entity as { entity = v }, matching what the
+-- native register conversion does with entity userdata.
+Entity.__is_entity = true
 
--- Frame registers (Signal=1, Visual=2, Store=3, Goto=4) -- same bank the engine_stub Owner models,
+-- Frame registers (Goto=1, Store=2, Visual=3, Signal=4 -- the corrected wire mapping, see
+-- engine_stub.lua's FRAMEREG_* block) -- same bank the engine_stub Owner models,
 -- reachable from InstGet as `comp.owner:GetRegister(1..4)`. Values are coerced through the global
 -- Tool.NewRegisterObject (engine_stub) so downstream `.num`/`.coord`/`.id`/`.entity` reads work.
 function Entity:GetRegister(n) return self.registers[n] or NewValue(0) end
@@ -444,9 +455,9 @@ end
 -- Closest entity to `owner` within `range` for which `pred(e)` is truthy, applying the broad-phase
 -- `filter` mask (MatchFilter) first exactly as the real callers rely on (get_closest_entity's pred
 -- only calls FilterEntity, trusting FindClosestEntity to have masked by frametype/faction already).
--- The owner is excluded -- radar returns OTHER units, never self. The range gate is Chebyshev
--- (confirmed in-game via the magnifier); "closest" ordering among gate-passers is Euclidean
--- GetDistance (user-observed in-game) -- see the distance-model note above for both.
+-- The owner is excluded -- radar returns OTHER units, never self. The range gate is modeled
+-- Chebyshev (exact metric pending the RangeProbe run); "closest" ordering among gate-passers is
+-- Euclidean (user-observed in-game) -- see the distance-model note above for both.
 function Map.FindClosestEntity(owner, range, pred, filter)
 	local best, best_d = nil, nil
 	for _, e in pairs(World.registry) do

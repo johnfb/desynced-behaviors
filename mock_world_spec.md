@@ -344,16 +344,22 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   `RequestStateMove` sets it. One cheap in-game test (domove to a known-distance coord; note the
   stop distance and whether `range` widens it) closes it; the RALLY gate's testability depends on
   getting this tolerance right.
-- **Distance metrics — settled 2026-07-19 (three coexisting measures), two small loose ends.**
-  - **`Map.FindClosestEntity`'s range gate is Chebyshev — confirmed in-game, not a modeling
-    choice.** The Blight Magnifier's `range = 2` coverage is a user-confirmed Chebyshev square
-    (`blight_magnifier_mining.md`, "Range is Chebyshev distance"), and its implementation is
-    literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)` (`c_blight_magnifier`'s
-    `on_update`; the Virus Duplicator's min-spacing check rides the same call). Every sensing
-    instruction routed through that native function (`get_closest_entity`,
-    `for_entities_in_range`) therefore senses a **square** area, side `2·range+1` — the mock's
-    `Map.FindClosestEntity`/`GetEntitiesInRange` gates match (fixed 2026-07-19; they were
-    initially written rounded-Euclidean on the wrong assumption that no in-game evidence existed).
+- **Distance metrics — mostly settled 2026-07-19; the gate's exact metric has a pending in-game
+  probe.**
+  - **`Map.FindClosestEntity`'s range gate: square at radius 2 (confirmed); Chebyshev vs.
+    floored-Euclidean undecided — `range_probe.bsf` decides.** The Blight Magnifier's `range = 2`
+    coverage is a user-confirmed full 5×5 square (`blight_magnifier_mining.md`), and its
+    implementation is literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)`
+    (`c_blight_magnifier`'s `on_update`; the Virus Duplicator's min-spacing check rides the same
+    call) — but radius 2 is the degenerate size where Chebyshev and `floor(Euclidean)` give the
+    identical square (corner at 2√2 ≈ 2.83 floors to 2), so the square only *rules out*
+    round/ceil/real-valued Euclidean; the user expects the Euclidean family engine-wide. The
+    metrics first separate at range 3. The mock's gates are Chebyshev for now (they were
+    initially rounded-Euclidean, which the confirmed square genuinely refutes); the RangeProbe
+    behavior (`range_probe.bsf`/`.dcs`, workspace root — sweeps `for_entities_in_range` Range
+    1..15 and reports the minimal detecting Range on `@signal`, plus the `get_distance` readout
+    on `@store`) measures the truth in-game — switch the gate to `floor(Euclidean)` if a target
+    at offset (3,3) first appears at Range 4 rather than 3.
   - **"Closest" selection among gate-passers is Euclidean** (user-observed in-game 2026-07-19) —
     the winner is the straight-line-nearest candidate inside the square.
   - **`Map.GetDistance` (the `get_distance` readout) is the *unobstructed grid path length***

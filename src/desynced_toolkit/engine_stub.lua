@@ -15,8 +15,8 @@
 -- output, see project notes): every instruction arg is a plain Lua integer. Positive integers
 -- are `state.mem[]` slots (used for BOTH local variables and literal constants -- the harness's
 -- Python-side `Memory` class allocates these, mirroring what the real compiler would do).
--- Negative integers 1..4 select a frame register (Signal/Visual/Store/Goto, per
--- behavior_format.md's table) via `comp.owner:GetRegister`.
+-- Negative integers -1..-4 select a frame register (Goto/Store/Visual/Signal -- see the
+-- FRAMEREG_* block below for the corrected mapping) via `comp.owner:GetRegister`.
 
 -- Confirmed 2026-07-11 via a real in-game test (a behavior with plain `set_reg(Value=N,
 -- Target=Result)` calls for N = 0, 1, -2147483647, -2147483648, read back from the Result
@@ -38,7 +38,27 @@ REG_INFINITE = -2147483648
 REG_NOT = -2147483647
 
 Value = {}
-Value.__index = Value
+-- `.is_empty` is a NATIVE computed property of the real register object, consulted by ~15
+-- instruction funcs (`is_empty`'s own branch, `value_type`'s early return, GetSeenEntityOrSelf's
+-- guard, combine_coordinate, ...). The stub never modeled it until 2026-07-19, so every such read
+-- silently got nil (= "has a value") -- found when the `is_empty` instruction took its Has Value
+-- pin on a genuinely empty register. Semantics mirrored from the settled in-game behavior
+-- (behavior_format.md "dangling entity references"): empty <=> num == 0 AND no data part, where a
+-- dangling entity reference (target destroyed, `exists == false`) counts as blank -- on the
+-- current build an entity-only dangling ref IS empty (the next game release inverts exactly this;
+-- revisit then). Implemented via __index so it stays live as the boxed value is Init()-ed in place.
+Value.__index = function(t, k)
+	if k == "is_empty" then
+		local e = rawget(t, "entity")
+		if e ~= nil and e.exists == false then e = nil end
+		return (rawget(t, "num") or 0) == 0
+			and rawget(t, "coord") == nil
+			and rawget(t, "id") == nil
+			and e == nil
+			and rawget(t, "item") == nil
+	end
+	return rawget(Value, k)
+end
 
 local function is_value(v)
 	return type(v) == "table" and getmetatable(v) == Value
@@ -76,6 +96,14 @@ local function coerce(v)
 	if is_value(v) then return NewValue(v.num, v.coord, v.id, v.entity, v.item) end
 	if type(v) == "number" then return NewValue(v) end
 	if type(v) == "table" then
+		-- a bare mock-world entity (world.lua marks its Entity metatable): the real engine's
+		-- entities are userdata and the native register conversion stores one as `.entity`;
+		-- without this, the generic branch below would misread the entity's own `.id` (its frame
+		-- id) as an id-literal value and drop the entity itself
+		local mt = getmetatable(v)
+		if mt ~= nil and rawget(mt, "__is_entity") then
+			return NewValue(0, nil, nil, v)
+		end
 		-- a raw table (not a Value) built directly by some instruction func, e.g.
 		-- combine_coordinate's `{ coord = { new_x, new_y } }` -- same fields, not yet a Value
 		return NewValue(v.num, v.coord, v.id, v.entity, v.item)
@@ -87,6 +115,13 @@ end
 -- EXISTING slot object to overwrite its contents in place (rather than replacing the table
 -- entry), so other references to the same slot see the update without needing to re-fetch it.
 function Value:Init(val)
+	-- nil clears to a genuinely empty value -- a real, reachable path: e.g. read_signal's func
+	-- does `Set(comp, state, res, ent and ent:GetRegister(FRAMEREG_SIGNAL) or nil)`, so the native
+	-- Init must accept nil. (Found 2026-07-19 via a read_signal-with-no-Unit test erroring here.)
+	if val == nil then
+		self.num, self.coord, self.id, self.entity, self.item = 0, nil, nil, nil, nil
+		return self
+	end
 	val = coerce(val)
 	self.num, self.coord, self.id, self.entity, self.item = val.num, val.coord, val.id, val.entity, val.item
 	return self
@@ -182,8 +217,9 @@ function PatchBeginBlock(fn)
 	end
 end
 
--- Frame registers (Signal=1, Visual=2, Store=3, Goto=4, per InstGet's `comp.owner:GetRegister(-j)`
--- for `-99 <= j <= 0`) backed by a plain array on a fake `owner` entity.
+-- Frame registers (Goto=1, Store=2, Visual=3, Signal=4 -- see the FRAMEREG_* block below; InstGet
+-- resolves wire address j, `-99 <= j <= 0`, via `comp.owner:GetRegister(-j)`) backed by a plain
+-- array on a fake `owner` entity.
 local Owner = {}
 Owner.__index = Owner
 function Owner:GetRegister(n) return self.registers[n] or NewValue(0) end
@@ -290,14 +326,20 @@ FF_NEUTRALFACTION = 512
 FF_ALLYFACTION    = 1024
 FF_WORLDFACTION   = 2048
 
--- Frame register indices. Consistent with InstGet's own `comp.owner:GetRegister(-j)` frame-register
--- addressing (address -1..-4 -> register 1..4) and with instructions that pass a FRAMEREG_* value
--- straight to `entity:GetRegister(...)` (e.g. read_signal's `ent:GetRegister(FRAMEREG_SIGNAL)`),
--- and with behavior_format.md's Signal/Visual/Store/Goto ordering.
-FRAMEREG_SIGNAL = 1
-FRAMEREG_VISUAL = 2
-FRAMEREG_STORE  = 3
-FRAMEREG_GOTO   = 4
+-- Frame register indices. InstGet resolves a wire address -j to `comp.owner:GetRegister(j)`, and
+-- the TRUE wire mapping is -1 Goto, -2 Store, -3 Visual, -4 Signal (corrected 2026-07-19 --
+-- confirmed from deployed, in-game-working behaviors: magnifier_signal's drone-invitation
+-- broadcast writes @signal as wire -4, miner_drone's travel write puts @goto at wire -1; matches
+-- bsf/values.py's mapping). So the native register indices these constants must equal are
+-- Goto=1..Signal=4 -- the REVERSE of an earlier guess here (Signal=1..Goto=4), which had copied
+-- GetRegisterOrComponentRegister's selector order: that function maps the comp-reg instructions'
+-- POSITIVE selector numbers (1 Signal, 2 Visual, 3 Store, 4 Goto), a different address space from
+-- the negative wire encoding (native index = 5 - selector). With these values, a wire -4 write and
+-- read_signal's `ent:GetRegister(FRAMEREG_SIGNAL)` land on the same slot, as in the real engine.
+FRAMEREG_GOTO   = 1
+FRAMEREG_STORE  = 2
+FRAMEREG_VISUAL = 3
+FRAMEREG_SIGNAL = 4
 FRAMEREG_COUNT  = 4
 
 -- data/components.lua's portable-radar re-arm timing quirk uses this fixed rate (=5, confirmed

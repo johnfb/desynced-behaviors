@@ -53,10 +53,12 @@ def test_find_closest_picks_nearest_in_range(engine):
 
 
 def test_range_gate_is_chebyshev(engine):
-    # The range gate is Chebyshev, confirmed in-game via the Blight Magnifier's square range=2
-    # coverage (blight_magnifier_mining.md "Range is Chebyshev distance"), whose implementation is
-    # Map.FindClosestEntity itself. A diagonal placement distinguishes the metrics: (3,3) is
-    # Chebyshev 3 but path-length/Euclidean 4.24.
+    # Pins the mock's MODELED gate metric (Chebyshev). What's in-game-confirmed is only that the
+    # magnifier's radius-2 coverage is a full square -- which Chebyshev and floor(Euclidean)
+    # both produce at that size; the in-game RangeProbe run (range_probe.bsf) decides between
+    # them, and this test's expectations flip to floor(Euclidean) if it reports (3,3) first
+    # detected at Range 4 (see world.lua's distance-model note). (3,3) is where they separate:
+    # Chebyshev 3 vs floor(Euclid) 4.
     w = MockWorld(engine)
     me = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
     diag = w.spawn("f_bot_1m_c", "player", 3, 3)
