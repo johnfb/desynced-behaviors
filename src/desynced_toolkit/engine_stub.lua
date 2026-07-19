@@ -111,6 +111,14 @@ local function coerce(v)
 	error("cannot coerce to Value: " .. tostring(v))
 end
 
+-- The real register object's `:Clear()` -- called by the dispatcher's restart path
+-- (`c_behavior_on_end`'s `mem[i]:Clear()` over `asm.lvs`, the local-variable slots of a
+-- non-`keepvars` behavior) to blank locals when a behavior falls back to Program Start.
+function Value:Clear()
+	self.num, self.coord, self.id, self.entity, self.item = 0, nil, nil, nil, nil
+	return self
+end
+
 -- `state.mem[j]` slots are mutable "register object" boxes: InstSet calls `:Init(val)` on the
 -- EXISTING slot object to overwrite its contents in place (rather than replacing the table
 -- entry), so other references to the same slot see the update without needing to re-fetch it.
@@ -179,13 +187,23 @@ function Tool.NewRegisterObject(v)
 	return coerce(v)
 end
 
--- Used by a few instruction funcs (e.g. for_signal_match's numeric filter modes) to snapshot a
--- value before mutating. Engine-native; a shallow copy preserving the metatable is enough here.
+-- Engine-native deep copy. Used by instruction funcs to snapshot values (for_signal_match's
+-- numeric filter modes) and -- load-bearing since the real-dispatcher work -- by `SetBehavior`
+-- (data/library.lua) as `Tool.Copy(asm.mem)`: the compiled asm's initial memory image is COPIED
+-- into each running state, so this must be a genuinely deep copy -- a shallow one (this stub's
+-- first version) would hand every run the cached compile's own Value boxes, and the first
+-- in-place `:Init()` would corrupt the shared compile for every later run. Entities are the one
+-- reference type that must NOT be copied (identity is their meaning; the real engine's entities
+-- are userdata and survive its native deep copy as references) -- recognized via the mock
+-- Entity metatable marker, same as `coerce` below. No cycle handling: nothing this harness
+-- copies is cyclic (asm.mem is a flat Value array; a Value's fields bottom out immediately).
 function Tool.Copy(v)
 	if type(v) ~= "table" then return v end
+	local mt = getmetatable(v)
+	if mt ~= nil and rawget(mt, "__is_entity") then return v end
 	local c = {}
-	for k, val in pairs(v) do c[k] = val end
-	return setmetatable(c, getmetatable(v))
+	for k, val in pairs(v) do c[k] = Tool.Copy(val) end
+	return setmetatable(c, mt)
 end
 
 -- A block-loop instruction func (for_entities_in_range/for_signal_match) builds an iterator table
@@ -228,19 +246,58 @@ function Owner:GetRegisterNum(n) return (self.registers[n] or NewValue(0)).num e
 function Owner:GetRegisterCoord(n) local r = self.registers[n] return r and r.coord end
 function Owner:GetRegisterId(n) local r = self.registers[n] return r and r.id end
 function Owner:GetRegisterEntity(n) local r = self.registers[n] return r and r.entity end
+-- `UpdateEntityBehaviorState` (data/library.lua, reached via the real `exit` func) scans the
+-- owner's components by base id + occurrence index; the bare fake owner has none.
+function Owner:FindComponent(id, by_base, index) return nil end
+
+-- The bare stand-in faction a `NewComp` component belongs to. Real behavior execution reaches the
+-- faction for two things outside the mock world: `comp.faction.extra_data.library` (the saved-
+-- behavior store `GetFactionBehaviorAsm`/`SetBehavior` compile from -- per-comp here, so parallel
+-- bare interpreters never share ids) and `faction:RunUI(...)` (`InstError`'s user notification --
+-- a no-op here; the error still stops the behavior via the real `exit` func).
+local StubFaction = {}
+StubFaction.__index = StubFaction
+function StubFaction:RunUI(...) end
 
 -- `wait`'s func (data/instructions.lua) calls `comp:SetStateSleep(t)` and returns `true` when it
 -- actually slept (t > 0) -- the real per-tick dispatcher reads this to know to stop running this
 -- component for the rest of the current tick. `t` defaults to 1 when omitted (a handful of real
 -- callers in data/components.lua use `comp:SetStateSleep()` with no argument at all).
+--
+-- `has_extra_data` is a NATIVE computed property of real components (`comp.has_extra_data and
+-- comp.extra_data` is the dispatcher's own idiom), modeled with an __index function so it stays
+-- live as `SetBehavior` assigns `comp.extra_data`.
 local CompMeta = {}
-CompMeta.__index = CompMeta
+CompMeta.__index = function(t, k)
+	if k == "has_extra_data" then return rawget(t, "extra_data") ~= nil end
+	return CompMeta[k]
+end
 function CompMeta:SetStateSleep(t)
 	self.sleep = t or 1
 end
+-- Component registers (a behavior's PARAMETERS live here -- `state.stk = #parameters` makes
+-- GetStack route addresses 1..#parameters to `comp:GetRegister(j)`, see data/library.lua's
+-- SetBehavior). Same bank shape as the Owner's frame registers above.
+function CompMeta:GetRegister(n) return self.registers[n] or NewValue(0) end
+function CompMeta:SetRegister(n, v) if v == nil then self.registers[n] = nil else self.registers[n] = coerce(v) end end
+function CompMeta:GetRegisterNum(n) return (self.registers[n] or NewValue(0)).num end
+function CompMeta:GetRegisterCoord(n) local r = self.registers[n] return r and r.coord end
+function CompMeta:GetRegisterId(n) local r = self.registers[n] return r and r.id end
+function CompMeta:GetRegisterEntity(n) local r = self.registers[n] return r and r.entity end
+-- Activation lifecycle (the engine's own component activity flag, flipped by SetBehavior/exit).
+function CompMeta:Activate() self.is_active = true end
+function CompMeta:Shutdown() self.is_active = false end
 
 function NewComp()
-	return setmetatable({ owner = setmetatable({ registers = {} }, Owner), sleep = 0 }, CompMeta)
+	return setmetatable({
+		owner = setmetatable({ registers = {} }, Owner),
+		faction = setmetatable({ meta_type = "faction", extra_data = { library = {} } }, StubFaction),
+		def = { name = "stub component" },
+		registers = {},
+		register_count = 0,
+		is_active = false,
+		sleep = 0,
+	}, CompMeta)
 end
 
 -- `state.stk = 0` (a plain number, not a table) is GetStack's simplest case: a flat, top-level
@@ -265,6 +322,15 @@ function Map.GetSettings()
 	-- (`Map.GetSettings().blight_threshold - 0.3`), so it must be a real number for the registry
 	-- load to succeed; its value only feeds a cosmetic `terraforming_target` field.
 	return { block_unlocked_behaviors = false, blight_threshold = 0.1 }
+end
+
+-- Deferred-callback queue (`Map.Defer` schedules engine work for end-of-tick -- SetBehavior's
+-- event-listener spawn rides it). This bare queue is never drained automatically; the mock world
+-- (world.lua, loaded on top) REPLACES Defer with its own World-owned queue that MockWorld.step
+-- drains every tick. Kept here so the bare (no-world) runtime can at least accept the calls.
+Map.deferred = {}
+function Map.Defer(fn)
+	Map.deferred[#Map.deferred + 1] = fn
 end
 
 -- `jump`'s func scans `GetCachedBehaviorAsm(state.revid)` for a matching `label` instruction --

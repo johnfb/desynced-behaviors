@@ -157,9 +157,23 @@ Faction.__index = Faction
 function World.MakeFaction(name, is_world)
 	local f = World.factions[name]
 	if f then return f end
-	f = setmetatable({ name = name, is_world_faction = is_world or false, trust = {} }, Faction)
+	f = setmetatable({
+		name = name,
+		is_world_faction = is_world or false,
+		trust = {},
+		-- The saved-behavior store the real GetFactionBehaviorAsm/SetBehavior (data/library.lua)
+		-- compile from; MockWorld.attach_behavior imports into it (real per-faction shape).
+		extra_data = { library = {} },
+	}, Faction)
 	World.factions[name] = f
 	return f
+end
+
+-- `InstError`'s user notification path; the mock has no UI. The error still stops the behavior
+-- (InstError falls through to the real `exit` func), and the notification closure is recorded so
+-- a test can at least assert that an instruction error happened.
+function Faction:RunUI(...)
+	World.last_run_ui = ...
 end
 
 -- Trust is symmetric here (the game's can differ per direction, but the first-version mock has no
@@ -317,11 +331,18 @@ end
 
 function Entity:CountItem(id) return self.inventory[id] or 0 end
 
--- Exact-id component lookup. base_id-family matching (has_like_component) and UI-order indexing are
--- later refinements; the sensing/movement phase only needs presence-by-id.
-function Entity:FindComponent(id)
+-- Component lookup. The real native signature (seen in `UpdateEntityBehaviorState`,
+-- data/library.lua: `e:FindComponent("c_behavior", true, i)`) takes an id, a flag, and a 1-based
+-- occurrence index; the flag is modeled as "match by base_id family too" (so the scan finds
+-- c_integrated_behavior when asked for c_behavior -- consistent with what that caller counts;
+-- the engine's exact flag meaning is unverified, flagged as a modeling choice).
+function Entity:FindComponent(id, by_base, index)
+	local n = 0
 	for _, c in ipairs(self.components) do
-		if c.id == id then return c end
+		if c.id == id or (by_base and c.def.base_id == id) then
+			n = n + 1
+			if n >= (index or 1) then return c end
+		end
 	end
 	return nil
 end
@@ -361,15 +382,24 @@ end
 --------------------------------------------------------------------------------------------------
 
 local Component = {}
-Component.__index = Component
+-- `has_extra_data` mirrors the engine's native computed property (`comp.has_extra_data and
+-- comp.extra_data` is the real dispatcher's idiom) -- live via __index, same as engine_stub's
+-- bare comp.
+Component.__index = function(t, k)
+	if k == "has_extra_data" then return rawget(t, "extra_data") ~= nil end
+	return Component[k]
+end
 
 function Component:GetRegister(n) return self.registers[n] or NewValue(0) end
-function Component:SetRegister(n, v) self.registers[n] = Tool.NewRegisterObject(v) end
+function Component:SetRegister(n, v) if v == nil then self.registers[n] = nil else self.registers[n] = Tool.NewRegisterObject(v) end end
 function Component:GetRegisterNum(n) return (self.registers[n] or NewValue(0)).num end
 function Component:GetRegisterCoord(n) local r = self.registers[n] return r and r.coord end
 function Component:GetRegisterId(n) local r = self.registers[n] return r and r.id end
 function Component:GetRegisterEntity(n) local r = self.registers[n] return r and r.entity end
 function Component:SetStateSleep(t) self.sleep = t or 1 end
+-- Activation lifecycle (the engine's own component activity flag, flipped by SetBehavior/exit).
+function Component:Activate() self.is_active = true end
+function Component:Shutdown() self.is_active = false end
 
 -- Records a move goal on the OWNER and reports (need_move, repeat_blocked). Phase 3 replaces the
 -- always-"need_move=true" with real per-tick tile advance so arrival-gated loops terminate.
@@ -440,6 +470,8 @@ function World.AddComponent(entity, comp_id, register_count)
 		owner = entity,
 		faction = entity.faction,
 		registers = {},
+		register_count = 0,
+		is_active = false,
 		sleep = 0,
 	}, Component)
 	entity.components[#entity.components + 1] = c
