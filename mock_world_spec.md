@@ -298,7 +298,8 @@ cap.attach_behavior("library/squad-captain.dcs", params={...})
 g1 = w.spawn("f_bot_1m_b", faction="player", x=2, y=0)
 g1.attach_behavior("library/squad-gunner.dcs", params={"Captain": cap})
 
-enemy = w.spawn("f_bug_larva", faction="bugs", x=35, y=0)
+enemy = w.spawn("f_larva1", faction="bugs", x=35, y=0)  # "Larva" (real frame id -- an earlier
+                                                        # draft wrote the nonexistent f_bug_larva)
 
 w.step(20)
 assert cap.get_register("SIGNAL").entity is enemy            # Captain broadcast ENGAGE
