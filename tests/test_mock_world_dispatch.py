@@ -67,8 +67,8 @@ def test_get_closest_entity_finds_enemy(engine):
 def test_distance_metrics_through_real_funcs(engine):
     """Pins the settled distance semantics through the REAL instruction funcs (not just the
     Map primitives): get_closest_entity's winner is the straight-line-nearest (Euclidean), and
-    get_distance reads back the unobstructed grid path length (octile) -- both user-observed
-    in-game 2026-07-19; see world.lua's distance-model note."""
+    get_distance reads back floored straight-line Euclidean -- settled by the in-game RangeProbe
+    run 2026-07-19; see world.lua's distance-model note."""
     w = MockWorld(engine)
     player = w.faction("player")
     bugs = w.faction("bugs")
@@ -86,8 +86,9 @@ def test_distance_metrics_through_real_funcs(engine):
         "n2: get_distance(Target=Out, Distance=Dist)\n",
     )
     assert interp.read_param(1).entity.eid == b.eid
-    # path length to (10,3): 10 + 3*(sqrt(2)-1) = 11.24 -> 11 (Euclidean would round to 10)
-    assert interp.read_param(2).num == 11
+    # get_distance to (10,3): floor(10.44) = 10 (the path length 11.24 would read 11 -- ruled
+    # out by the in-game probe's (6,3) row)
+    assert interp.read_param(2).num == 10
 
 
 def test_frame_register_wire_mapping_signal(engine):
@@ -251,21 +252,20 @@ def test_for_signal_match_membership_scan(engine):
 
 # The RangeProbe instrument (tests/data/range_probe.bsf, compiled copy alongside): sweeps
 # Loop Units (Range) with Range=1..15 and reports the smallest detecting Range on @signal plus the
-# get_distance readout on @store. The min_range column holds the GOLDEN in-game results
-# (user-run 2026-07-19), which settled the gate metric as floored Euclidean: they match
-# floor(euclid) exactly, while (3,3)/(4,3) rule out Chebyshev, (6,3) rules out floored-octile,
-# and (2,2)/(3,2) rule out round/ceil/real Euclidean. The distance column is still the mock's
-# model of the @store readout (rounded octile path length -- its exact rounding was not part of
-# the reported results; flip these if an in-game @store reading ever disagrees).
+# get_distance readout on @store. BOTH columns are GOLDEN in-game results (user-run 2026-07-19;
+# @store was identical to @signal at every offset), which settled the whole distance model as one
+# function: get_distance = floor(straight-line Euclidean), and the range gate is exactly
+# `get_distance <= R`. (3,3)/(4,3) rule out Chebyshev, (6,3) rules out path-length/octile (7.24
+# would read 7; the game said 6), (2,2)/(3,2) rule out round/ceil Euclidean.
 @pytest.mark.parametrize(
     "offset,min_range,distance",
     [
         ((3, 0), 3, 3),
-        ((2, 2), 2, 3),
-        ((3, 2), 3, 4),
+        ((2, 2), 2, 2),
+        ((3, 2), 3, 3),
         ((3, 3), 4, 4),
         ((4, 3), 5, 5),
-        ((6, 3), 6, 7),
+        ((6, 3), 6, 6),
     ],
 )
 def test_range_probe_fixture_against_mock_model(engine, offset, min_range, distance):

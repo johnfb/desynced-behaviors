@@ -358,16 +358,18 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
     form of Euclidean" hypothesis was right. Every sensing instruction routed through the native
     function inherits this gate.
   - **"Closest" selection among gate-passers is Euclidean** (user-observed in-game 2026-07-19) —
-    the winner is the straight-line-nearest candidate inside the square.
-  - **`Map.GetDistance` (the `get_distance` readout) is the *unobstructed grid path length***
-    (user-observed in-game 2026-07-19): the cost of the straight 8-connected walk over the grid,
-    **ignoring obstacles — it does not run the pathfinder**. That is the octile measure
-    `max(|dx|,|dy|) + (√2−1)·min(|dx|,|dy|)`, i.e. exactly the movement model's per-step Euclidean
-    accumulation, returned rounded — and because the real readout ignores obstacles, the closed
-    formula stays exact even once the mock models occupancy/blocking. All three measures are
-    pinned by tests (`test_mock_world.py`, `test_mock_world_dispatch.py`).
-  - Loose ends: the readout's exact rounding rule (only observable at `.5` boundaries), and the
-    faction-vision bubble's shape (mock uses Euclidean).
+    the winner is the straight-line-nearest candidate.
+  - **`Map.GetDistance` (the `get_distance` readout) is that same function — floored
+    straight-line Euclidean, and the gate is literally `get_distance ≤ R`.** The probe's `@store`
+    readouts were **identical to the minimal detecting ranges at every offset** (user-reported),
+    so gate and readout are one function. The (6,3) row settled the readout's *metric*: an
+    unobstructed-grid-path-length model (octile ≈ 7.24 there — a working hypothesis mid-probe)
+    would have read 7; the game read 6 = `floor(6.71)`. Floor (not round) is pinned by (2,2):
+    2.83 → 2. The distinction that survives: **movement cost** still accumulates ≈√2 per
+    diagonal step (the measured movement model) — a property of motion, not of the distance
+    readout. Everything pinned by tests (`test_mock_world.py`, `test_mock_world_dispatch.py`;
+    the probe's golden rows carry both columns).
+  - Remaining loose end: the faction-vision bubble's shape (mock uses Euclidean).
   - Real `get_distance` on a multi-tile entity means closest-tile, and center-tile after a
     `get_location` (rounds up on ties) — see the project memory on this. The mock should reproduce
     at least the single-tile-entity case exactly and document any multi-tile simplification.

@@ -528,12 +528,13 @@ Update this file directly as items are picked up/finished.
       (6,3)=6 — **floored Euclidean** exactly (in range R ⟺ floor(dist) ≤ R); Chebyshev,
       floored-octile, and round/ceil Euclidean each contradicted by at least one row. The
       magnifier's 5×5 square at range 2 is the floor artifact of this circular gate at small
-      radius. `world.lua`'s gate, the pinned tests (probe rows are now the in-game golden
+      radius. Follow-up report closed the `@store` question too: **the `get_distance` readouts
+      were identical to the minimal detecting ranges at every offset** — so gate and readout are
+      one function, `get_distance` = floor(straight-line Euclidean), and the (6,3)=6 row refuted
+      the interim "unobstructed path length" model (octile ≈ 7.24 would have read 7). `world.lua`
+      (one distance function now), the pinned tests (both probe columns are in-game golden
       values), `mock_world_spec.md`, `blight_magnifier_mining.md`, and the
-      `reference_distance_metrics` memory all updated. Still open (minor): the `@store`
-      (`get_distance` readout) rounding rule wasn't part of the reported results — the golden
-      distance column stays the mock's octile-rounded model until an in-game `@store` reading
-      says otherwise.
+      `reference_distance_metrics` memory all updated.
 - [ ] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm`** in `interpreter.py` rather
       than its current Python-simulated block stack and simplified `Memory`/mem-slot
       allocation — `for_number`'s own per-iteration decision is already delegated to real Lua,

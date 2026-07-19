@@ -22,19 +22,22 @@ def test_spawn_uses_real_def(engine):
     assert bot.location.x == 0 and bot.location.y == 0
 
 
-def test_get_distance_is_unobstructed_path_length(engine):
-    # get_distance's readout is the UNOBSTRUCTED grid path length (user-observed in-game
-    # 2026-07-19): the straight 8-connected walk's cost, ignoring obstacles (no pathfinder) --
-    # octile: max + (sqrt(2)-1)*min, rounded. (12,5) distinguishes it from straight-line
-    # Euclidean, which would say 13.
+def test_get_distance_is_floored_euclidean(engine):
+    # get_distance's readout is FLOORED straight-line Euclidean -- settled by the in-game
+    # RangeProbe run (2026-07-19; @store equaled @signal at every offset). (6,3) was the decisive
+    # in-game row (path length ~7.24 would read 7; the game said 6 = floor(6.71)); (12,5) is this
+    # test's own path-length discriminator (octile would say 14), (2,2)-type floors pin floor
+    # over round.
     w = MockWorld(engine)
     a = w.spawn("f_bot_1m_c", "player", 0, 0)
     b = w.spawn("f_bot_1m_c", "player", 3, 4)
-    assert w.distance(a, b) == 5  # 4 + 3*0.414 = 5.24 -> 5 (Euclidean happens to agree here)
+    assert w.distance(a, b) == 5  # exact 5.0
     c = w.spawn("f_bot_1m_c", "player", 35, 0)
-    assert w.distance(a, c) == 35  # axis-aligned: path length == Euclidean == Chebyshev
+    assert w.distance(a, c) == 35  # axis-aligned
     d = w.spawn("f_bot_1m_c", "player", 12, 5)
-    assert w.distance(a, d) == 14  # 12 + 5*0.414 = 14.07 -> 14; NOT the Euclidean 13
+    assert w.distance(a, d) == 13  # exact 13.0; the octile path length 14.07 would read 14
+    e = w.spawn("f_bot_1m_c", "player", 6, 3)
+    assert w.distance(a, e) == 6  # IN-GAME GOLDEN: floor(6.71); path length would read 7
 
 
 def test_find_closest_picks_nearest_in_range(engine):

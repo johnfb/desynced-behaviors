@@ -101,8 +101,8 @@ class MockWorld:
     # -- sensing primitives (direct access; Phase 2 wires these through instruction dispatch) ---
 
     def distance(self, a, b) -> int:
-        """``Map.GetDistance`` between two entities/coords: the rounded unobstructed grid path
-        length (octile measure; see world.lua's distance-model note)."""
+        """``Map.GetDistance`` between two entities/coords: floored straight-line Euclidean
+        (settled in-game by the RangeProbe run; see world.lua's distance-model note)."""
         return int(self._Map.GetDistance(a, b))
 
     def find_closest(self, owner, range_: int, filter_mask=None):

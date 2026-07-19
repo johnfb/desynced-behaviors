@@ -47,45 +47,35 @@ local function xy_of(target)
 	return nil
 end
 
--- Distance model -- THREE different measures, deliberately (see mock_world_spec.md "Open items"):
+-- Distance model -- SETTLED in-game 2026-07-19 by the RangeProbe run (tests/data/range_probe.bsf;
+-- its measured numbers are the golden rows in test_mock_world_dispatch.py). One distance function
+-- explains everything:
 --
--- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below) are FLOORED EUCLIDEAN:
---   in range R iff floor(euclid) <= R, equivalently euclid < R+1. SETTLED in-game 2026-07-19 by
---   the RangeProbe run (tests/data/range_probe.bsf; the measured minimal detecting ranges are the
---   golden rows in test_mock_world_dispatch.py): (3,0)=3 (2,2)=2 (3,2)=3 (3,3)=4 (4,3)=5 (6,3)=6
---   -- matches floor(Euclidean) exactly, while (3,3)/(4,3) rule out Chebyshev, (6,3) rules out
---   floored-octile, and (2,2)/(3,2) rule out round/ceil/real-valued Euclidean. This also explains
---   the magnifier's confirmed 5x5 coverage at range 2 (blight_magnifier_mining.md): the corner
---   sits at 2*sqrt(2)~2.83, which floors to 2 -- a small-radius floor artifact of a circular
---   gate, not a square metric.
--- * "Closest" ordering among gate-passing candidates (get_closest_entity's winner) is EUCLIDEAN --
---   user-observed in-game (2026-07-19). Same family as the gate: candidacy is the floored-Euclidean
---   disc, the winner inside it is the straight-line-nearest.
--- * Map.GetDistance (the get_distance instruction delegates straight to it) is the UNOBSTRUCTED
---   GRID PATH LENGTH -- user-observed in-game (2026-07-19): the length of the straight 8-connected
---   walk over the grid, ignoring obstacles entirely (it does NOT run the pathfinder). That is the
---   octile measure max(|dx|,|dy|) + (sqrt(2)-1)*min(|dx|,|dy|) -- the same per-step Euclidean
---   accumulation the movement measurement pinned (a diagonal step costs ~sqrt(2)) -- returned
---   rounded. Because obstacles are ignored by the real readout too, this formula stays exact even
---   once the mock models occupancy/blocking.
+-- * Map.GetDistance (the get_distance readout) is FLOORED STRAIGHT-LINE EUCLIDEAN:
+--   floor(sqrt(dx^2 + dy^2)). Measured per-offset readouts (3,0)=3 (2,2)=2 (3,2)=3 (3,3)=4
+--   (4,3)=5 (6,3)=6 match it exactly. (6,3)=6 is the decisive row: the unobstructed 8-connected
+--   PATH LENGTH there is 6 + 3*(sqrt(2)-1) ~ 7.24, so any path-length model -- an earlier working
+--   hypothesis -- would have read 7; floor(sqrt(45)) = 6. Floor (not round/ceil) is pinned by
+--   (2,2): 2.83 -> 2. Movement COST still accumulates ~sqrt(2) per diagonal step (the measured
+--   movement model) -- that is a property of motion, not of this readout.
+-- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below) are exactly
+--   `GetDistance(a, b) <= range`: the measured minimal detecting Range equaled the GetDistance
+--   readout at every offset (user-reported identical @signal/@store), i.e. gate and readout are
+--   one function. Chebyshev was ruled out by (3,3)/(4,3), octile by (6,3), round/ceil Euclidean
+--   by (2,2)/(3,2). The magnifier's confirmed 5x5 coverage at range 2
+--   (blight_magnifier_mining.md) is the floor artifact of this circular gate at small radius
+--   (corner 2*sqrt(2) ~ 2.83 floors to 2), not a square metric.
+-- * "Closest" ordering among gate-passers (get_closest_entity's winner) is Euclidean
+--   (user-observed in-game). The mock orders by the UNROUNDED value -- a modeling refinement the
+--   probe can't distinguish from ordering-by-floored-value + some tie-break; revisit only if a
+--   tie case ever matters.
 --
--- All three are pinned by tests (test_mock_world.py / test_mock_world_dispatch.py). Still
--- unverified: the readout's exact rounding rule (this mock rounds half up -- only matters on .5
--- boundaries), and the faction-vision bubble's shape (IsSeen/IsVisible below use Euclidean).
+-- Still unverified: the faction-vision bubble's shape (IsSeen/IsVisible below use Euclidean).
 -- For a multi-tile entity the real engine measures to the closest tile (see
 -- reference_get_distance_closest_tile) -- first-version mock entities are single-tile, so the
 -- distinction does not yet arise.
-local SQRT2_MINUS_1 = math.sqrt(2) - 1
 
-function Map.GetDistance(a, b)
-	local ax, ay = xy_of(a)
-	local bx, by = xy_of(b)
-	if ax == nil or bx == nil then return REG_INFINITE end
-	local dx, dy = math.abs(ax - bx), math.abs(ay - by)
-	return math.floor(math.max(dx, dy) + SQRT2_MINUS_1 * math.min(dx, dy) + 0.5)
-end
-
--- Unrounded Euclidean: the "closest" ordering metric (and the mock's vision-bubble test).
+-- Unrounded Euclidean: the "closest" ordering value (and the mock's vision-bubble test).
 local function euclid(a, b)
 	local ax, ay = xy_of(a)
 	local bx, by = xy_of(b)
@@ -94,12 +84,14 @@ local function euclid(a, b)
 	return math.sqrt(dx * dx + dy * dy)
 end
 
--- The range-gate measure: floored Euclidean (settled by the RangeProbe -- distance-model note).
-local function gate_distance(a, b)
+function Map.GetDistance(a, b)
 	local d = euclid(a, b)
 	if d == math.huge then return REG_INFINITE end
 	return math.floor(d)
 end
+
+-- The range gate IS the readout (see the distance-model note): in range iff GetDistance <= range.
+local gate_distance = Map.GetDistance
 
 --------------------------------------------------------------------------------------------------
 -- Tiles (see mock_world_spec.md "Tile model"). A tile is a tiny record; defaults are open valley,
