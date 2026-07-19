@@ -460,6 +460,25 @@ Update this file directly as items are picked up/finished.
         `Map.GetSettings`, empty `FactionAction`/`EntityAction`/`UIMsg`/`Delay` handler tables, a
         no-op `GetFactionBehaviorAsm`, and an auto-vivifying `data` table. Covered by new tests in
         `test_lua_runtime.py`; full suite green. Next: Phase 1 (`world.lua` primitives).
+      - [x] **Phase 1 — engine-native primitives in `world.lua`.** Done 2026-07-19. New
+        `world.lua` (loaded after instructions.lua) supplies the mocked leaves: the entity registry
+        with `Map.FindClosestEntity`/`GetDistance`/`GetEntitiesInRange`/`GetEntityAt`/`Defer`, the
+        tile record + `GetPlateauDelta`/`GetBlightnessDelta`/`GetTileData`/`CountTiles`, and the
+        Entity/Faction/Component metatables (frame+component register banks, `:MatchFilter`,
+        `faction:IsSeen`/`IsVisible`/`GetTrust`/`GetPowerGridIndexAt`, `:GetLocationXY`/`CountItem`/
+        `FindComponent`/`IsTouching`). Entity `.def` IS the real `data.frames`/`data.components`
+        table. `MatchFilter` splits a real `PrepareFilterEntity` mask into frametype (low bits) +
+        relative-faction (high bits) and agrees with it by construction; every finer type/faction
+        discrimination still bottoms out in the reused `FilterEntity`. Python facade
+        `desynced_toolkit.MockWorld` (spawn/add_component/faction/set_trust/set_tile + direct
+        sensing helpers); `World.Reset()` on construction isolates instances on the session engine.
+        `test_mock_world.py` covers the primitives *and* an end-to-end run of the unmodified real
+        `get_closest_entity` func over the mock (returns the right nearest enemy, skipping friendly/
+        out-of-range) — the proof the mocked surface satisfies a real func's contract. Modeling
+        choices flagged in `world.lua` for later in-game verification: distance is rounded Euclidean
+        (consistent with the movement model); vision is "within any own entity's visibility_range";
+        no power-grid/base_id-family model yet. Next: Phase 2 (interpreter op dispatch for the world
+        ops; also unblocks `library/hexat.dcs`'s unit-Origin path).
       - [x] **Movement-rate model measured in-game.** Done 2026-07-18: an Engineer walked a
         closed `HexAt`-corner circuit (R=1, d_half=5) under a logging behavior printing each
         location change with a Simulation Tick stamp. Pins Phase 3's per-tick advance: sub-tile
