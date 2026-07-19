@@ -144,6 +144,44 @@ function Tool.NewRegisterObject(v)
 	return coerce(v)
 end
 
+-- Used by a few instruction funcs (e.g. for_signal_match's numeric filter modes) to snapshot a
+-- value before mutating. Engine-native; a shallow copy preserving the metatable is enough here.
+function Tool.Copy(v)
+	if type(v) ~= "table" then return v end
+	local c = {}
+	for k, val in pairs(v) do c[k] = val end
+	return setmetatable(c, getmetatable(v))
+end
+
+-- A block-loop instruction func (for_entities_in_range/for_signal_match) builds an iterator table
+-- and hands it to `BeginBlock`, which in the real engine (`InstBeginBlock`, defined in
+-- instructions.lua) drives the loop via a `state.blocks` stack + the compiled asm. The Python
+-- Interpreter simulates the block stack itself (same tier as its for_number driver) and only needs
+-- the iterator table back. `BeginBlock` is a file-local alias for `InstBeginBlock` inside
+-- instructions.lua (like Get/Set), so it can't be shadowed by a global; instead `PatchBeginBlock`
+-- (called once after instructions.lua loads) repoints that shared upvalue cell to `MockBeginBlock`,
+-- which just returns `it`. Every block-loop func shares the one upvalue cell, so a single patch
+-- covers them all. Nothing in the current interpreter reaches BeginBlock any other way, so this is
+-- inert for for_number/sequence. Reusing the real InstBeginBlock/block stack is separate deferred
+-- work (see todo.md).
+function MockBeginBlock(comp, state, it)
+	return it
+end
+
+function PatchBeginBlock(fn)
+	if not (debug and debug.getupvalue) then return false end
+	local i = 1
+	while true do
+		local name = debug.getupvalue(fn, i)
+		if name == nil then return false end
+		if name == "BeginBlock" then
+			debug.setupvalue(fn, i, MockBeginBlock)
+			return true
+		end
+		i = i + 1
+	end
+end
+
 -- Frame registers (Signal=1, Visual=2, Store=3, Goto=4, per InstGet's `comp.owner:GetRegister(-j)`
 -- for `-99 <= j <= 0`) backed by a plain array on a fake `owner` entity.
 local Owner = {}

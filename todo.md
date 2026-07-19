@@ -479,6 +479,30 @@ Update this file directly as items are picked up/finished.
         (consistent with the movement model); vision is "within any own entity's visibility_range";
         no power-grid/base_id-family model yet. Next: Phase 2 (interpreter op dispatch for the world
         ops; also unblocks `library/hexat.dcs`'s unit-Origin path).
+      - [x] **Phase 2 — extend the interpreter op dispatch.** Done 2026-07-19. Replaced the
+        `interpreter.py` `else: raise` with a **metadata-driven generic dispatcher**: it reads each
+        op's real `data.instructions[op].args` directions (in/out/exec), marshals the positional args
+        (value args → mem slots / nil; exec args → raw 1-based branch targets / False, omitted →
+        next node — the same 3-way rule `check_number`'s hand arm uses), prepends any hidden
+        `make_asm` arg (the `c` field — domove's Sync/Async, bitwise_op's op, for_signal_match's
+        mode; reuses the real `make_asm` for the default), calls the genuine func, and resolves its
+        `state.counter` branch decision uniformly. Covers get_location/get_distance/get_health/
+        get_closest_entity/read_signal/set_comp_reg/get_comp_reg/value_type/match/check_bit/
+        bitwise_op/domove/… in one arm. The two **block-producing sensing loops**
+        (for_entities_in_range/for_signal_match) get a shared `_enter_block_loop` mirroring
+        `_enter_for_number`, but the real `func` builds the iterator via real
+        `Map.FindClosestEntity`/`GetEntitiesWithRegister` + `FilterEntity`; since their `BeginBlock`
+        is a file-local alias for the real `InstBeginBlock` block-stack driver (which the Python
+        interpreter deliberately doesn't use — the separate deferred item below), `LupaEngine`
+        repoints that one shared upvalue cell to a `MockBeginBlock` stub (via `debug.setupvalue`)
+        that just returns the iterator, letting the Python block driver run `.next`/`.last`.
+        `Interpreter` gained an optional `comp=` param so a MockWorld component (comp.owner = a real
+        mock entity) can back the sensing ops. Tests: `test_mock_world_dispatch.py` (get_location,
+        get_closest_entity, read_signal, match exec-branch, value_type, both loops) + the spec's
+        explicit payoff `test_hexat_unit_origin_runs_via_mock_world` in `test_bsf_end_to_end.py`
+        (deployed `library/hexat.dcs`'s value_type→get_location Unit path, previously unrunnable).
+        Full suite green. Next: Phase 3 (movement + `MockWorld.step`, against the golden
+        `movement_circuit_test` fixture).
       - [x] **Movement-rate model measured in-game.** Done 2026-07-18: an Engineer walked a
         closed `HexAt`-corner circuit (R=1, d_half=5) under a logging behavior printing each
         location change with a Simulation Tick stamp. Pins Phase 3's per-tick advance: sub-tile
@@ -515,6 +539,15 @@ Update this file directly as items are picked up/finished.
       `test_lint_clean_on_all_library_behaviors` decompiles + lints every library behavior,
       so decode regressions are caught — the render→parse→compile round-trip half is still
       open.*
+- [ ] **A branch note without a `(pin)` name is silently dropped by the BSF parser** (found
+      2026-07-19 writing Phase 2 mock-world tests). `_parse_branch_notes` extracts `(target, pin)`
+      pairs via `_BRANCH_RE.findall`, so a hand-written bare `>POP` / `>n4` (no ` (pinname)`) matches
+      nothing and is discarded with no error — the node silently keeps positional fallthrough instead
+      of the intended dead-end/target. The canonical renderer always emits `(pin)`, so round-trips
+      are unaffected; only hand-authored BSF hits it. This is exactly the silent-miswire class the
+      strict validator exists to prevent, so it should **error** (unknown/absent pin) — or, for a
+      single-exec-pin op where the pin is unambiguous, be accepted as shorthand for that pin. Small,
+      localized fix in `parse_text.py`.
 - [ ] **Fix `semantic_diff`'s rendering of a node inserted at a fallthrough boundary**
       (noticed 2026-07-14 verifying the Mining Leader arm-once fix): the insertion itself
       reports fine, but the predecessor's fallthrough pins are additionally reported as

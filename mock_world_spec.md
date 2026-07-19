@@ -1,8 +1,10 @@
 # Mock World for Behavior Testing — Design Spec
 
-**Status:** Phases 0–1 done (Data registries load under the stub; `world.lua` supplies the
-engine-native sensing primitives + entity graph, driven by `desynced_toolkit.MockWorld`); Phases
-2–4 not started. Work state lives in `todo.md` (§ `desynced_toolkit` / BSF infrastructure), not here.
+**Status:** Phases 0–2 done (Data registries load under the stub; `world.lua` supplies the
+engine-native sensing primitives + entity graph, driven by `desynced_toolkit.MockWorld`; the
+`Interpreter` op dispatch runs the world/sensing ops + both block-producing sensing loops
+end-to-end); Phases 3–4 not started. Work state lives in `todo.md` (§ `desynced_toolkit` / BSF
+infrastructure), not here.
 
 ## Goal
 

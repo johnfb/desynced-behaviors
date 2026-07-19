@@ -100,3 +100,33 @@ def test_end_to_end_reorder_edit_on_hexat_test(engine):
         interp.run()
         result = interp.read_param(3)
         assert (result.coord.x, result.coord.y) == _ref_hexat(R, T)
+
+
+def test_hexat_unit_origin_runs_via_mock_world(engine):
+    """Mock world Phase 2 payoff (mock_world_spec.md): the deployed library/hexat.dcs's unit-Origin
+    path -- value_type(Origin) -> Unit branch -> get_location -> separate_coordinate -- was
+    unrunnable through the Interpreter until the op dispatch grew those ops (Phase 2) and the mock
+    world could supply a real entity to read a location from (Phase 1). With a MockWorld-backed comp
+    and Origin bound to a live unit, HexAt computes the same coordinate as passing that unit's own
+    coord directly (the closed-form reference, origin = the unit's tile)."""
+    from desynced_toolkit import MockWorld
+
+    repo_root = Path(__file__).parent.parent
+    b = decompile_dcs(engine, (repo_root / "library" / "hexat.dcs").read_text().strip())
+    prog = compile_behavior(engine, b)
+
+    w = MockWorld(engine)
+    ux, uy = -14, 51
+    unit = w.spawn("f_bot_1m_c", "player", ux, uy)
+    owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=200)
+    comp = w.add_component(owner, "c_behavior")
+    new_value = engine.lua.globals().NewValue
+
+    # R > 0 so it takes the get_location path rather than n1's R==0 "return Origin" shortcut.
+    for R, T in [(3, 5), (5, 29), (8, 40)]:
+        interp = Interpreter(engine, prog, params={1: R, 2: T, 5: D_HALF}, comp=comp)
+        # Origin (param slot 4) is a live UNIT entity -> value_type routes to the Unit branch.
+        interp.state.mem[4] = new_value(0, None, None, unit)
+        interp.run()
+        result = interp.read_param(3)
+        assert (result.coord.x, result.coord.y) == _ref_hexat(R, T, origin=(ux, uy))

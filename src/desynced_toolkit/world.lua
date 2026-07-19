@@ -84,16 +84,22 @@ function World.SetTile(x, y, fields)
 end
 
 -- Signed deltas: >= 0 means on-plateau / in-blight (matches FilterEntity's v_plateau/v_blight tests
--- and the check_altitude/check_blightness instructions). Accept an entity or a coord; ignore any
--- trailing threshold arg the real signature takes.
-function Map.GetPlateauDelta(target)
-	local x, y = xy_of(target)
+-- and the check_altitude/check_blightness instructions). Called three ways in the real funcs:
+-- `(entity)`, `(entity, threshold)`, and `(x, y, threshold)` -- so accept an entity/coord OR a
+-- literal x,y pair; trailing threshold args are ignored (first-version tiles have no sub-threshold).
+local function delta_xy(a, b)
+	if type(a) == "number" and type(b) == "number" then return a, b end
+	return xy_of(a)
+end
+
+function Map.GetPlateauDelta(a, b)
+	local x, y = delta_xy(a, b)
 	if x == nil then return -1 end
 	return World:tile(x, y).plateau_delta
 end
 
-function Map.GetBlightnessDelta(target)
-	local x, y = xy_of(target)
+function Map.GetBlightnessDelta(a, b)
+	local x, y = delta_xy(a, b)
 	if x == nil then return -1 end
 	return World:tile(x, y).blight_delta
 end
@@ -159,6 +165,28 @@ function Faction:IsVisible(a, b)
 		return false
 	end
 	return self:IsSeen(a)
+end
+
+-- Broad-phase signal scan (`for_signal_match`): return own-faction entities that currently hold a
+-- non-empty signal register value. The real for_signal_match func re-filters these precisely (by
+-- signal id, or an embedded-entity MatchFilter), so this only supplies the candidate set.
+function Faction:GetEntitiesWithRegister(reg_index, signal, include_flag)
+	local out = {}
+	for _, e in pairs(World.registry) do
+		if e.exists and e.faction == self then
+			local r = e.registers[reg_index]
+			if r ~= nil and not (r.num == 0 and r.id == nil and r.entity == nil and r.coord == nil) then
+				out[#out + 1] = e
+			end
+		end
+	end
+	return out
+end
+
+-- Fog-of-war "has this tile been discovered". First-version mock has no fog model -- everything is
+-- discovered (check_altitude/check_blightness gate on this).
+function Faction:IsDiscovered(coord)
+	return true
 end
 
 -- Power grid: first-version mock has no grid model, so nil (v_in_powergrid -> false, and the

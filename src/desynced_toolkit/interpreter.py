@@ -56,7 +56,11 @@ def _seq_targets(instr, i: int):
 
 class Interpreter:
     def __init__(
-        self, engine: LupaEngine, prog, params: dict[int, object] | None = None
+        self,
+        engine: LupaEngine,
+        prog,
+        params: dict[int, object] | None = None,
+        comp=None,
     ) -> None:
         self.engine = engine
         self.prog = prog
@@ -64,7 +68,10 @@ class Interpreter:
         while prog[self.n + 1] is not None:
             self.n += 1
         self.state = engine.new_state()
-        self.comp = engine.new_comp()
+        # `comp` defaults to the bare engine stub (fake Owner). Pass a MockWorld component
+        # (comp.owner is a real mock entity, comp.faction set) to run sensing/movement ops that
+        # read the world -- get_location/get_closest_entity/read_signal/domove/... .
+        self.comp = comp if comp is not None else engine.new_comp()
         self.mem = Memory(engine, self.state)
         # reserve mem slots 1..N for declared parameters (matching the source format's own
         # convention of plain positive ints for parameter references) -- every slot needs a
@@ -84,6 +91,7 @@ class Interpreter:
         self._i = 0
         self._blocks: list[dict] = []
         self._finished = False
+        self._arg_dir_cache: dict[str, list[str]] = {}
 
     def _value_for(self, py_value):
         if isinstance(py_value, tuple):
@@ -195,6 +203,100 @@ class Interpreter:
             return target
         blocks.append({"kind": "loop", "advance": advance, "break_": call_last})
         return target  # == body_start
+
+    def _arg_dirs(self, op: str) -> list[str]:
+        """Direction ('in'/'out'/'exec') of each declared arg for `op`, from the real
+        `data.instructions[op].args`, in declaration order -- the func's params after `cause` map
+        1:1 to these. Cached (static per engine)."""
+        cached = self._arg_dir_cache.get(op)
+        if cached is not None:
+            return cached
+        d = self.engine.data.instructions[op]
+        dirs: list[str] = []
+        meta = d.args if d is not None else None
+        if meta is not None:
+            k = 1
+            while meta[k] is not None:
+                dirs.append(meta[k][1])
+                k += 1
+        self._arg_dir_cache[op] = dirs
+        return dirs
+
+    def _hidden_args(self, op: str, instr) -> list:
+        """Leading hidden arg(s) some funcs take before their declared args -- produced by the real
+        `make_asm(inst)` (the `c` combo field: domove's Sync/Async, bitwise_op's operation,
+        for_signal_match's match mode). Not in `args` metadata, so the generic dispatcher must
+        prepend them. Reuses the real `make_asm` so the default (`inst.c or N`) is the game's own."""
+        d = self.engine.data.instructions[op]
+        if d is None or d.make_asm is None:
+            return []
+        r = d.make_asm(instr)
+        return list(r) if isinstance(r, tuple) else [r]
+
+    def _marshal_positional(self, instr, i: int, dirs: list[str]) -> list:
+        """Marshal an instruction's positional args to Lua-callable form per their declared
+        direction: 'in'/'out' value args -> a mem slot (or nil for absent / bare-bool, which the
+        compiler treats as absent); 'exec' args -> a raw 1-based branch target (or False for a
+        genuine dead end), with an omitted pin defaulting to the next instruction -- the same
+        3-way resolution `check_number`'s hand-written arm uses."""
+        out = []
+        for k, direction in enumerate(dirs, start=1):
+            if direction == "exec":
+                tgt = _resolve_next(instr, k, i + 1)
+                out.append(False if tgt is None else tgt + 1)
+            else:
+                raw = instr[k]
+                if raw is None or isinstance(raw, bool):
+                    out.append(None)
+                else:
+                    out.append(self._translate_arg(raw))
+        return out
+
+    def _is_block_loop(self, op: str) -> bool:
+        """A block-producing loop op (its definition carries `.next`/`.last` iteration funcs, like
+        `for_number`): `for_entities_in_range`/`for_signal_match`. `for_number` itself is matched by
+        its own earlier arm, so this only ever catches the sensing loops."""
+        d = self.engine.data.instructions[op]
+        return d is not None and d.next is not None and d.last is not None
+
+    def _enter_block_loop(self, op: str, instr, i: int):
+        """Drive a sensing loop (`for_entities_in_range`/`for_signal_match`) the same way as
+        `_enter_for_number`, but let the real `func` build the iterator table (it populates it via
+        real `Map.FindClosestEntity`/`GetEntitiesWithRegister` + `FilterEntity` -- real sensing);
+        `BeginBlock` (engine_stub) just hands that table back. Per-iteration `.next` and completion
+        `.last` are the genuine game funcs. Returns a 0-based target, or None for a dead end."""
+        d = self.engine.data.instructions[op]
+        dirs = self._arg_dirs(op)
+        args = self._hidden_args(op, instr) + self._marshal_positional(instr, i, dirs)
+        self.state.lastcounter = i + 1
+        self.state.counter = None
+        it = d.func(self.comp, self.state, None, *args)
+        # Body entry = the loop's own top-level `next` pin (normally the physically-next node via
+        # an omitted/`>NEXT` pin, hence the i+1 default; honored here in case it's retargeted).
+        bs = _resolve_next(instr, None, i + 1)
+        body_start = i + 1 if bs is None else bs
+
+        def resolve_counter():
+            return None if self.state.counter is False else int(self.state.counter) - 1
+
+        def advance():
+            self.state.counter = None
+            finished = d.next(self.comp, self.state, it, *args)
+            if not finished:
+                return False, body_start
+            d.last(self.comp, self.state, it, *args)
+            return True, resolve_counter()
+
+        def break_():
+            self.state.counter = None
+            d.last(self.comp, self.state, it, *args)
+            return resolve_counter()
+
+        finished, target = advance()
+        if finished:
+            return target
+        self._blocks.append({"kind": "loop", "advance": advance, "break_": break_})
+        return target
 
     def _dead_end(self):
         blocks = self._blocks
@@ -327,9 +429,20 @@ class Interpreter:
                 return "continue"
             self._i = target
             return "continue"
+        elif self._is_block_loop(op):
+            target = self._enter_block_loop(op, instr, i)
+            if target is None:
+                nxt = self._dead_end()
+                if nxt is None:
+                    self._finished = True
+                    return "finished"
+                self._i = nxt
+                return "continue"
+            self._i = target
+            return "continue"
         elif op == "last":
             if not self._blocks or self._blocks[-1]["kind"] != "loop":
-                raise RuntimeError("last (Break) requires an enclosing for_number loop")
+                raise RuntimeError("last (Break) requires an enclosing loop")
             block = self._blocks.pop()
             target = block["break_"]()
             if target is None:
@@ -387,7 +500,35 @@ class Interpreter:
             val = self.engine.get_value(self.comp, self.state, self._translate_arg(instr[1]))
             print(f"[debug_print] num={val.num} coord={val.coord} id={val.id}")
         else:
-            raise RuntimeError(f"unhandled op {op}")
+            # Generic metadata-driven dispatch for every other real instruction: marshal the
+            # declared args (in/out/exec) + any hidden make_asm arg, call the genuine func, and
+            # resolve its branch decision uniformly -- the same shape as `check_number`, generalized.
+            # Covers the world/sensing ops (get_location/get_distance/get_health/get_closest_entity/
+            # read_signal/set_comp_reg/get_comp_reg/value_type/match/check_bit/bitwise_op/domove/...).
+            d = self.engine.data.instructions[op]
+            if d is None or d.func is None:
+                raise RuntimeError(f"unhandled op {op}")
+            dirs = self._arg_dirs(op)
+            args = self._hidden_args(op, instr) + self._marshal_positional(instr, i, dirs)
+            # `state.lastcounter` must be this instruction's 1-based position before the call --
+            # domove's sync-move "repeat me next tick" sets `state.counter = state.lastcounter`.
+            self.state.lastcounter = i + 1
+            self.state.counter = None
+            ret = self.engine.call(op, self.comp, self.state, *args)
+            slept = bool(ret)  # a func returning true yielded the tick (domove sync-move, etc.)
+            counter = self.state.counter
+            if counter is False:
+                nxt = self._dead_end()
+                if nxt is None:
+                    self._finished = True
+                    return "finished"
+                self._i = nxt
+                return "continue"
+            if counter is not None:
+                self._i = int(counter) - 1
+                return "waited" if slept else "continue"
+            # counter untouched -> no branch decision; fall through to the shared next/fallthrough
+            # tail below (nexti defaults to i+1, or the instruction's own `next`).
 
         if instr["next"] is not None:
             nexti2 = _resolve_next(instr, None, None)

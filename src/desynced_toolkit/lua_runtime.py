@@ -68,6 +68,17 @@ class LupaEngine:
         instructions_path = resolve_include(pm.entry_dir, "instructions.lua")
         self.lua.execute(source.read_text(instructions_path))
 
+        # Repoint the shared `BeginBlock` upvalue (a local alias for the real InstBeginBlock
+        # block-stack driver) to `MockBeginBlock`, so the Python interpreter's own block driver can
+        # enter the sensing loops (for_entities_in_range/for_signal_match): their func builds the
+        # iterator via real sensing and returns BeginBlock(it), and the stub just hands `it` back.
+        # Anchored on any block-loop func (all block funcs share the one upvalue cell). Inert for the
+        # existing for_number/sequence paths, which never reach BeginBlock. See engine_stub.lua.
+        self.lua.execute(
+            "local f = data.instructions.for_entities_in_range\n"
+            "if f and f.func then PatchBeginBlock(f.func) end"
+        )
+
         self.data = self.lua.globals().data
         self._new_state = self.lua.globals().NewState
         self._new_comp = self.lua.globals().NewComp
