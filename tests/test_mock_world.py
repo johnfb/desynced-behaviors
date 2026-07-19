@@ -145,6 +145,13 @@ def test_is_seen_vision_model(engine):
 
     assert w.is_seen(player, close_enemy) is True   # within scout's vision
     assert w.is_seen(player, far_enemy) is False     # beyond it
+    # The vision bubble is the same floored-Euclidean disc as the range gate (user eyeball
+    # observation 2026-07-19 -- the on-screen shape looks identical to the sensing shape):
+    # a fringe tile at (15,4), distance 15.52, floors to 15 <= vis and IS seen.
+    fringe = w.spawn("f_bot_1m_c", bugs, 15, 4)
+    assert w.is_seen(player, fringe) is True
+    just_out = w.spawn("f_bot_1m_c", bugs, 15, 6)  # 16.16 -> floor 16 > 15
+    assert w.is_seen(player, just_out) is False
     # own-faction entities are always seen regardless of range
     own = w.spawn("f_bot_1m_c", player, 500, 500)
     assert w.is_seen(player, own) is True

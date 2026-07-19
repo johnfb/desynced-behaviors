@@ -369,7 +369,12 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
     diagonal step (the measured movement model) — a property of motion, not of the distance
     readout. Everything pinned by tests (`test_mock_world.py`, `test_mock_world_dispatch.py`;
     the probe's golden rows carry both columns).
-  - Remaining loose end: the faction-vision bubble's shape (mock uses Euclidean).
+  - **The faction-vision bubble looks like the same shape** (user eyeball observation
+    2026-07-19): the on-screen vision area appears identical in shape to the sensing area, so
+    the mock's `IsSeen`/`IsVisible` use the same one function (`GetDistance ≤ visibility_range`
+    — a floored-Euclidean disc, fringe tiles included). Observation-grade provenance, not
+    probe-measured — a RangeProbe-style vision instrument would be needed only if fringe-tile
+    vision precision ever becomes load-bearing (e.g. the Captain's vision-lock band tuning).
   - Real `get_distance` on a multi-tile entity means closest-tile, and center-tile after a
     `get_location` (rounds up on ties) — see the project memory on this. The mock should reproduce
     at least the single-tile-entity case exactly and document any multi-tile simplification.

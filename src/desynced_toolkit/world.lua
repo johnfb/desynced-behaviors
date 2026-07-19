@@ -70,12 +70,14 @@ end
 --   probe can't distinguish from ordering-by-floored-value + some tie-break; revisit only if a
 --   tie case ever matters.
 --
--- Still unverified: the faction-vision bubble's shape (IsSeen/IsVisible below use Euclidean).
+-- The faction-vision bubble uses this same function too (GetDistance <= visibility_range) --
+-- user eyeball observation (2026-07-19): the on-screen vision shape looks identical to the
+-- sensing shape. Observation-grade, not probe-measured.
 -- For a multi-tile entity the real engine measures to the closest tile (see
 -- reference_get_distance_closest_tile) -- first-version mock entities are single-tile, so the
 -- distinction does not yet arise.
 
--- Unrounded Euclidean: the "closest" ordering value (and the mock's vision-bubble test).
+-- Unrounded Euclidean: the "closest" ordering value.
 local function euclid(a, b)
 	local ax, ay = xy_of(a)
 	local bx, by = xy_of(b)
@@ -185,15 +187,20 @@ function Faction:GetTrust(other, compare)
 end
 
 -- First-version vision model (mock_world_spec.md Phase 1): an entity is "seen" if it is on this
--- faction's own side, or lies within the visibility_range of ANY of this faction's entities. Honest
--- but not fog-of-war-accurate -- the squad's premise is only that the vision lock is real, not
--- pixel-perfect.
+-- faction's own side, or lies within the visibility_range of ANY of this faction's entities.
+-- The per-entity bubble uses the SAME one distance function as everything else
+-- (GetDistance <= visibility_range, i.e. a floored-Euclidean disc): user eyeball observation
+-- (2026-07-19) says the on-screen vision shape looks identical to the sensing shape -- an
+-- observation, not a probe measurement, so fringe tiles (where floor(dist) == vis but the
+-- unrounded distance exceeds it) are modeled-in but only eyeball-confirmed. Still not
+-- fog-of-war-accurate (no discovery history) -- the squad's premise only needs the vision lock
+-- to be real, not pixel-perfect.
 function Faction:IsSeen(e)
 	if e == nil then return false end
 	if e.faction == self then return true end
 	for _, w in pairs(World.registry) do
 		if w.exists and w.faction == self and (w.visibility_range or 0) > 0 then
-			if euclid(w, e) <= w.visibility_range then return true end
+			if Map.GetDistance(w, e) <= w.visibility_range then return true end
 		end
 	end
 	return false
@@ -202,10 +209,11 @@ end
 -- Called two ways in the real funcs: `faction:IsVisible(x, y)` (is_passable) and `faction:IsVisible(e)`.
 function Faction:IsVisible(a, b)
 	if b ~= nil then
-		-- coordinate form: visible if within any own entity's visibility_range
+		-- coordinate form: visible if within any own entity's visibility_range (same
+		-- floored-Euclidean disc as IsSeen above)
 		for _, w in pairs(World.registry) do
 			if w.exists and w.faction == self and (w.visibility_range or 0) > 0 then
-				if euclid(w, { x = a, y = b }) <= w.visibility_range then return true end
+				if Map.GetDistance(w, { x = a, y = b }) <= w.visibility_range then return true end
 			end
 		end
 		return false
