@@ -12,6 +12,14 @@ the game itself stores and what `Tool.GetClipboard()` would hand a real Lua call
 Python-dict 0-based rendering step anywhere in this module (that convention only ever existed as
 `dsc_codec.py`'s -- now retired -- own choice for JSON/Python display, per `dcs_wire.py`'s module
 docstring).
+
+One DELIBERATE deviation from real engine semantics (documented so nobody "fixes" tests into
+infinite loops, or mistakes this for the game's behavior): a dead end that pops through the entire
+block stack ends the run (`_finished = True`). The real engine instead falls back to Program Start
+without yielding and keeps going forever -- `exit` is the only genuine halt (behavior_format.md
+"Stopping a behavior"; `reference_stop_deadend_semantics`). A test harness needs termination, so
+top-level fall-off means "one full pass completed" here; drive `run_ticks` in a loop with a fresh
+counter reset if a test ever genuinely needs the restart-forever shape.
 """
 
 from __future__ import annotations

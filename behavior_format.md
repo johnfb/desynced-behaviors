@@ -691,8 +691,18 @@ fall-through) doesn't restart the whole program — it pops back to the
   optional, plus `Last` exec) chains whichever of `First..Fourth` are
   wired, in order — each one runs to its own dead end, then control
   returns to `sequence` to start the next wired one, and finally jumps to
-  `Last`. An omitted pin is simply skipped (not pushed onto the internal
-  step list at all). This is the confirmed idiom for "run these two
+  `Last`. A pin wired **`false`** (genuinely unconnected in the editor) is
+  simply skipped — not pushed onto the internal step list at all (the
+  func's own `if exec_first then ...` guard; this is also why unconnected
+  stages cost zero ticks). An ***omitted*** pin is **not** skipped: per the
+  universal omission rule above, `GetFactionBehaviorAsm` resolves it to the
+  physically-next instruction at compile time (`val == nil → inst_idx + 1`),
+  so the func receives a real target and that pin becomes a real step —
+  `hexat_test.dcs`'s own `sequence` relies on exactly this (its `First` pin
+  is omitted and correctly runs the X-computation chain that physically
+  follows). An earlier version of this bullet said the omitted case was
+  skipped — wrong, and contradicted by that same in-game-validated fixture.
+  This is the confirmed idiom for "run these two
   independent calculations, then continue once both are done" — e.g.
   `hexat_test.dcs`'s `HexAt` computes X (`First`) then Y (`Second`/`Third`)
   then combines them (`Last`), with a `next: false` ending each of the

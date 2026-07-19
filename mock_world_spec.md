@@ -343,8 +343,7 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   `RequestStateMove` sets it. One cheap in-game test (domove to a known-distance coord; note the
   stop distance and whether `range` widens it) closes it; the RALLY gate's testability depends on
   getting this tolerance right.
-- **Distance metrics — the range gate is settled, the readout is not.** Two different native
-  functions, two different answers:
+- **Distance metrics — settled 2026-07-19 (three coexisting measures), two small loose ends.**
   - **`Map.FindClosestEntity`'s range gate is Chebyshev — confirmed in-game, not a modeling
     choice.** The Blight Magnifier's `range = 2` coverage is a user-confirmed Chebyshev square
     (`blight_magnifier_mining.md`, "Range is Chebyshev distance"), and its implementation is
@@ -354,11 +353,17 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
     `for_entities_in_range`) therefore senses a **square** area, side `2·range+1` — the mock's
     `Map.FindClosestEntity`/`GetEntitiesInRange` gates match (fixed 2026-07-19; they were
     initially written rounded-Euclidean on the wrong assumption that no in-game evidence existed).
-  - **`Map.GetDistance` (the `get_distance` readout) is still unmeasured** — the mock uses rounded
-    Euclidean (consistent with the movement measurement's Euclidean path cost, but Chebyshev is
-    not ruled out for the readout the way it is for movement; a one-off in-game `get_distance` on
-    a known diagonal offset settles it). Also still unknown: which metric orders "closest" among
-    gate-passing candidates, and the faction-vision bubble's shape (mock uses Euclidean for both).
+  - **"Closest" selection among gate-passers is Euclidean** (user-observed in-game 2026-07-19) —
+    the winner is the straight-line-nearest candidate inside the square.
+  - **`Map.GetDistance` (the `get_distance` readout) is the *unobstructed grid path length***
+    (user-observed in-game 2026-07-19): the cost of the straight 8-connected walk over the grid,
+    **ignoring obstacles — it does not run the pathfinder**. That is the octile measure
+    `max(|dx|,|dy|) + (√2−1)·min(|dx|,|dy|)`, i.e. exactly the movement model's per-step Euclidean
+    accumulation, returned rounded — and because the real readout ignores obstacles, the closed
+    formula stays exact even once the mock models occupancy/blocking. All three measures are
+    pinned by tests (`test_mock_world.py`, `test_mock_world_dispatch.py`).
+  - Loose ends: the readout's exact rounding rule (only observable at `.5` boundaries), and the
+    faction-vision bubble's shape (mock uses Euclidean).
   - Real `get_distance` on a multi-tile entity means closest-tile, and center-tile after a
     `get_location` (rounds up on ties) — see the project memory on this. The mock should reproduce
     at least the single-tile-entity case exactly and document any multi-tile simplification.

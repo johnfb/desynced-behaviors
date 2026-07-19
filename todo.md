@@ -474,14 +474,16 @@ Update this file directly as items are picked up/finished.
         sensing helpers); `World.Reset()` on construction isolates instances on the session engine.
         `test_mock_world.py` covers the primitives *and* an end-to-end run of the unmodified real
         `get_closest_entity` func over the mock (returns the right nearest enemy, skipping friendly/
-        out-of-range) — the proof the mocked surface satisfies a real func's contract. Modeling
-        choices flagged in `world.lua` for later in-game verification: `Map.GetDistance` is rounded
-        Euclidean (consistent with the movement model) and so is "closest" ordering + vision;
-        range *gates* (`FindClosestEntity`/`GetEntitiesInRange`) were corrected to Chebyshev
-        2026-07-19 — that half is in-game-confirmed via the magnifier's square coverage, see
-        `mock_world_spec.md`'s distance-metrics open item; vision is "within any own entity's
-        visibility_range"; no power-grid/base_id-family model yet. Next: Phase 2 (interpreter op
-        dispatch for the world ops; also unblocks `library/hexat.dcs`'s unit-Origin path).
+        out-of-range) — the proof the mocked surface satisfies a real func's contract. Distance
+        model settled 2026-07-19 (see `mock_world_spec.md`'s distance-metrics item, all pinned by
+        tests): range *gates* are Chebyshev (in-game-confirmed via the magnifier's square
+        coverage), "closest" selection is Euclidean and `Map.GetDistance` is the unobstructed
+        grid path length / octile (both user-observed in-game) — the original all-Euclidean
+        model was corrected accordingly. Remaining modeling choices flagged in `world.lua`:
+        vision is Euclidean "within any own entity's visibility_range" (bubble shape unverified);
+        readout rounding rule unverified; no power-grid/base_id-family model yet. Next: Phase 2
+        (interpreter op dispatch for the world ops; also unblocks `library/hexat.dcs`'s
+        unit-Origin path).
       - [x] **Phase 2 — extend the interpreter op dispatch.** Done 2026-07-19. Replaced the
         `interpreter.py` `else: raise` with a **metadata-driven generic dispatcher**: it reads each
         op's real `data.instructions[op].args` directions (in/out/exec), marshals the positional args

@@ -22,13 +22,19 @@ def test_spawn_uses_real_def(engine):
     assert bot.location.x == 0 and bot.location.y == 0
 
 
-def test_get_distance_euclidean(engine):
+def test_get_distance_is_unobstructed_path_length(engine):
+    # get_distance's readout is the UNOBSTRUCTED grid path length (user-observed in-game
+    # 2026-07-19): the straight 8-connected walk's cost, ignoring obstacles (no pathfinder) --
+    # octile: max + (sqrt(2)-1)*min, rounded. (12,5) distinguishes it from straight-line
+    # Euclidean, which would say 13.
     w = MockWorld(engine)
     a = w.spawn("f_bot_1m_c", "player", 0, 0)
     b = w.spawn("f_bot_1m_c", "player", 3, 4)
-    assert w.distance(a, b) == 5  # rounded Euclidean
+    assert w.distance(a, b) == 5  # 4 + 3*0.414 = 5.24 -> 5 (Euclidean happens to agree here)
     c = w.spawn("f_bot_1m_c", "player", 35, 0)
-    assert w.distance(a, c) == 35
+    assert w.distance(a, c) == 35  # axis-aligned: path length == Euclidean == Chebyshev
+    d = w.spawn("f_bot_1m_c", "player", 12, 5)
+    assert w.distance(a, d) == 14  # 12 + 5*0.414 = 14.07 -> 14; NOT the Euclidean 13
 
 
 def test_find_closest_picks_nearest_in_range(engine):
@@ -50,13 +56,25 @@ def test_range_gate_is_chebyshev(engine):
     # The range gate is Chebyshev, confirmed in-game via the Blight Magnifier's square range=2
     # coverage (blight_magnifier_mining.md "Range is Chebyshev distance"), whose implementation is
     # Map.FindClosestEntity itself. A diagonal placement distinguishes the metrics: (3,3) is
-    # Chebyshev 3 but rounded-Euclidean 4.
+    # Chebyshev 3 but path-length/Euclidean 4.24.
     w = MockWorld(engine)
     me = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
     diag = w.spawn("f_bot_1m_c", "player", 3, 3)
-    assert w.distance(me, diag) == 4  # the Euclidean readout still says 4...
+    assert w.distance(me, diag) == 4  # the path-length readout says 4.24 -> 4...
     assert w.find_closest(me, 3).eid == diag.eid  # ...but the gate admits it at range 3
     assert w.find_closest(me, 2) is None
+
+
+def test_find_closest_orders_by_euclidean(engine):
+    # The winner among gate-passers is the straight-line-nearest (user-observed in-game
+    # 2026-07-19). Geometry chosen so every other metric disagrees: from (0,0), A=(8,7) vs
+    # B=(10,3) -- Euclidean picks B (10.44 < 10.63), while Chebyshev (8 < 10) and path-length
+    # (10.90 < 11.24) would both pick A.
+    w = MockWorld(engine)
+    me = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
+    w.spawn("f_bot_1m_c", "player", 8, 7)  # A
+    b = w.spawn("f_bot_1m_c", "player", 10, 3)
+    assert w.find_closest(me, 40).eid == b.eid
 
 
 def test_gettrust_accepts_entity_and_compare_forms(engine):

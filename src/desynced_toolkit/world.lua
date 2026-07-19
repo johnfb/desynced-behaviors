@@ -44,7 +44,7 @@ local function xy_of(target)
 	return nil
 end
 
--- Distance model -- TWO different metrics, deliberately (see mock_world_spec.md "Open items"):
+-- Distance model -- THREE different measures, deliberately (see mock_world_spec.md "Open items"):
 --
 -- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below) are CHEBYSHEV. This half is
 --   confirmed in-game, not a modeling choice: the Blight Magnifier's range=2 coverage is a
@@ -54,23 +54,40 @@ end
 --   the same call) -- so the native FindClosestEntity's range test is a Chebyshev square, and every
 --   sensing instruction routed through it (get_closest_entity, for_entities_in_range) inherits that
 --   square sensing area.
--- * Map.GetDistance (the get_distance instruction's backend, a separate native function) is rounded
---   Euclidean -- a MODELING CHOICE still awaiting an in-game get_distance test. The 2026-07-18
---   movement measurement pinned *movement cost* to Euclidean path accumulation (diagonal step
---   ~sqrt(2)), so Euclidean is the consistent guess for the distance readout; Chebyshev is not
---   ruled out for it the way it is for movement.
+-- * "Closest" ordering among gate-passing candidates (get_closest_entity's winner) is EUCLIDEAN --
+--   user-observed in-game (2026-07-19). So candidacy is a square; the winner inside it is the
+--   straight-line-nearest.
+-- * Map.GetDistance (the get_distance instruction delegates straight to it) is the UNOBSTRUCTED
+--   GRID PATH LENGTH -- user-observed in-game (2026-07-19): the length of the straight 8-connected
+--   walk over the grid, ignoring obstacles entirely (it does NOT run the pathfinder). That is the
+--   octile measure max(|dx|,|dy|) + (sqrt(2)-1)*min(|dx|,|dy|) -- the same per-step Euclidean
+--   accumulation the movement measurement pinned (a diagonal step costs ~sqrt(2)) -- returned
+--   rounded. Because obstacles are ignored by the real readout too, this formula stays exact even
+--   once the mock models occupancy/blocking.
 --
--- Still unverified: which metric orders "closest" among gate-passing candidates (the mock uses
--- rounded-Euclidean GetDistance), and the faction-vision bubble's shape (IsSeen/IsVisible below use
--- Euclidean). For a multi-tile entity the real engine measures to the closest tile (see
+-- All three are pinned by tests (test_mock_world.py / test_mock_world_dispatch.py). Still
+-- unverified: the readout's exact rounding rule (this mock rounds half up -- only matters on .5
+-- boundaries), and the faction-vision bubble's shape (IsSeen/IsVisible below use Euclidean).
+-- For a multi-tile entity the real engine measures to the closest tile (see
 -- reference_get_distance_closest_tile) -- first-version mock entities are single-tile, so the
 -- distinction does not yet arise.
+local SQRT2_MINUS_1 = math.sqrt(2) - 1
+
 function Map.GetDistance(a, b)
 	local ax, ay = xy_of(a)
 	local bx, by = xy_of(b)
 	if ax == nil or bx == nil then return REG_INFINITE end
+	local dx, dy = math.abs(ax - bx), math.abs(ay - by)
+	return math.floor(math.max(dx, dy) + SQRT2_MINUS_1 * math.min(dx, dy) + 0.5)
+end
+
+-- Unrounded Euclidean: the "closest" ordering metric (and the mock's vision-bubble test).
+local function euclid(a, b)
+	local ax, ay = xy_of(a)
+	local bx, by = xy_of(b)
+	if ax == nil or bx == nil then return math.huge end
 	local dx, dy = ax - bx, ay - by
-	return math.floor(math.sqrt(dx * dx + dy * dy) + 0.5)
+	return math.sqrt(dx * dx + dy * dy)
 end
 
 -- Chebyshev distance: the confirmed range-gate metric (see the distance-model note above).
@@ -181,7 +198,7 @@ function Faction:IsSeen(e)
 	if e.faction == self then return true end
 	for _, w in pairs(World.registry) do
 		if w.exists and w.faction == self and (w.visibility_range or 0) > 0 then
-			if Map.GetDistance(w, e) <= w.visibility_range then return true end
+			if euclid(w, e) <= w.visibility_range then return true end
 		end
 	end
 	return false
@@ -193,7 +210,7 @@ function Faction:IsVisible(a, b)
 		-- coordinate form: visible if within any own entity's visibility_range
 		for _, w in pairs(World.registry) do
 			if w.exists and w.faction == self and (w.visibility_range or 0) > 0 then
-				if Map.GetDistance(w, { x = a, y = b }) <= w.visibility_range then return true end
+				if euclid(w, { x = a, y = b }) <= w.visibility_range then return true end
 			end
 		end
 		return false
@@ -425,13 +442,13 @@ end
 -- `filter` mask (MatchFilter) first exactly as the real callers rely on (get_closest_entity's pred
 -- only calls FilterEntity, trusting FindClosestEntity to have masked by frametype/faction already).
 -- The owner is excluded -- radar returns OTHER units, never self. The range gate is Chebyshev
--- (confirmed in-game via the magnifier -- see the distance-model note above); "closest" ordering
--- among gate-passers uses rounded-Euclidean GetDistance (unverified, flagged there).
+-- (confirmed in-game via the magnifier); "closest" ordering among gate-passers is Euclidean
+-- GetDistance (user-observed in-game) -- see the distance-model note above for both.
 function Map.FindClosestEntity(owner, range, pred, filter)
 	local best, best_d = nil, nil
 	for _, e in pairs(World.registry) do
 		if e ~= owner and e.exists then
-			local d = Map.GetDistance(owner, e)
+			local d = euclid(owner, e)
 			if cheb_distance(owner, e) <= range then
 				if (not filter or e:MatchFilter(filter, owner.faction)) and (not pred or pred(e)) then
 					if best_d == nil or d < best_d then best, best_d = e, d end

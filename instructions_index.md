@@ -2,7 +2,7 @@
 
 Auto-generated reference of every entry in `data.instructions` (`data/instructions.lua`), for writing new behaviors in the visual programming editor. Regenerate by re-parsing that file if it changes.
 
-**Total instructions:** 192 (excludes the internal `nop` placeholder used for deleted instructions, and commented-out/dead definitions in the source)
+**Total instructions:** 196 (excludes the internal `nop` placeholder used for deleted instructions, and commented-out/dead definitions in the source. Four entries — `dodock`, `doundock`, `domovexy`, `getxy` — were found missing from an earlier generation of this index and added by hand 2026-07-19; two of them carry malformed `args` metadata in the game source itself, noted inline on their entries)
 
 ## How to read this
 
@@ -45,8 +45,8 @@ Description
 ## Categories
 
 - [Flow](#flow) (43)
-- [Unit](#unit) (55)
-- [Move](#move) (15)
+- [Unit](#unit) (57)
+- [Move](#move) (17)
 - [Component](#component) (7)
 - [AutoBase](#autobase) (8)
 - [Global](#global) (26)
@@ -55,7 +55,7 @@ Description
 
 ## Flow
 
-### *Loop Signal* (`for_signal`) *(loop)*
+### *Loop Signal* (`for_signal`) *(loop)* *(deprecated)*
 
 *DEPRECATED* Use Loop Signal (Match) instead
 
@@ -456,6 +456,12 @@ Disable Unit to deliver on transport route
 
 Disconnects the Unit from the Logistics Network
 
+### Dock (`dodock`)
+
+Docks an item on the following target
+
+- **in** Target — Unit
+
 ### Drop Off Items (`dodrop`) *(hidden literal)*
 
 Drop off items at a unit or location
@@ -751,6 +757,10 @@ Shuts down the power of the Unit
 
 Turns on the power of the Unit
 
+### Undock (`doundock`)
+
+Undocks an item on the following target
+
 ### Unequip Component (`unequip_component`)
 
 Unequips a component if it exists
@@ -767,7 +777,7 @@ Unlock all inventory slots or a specific item slot index
 
 ## Move
 
-### *Move Unit (Range)* (`domove_range`)
+### *Move Unit (Range)* (`domove_range`) *(deprecated)*
 
 *DEPRECATED* Use Move Unit
 
@@ -786,6 +796,15 @@ Gets current offset from a unit
 - **in** Target — Unit/Coord to get offset from `[coord]`
 - **out** Offset — Offset from unit `[coord]`
 
+### Get unit Coordinates (`getxy`)
+
+Gets the X and Y coordinate of a Unit
+
+- **out** X — X Coordinate
+- **out** Y — Y Coordinate
+
+*(Source quirk: this instruction's `args` metadata is malformed in `data/instructions.lua` — each entry is double-nested, `{ { 'out', "X", ... } }` instead of `{ 'out', "X", ... }` — the list above is the evident intent. Tooling reading `args[i][1]` as a direction string gets a table instead.)*
+
 ### Is Passable (`is_passable`)
 
 Checks whether a location is passable
@@ -796,13 +815,13 @@ Moves out of range of another unit, the number value of the target specifies the
 
 - **in** Target — Unit to move away from `[entity]`
 
-### Move East (`move_east`)
+### Move East (`move_east`) *(deprecated)*
 
 Moves towards a tile East of the current location at the specified distance
 
 - **in** Number — Number of tiles to move East `[posnum]`
 
-### Move North (`move_north`)
+### Move North (`move_north`) *(deprecated)*
 
 Moves towards a tile North of the current location at the specified distance
 
@@ -815,11 +834,20 @@ Moves to a specific offset of current location or specified unit
 - **in** Offset — Offset to move to `[coord]`
 - **in** Unit — Unit to offset from `[entity]` *(extra param)*
 
-### Move South (`move_south`)
+### Move South (`move_south`) *(deprecated)*
 
 Moves towards a tile South of the current location at the specified distance
 
 - **in** Number — Number of tiles to move South `[posnum]`
+
+### Move To Coordinate (`domovexy`)
+
+Move to a specific coordinate
+
+- **in** X — X Coordinate `[num]`
+- **in** Y — Y Coordinate `[num]`
+
+*(Source quirk: same malformed double-nested `args` metadata as `getxy` — see that entry.)*
 
 ### Move Unit (`domove`) *(hidden literal)*
 
@@ -829,13 +857,13 @@ Moves to another unit or within a range of another unit
 - **exec** Path Blocked — Where to continue if unit is path blocked
 - **in** Unit — Target Unit `[entity]` *(extra param)*
 
-### Move Unit (Async)* (`domove_async`)
+### Move Unit (Async)* (`domove_async`) *(deprecated)*
 
 *DEPRECATED* Use Move Unit
 
 - **in** Target — Unit to move to `[entity]`
 
-### Move West (`move_west`)
+### Move West (`move_west`) *(deprecated)*
 
 Moves towards a tile West of the current location at the specified distance
 
@@ -1025,7 +1053,7 @@ Gets the factions home unit
 
 - **out** Result — Factions home unit
 
-### Get Ingredients (`get_ingredients`)
+### Get Ingredients (`get_ingredients`) *(deprecated)*
 
 Returns the ingredients required to produce an item
 

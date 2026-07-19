@@ -58,6 +58,32 @@ def test_get_closest_entity_finds_enemy(engine):
     assert interp.read_param(1).entity.eid == enemy.eid
 
 
+def test_distance_metrics_through_real_funcs(engine):
+    """Pins the settled distance semantics through the REAL instruction funcs (not just the
+    Map primitives): get_closest_entity's winner is the straight-line-nearest (Euclidean), and
+    get_distance reads back the unobstructed grid path length (octile) -- both user-observed
+    in-game 2026-07-19; see world.lua's distance-model note."""
+    w = MockWorld(engine)
+    player = w.faction("player")
+    bugs = w.faction("bugs")
+    w.set_trust(player, bugs, "ENEMY")
+    owner = w.spawn("f_bot_1m_c", player, 0, 0, visibility_range=40)
+    w.spawn("f_bot_1m_c", bugs, 8, 7)  # Chebyshev/path-length would pick this one
+    b = w.spawn("f_bot_1m_c", bugs, 10, 3)  # Euclidean-nearest (10.44 < 10.63)
+
+    interp = _run(
+        engine,
+        w,
+        owner,
+        "behavior T(Out*, Dist*):\n"
+        "n1: get_closest_entity(Filter=v_enemy_faction, Output=Out)\n"
+        "n2: get_distance(Target=Out, Distance=Dist)\n",
+    )
+    assert interp.read_param(1).entity.eid == b.eid
+    # path length to (10,3): 10 + 3*(sqrt(2)-1) = 11.24 -> 11 (Euclidean would round to 10)
+    assert interp.read_param(2).num == 11
+
+
 def test_read_signal_of_found_unit(engine):
     w = MockWorld(engine)
     owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
