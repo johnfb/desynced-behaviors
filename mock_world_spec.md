@@ -344,22 +344,19 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   `RequestStateMove` sets it. One cheap in-game test (domove to a known-distance coord; note the
   stop distance and whether `range` widens it) closes it; the RALLY gate's testability depends on
   getting this tolerance right.
-- **Distance metrics — mostly settled 2026-07-19; the gate's exact metric has a pending in-game
-  probe.**
-  - **`Map.FindClosestEntity`'s range gate: square at radius 2 (confirmed); Chebyshev vs.
-    floored-Euclidean undecided — `range_probe.bsf` decides.** The Blight Magnifier's `range = 2`
-    coverage is a user-confirmed full 5×5 square (`blight_magnifier_mining.md`), and its
-    implementation is literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)`
-    (`c_blight_magnifier`'s `on_update`; the Virus Duplicator's min-spacing check rides the same
-    call) — but radius 2 is the degenerate size where Chebyshev and `floor(Euclidean)` give the
-    identical square (corner at 2√2 ≈ 2.83 floors to 2), so the square only *rules out*
-    round/ceil/real-valued Euclidean; the user expects the Euclidean family engine-wide. The
-    metrics first separate at range 3. The mock's gates are Chebyshev for now (they were
-    initially rounded-Euclidean, which the confirmed square genuinely refutes); the RangeProbe
-    behavior (`tests/data/range_probe.bsf`/`.dcs` — sweeps `for_entities_in_range` Range
-    1..15 and reports the minimal detecting Range on `@signal`, plus the `get_distance` readout
-    on `@store`) measures the truth in-game — switch the gate to `floor(Euclidean)` if a target
-    at offset (3,3) first appears at Range 4 rather than 3.
+- **Distance metrics — settled 2026-07-19 (in-game RangeProbe run + user observations).**
+  - **`Map.FindClosestEntity`'s range gate is floored Euclidean**: in range `R` ⟺
+    `floor(dist) ≤ R`, equivalently `dist < R+1`. Settled by the in-game RangeProbe run
+    (`tests/data/range_probe.bsf` — sweeps `for_entities_in_range` Range 1..15 and reports the
+    minimal detecting Range on `@signal`; measured results are the golden rows in
+    `test_mock_world_dispatch.py`): offsets (3,0)/(2,2)/(3,2)/(3,3)/(4,3)/(6,3) gave
+    3/2/3/**4**/**5**/**6** — exactly `floor(Euclidean)`, while (3,3)/(4,3) rule out Chebyshev,
+    (6,3) rules out floored-octile, and (2,2)/(3,2) rule out round/ceil/real-valued Euclidean.
+    The Blight Magnifier's confirmed 5×5 square at `range = 2` (`blight_magnifier_mining.md`) is
+    the **floor artifact of this circular gate at small radius** (the corner sits at 2√2 ≈ 2.83,
+    which floors to 2) — it briefly read as Chebyshev evidence; the user's "everything is some
+    form of Euclidean" hypothesis was right. Every sensing instruction routed through the native
+    function inherits this gate.
   - **"Closest" selection among gate-passers is Euclidean** (user-observed in-game 2026-07-19) —
     the winner is the straight-line-nearest candidate inside the square.
   - **`Map.GetDistance` (the `get_distance` readout) is the *unobstructed grid path length***

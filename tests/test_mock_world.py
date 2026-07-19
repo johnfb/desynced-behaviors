@@ -52,19 +52,18 @@ def test_find_closest_picks_nearest_in_range(engine):
     assert w.find_closest(me, 40).eid != far.eid
 
 
-def test_range_gate_is_chebyshev(engine):
-    # Pins the mock's MODELED gate metric (Chebyshev). What's in-game-confirmed is only that the
-    # magnifier's radius-2 coverage is a full square -- which Chebyshev and floor(Euclidean)
-    # both produce at that size; the in-game RangeProbe run (range_probe.bsf) decides between
-    # them, and this test's expectations flip to floor(Euclidean) if it reports (3,3) first
-    # detected at Range 4 (see world.lua's distance-model note). (3,3) is where they separate:
-    # Chebyshev 3 vs floor(Euclid) 4.
+def test_range_gate_is_floored_euclidean(engine):
+    # The gate metric was SETTLED by the in-game RangeProbe run (2026-07-19, results in
+    # test_mock_world_dispatch.py's golden rows): in range R iff floor(euclid) <= R. (3,3) is
+    # where the candidates separate -- euclid 4.24 floors to 4, so it first appears at Range 4
+    # (Chebyshev would have admitted it at 3); (2,2) floors to 2, ruling out round/ceil Euclidean.
     w = MockWorld(engine)
     me = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
     diag = w.spawn("f_bot_1m_c", "player", 3, 3)
-    assert w.distance(me, diag) == 4  # the path-length readout says 4.24 -> 4...
-    assert w.find_closest(me, 3).eid == diag.eid  # ...but the gate admits it at range 3
-    assert w.find_closest(me, 2) is None
+    assert w.find_closest(me, 4).eid == diag.eid  # floor(4.24) = 4
+    assert w.find_closest(me, 3) is None  # NOT admitted at 3 (Chebyshev would have)
+    corner = w.spawn("f_bot_1m_c", "player", -2, -2)
+    assert w.find_closest(me, 2).eid == corner.eid  # floor(2.83) = 2 -- the magnifier square
 
 
 def test_find_closest_orders_by_euclidean(engine):

@@ -49,19 +49,18 @@ end
 
 -- Distance model -- THREE different measures, deliberately (see mock_world_spec.md "Open items"):
 --
--- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below): modeled CHEBYSHEV, exact
---   metric PENDING an in-game probe. What is actually confirmed in-game is that the Blight
---   Magnifier's range=2 coverage is a full 5x5 SQUARE (blight_magnifier_mining.md), and its
---   implementation is literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)` -- but
---   radius 2 is exactly the degenerate size where Chebyshev and floor(Euclidean) produce the
---   identical square (the corner sits at 2*sqrt(2)~2.83, which floors to 2): the square only RULES
---   OUT round/ceil/real-valued Euclidean, and the user expects the Euclidean family engine-wide.
---   The metrics first separate at range 3 ((3,3): Chebyshev 3 vs floor-Euclid 4) -- the RangeProbe
---   behavior (tests/data/range_probe.bsf) measures exactly this in-game; switch this gate to
---   floor(Euclidean) if it reports (3,3) undetected at Range 3.
+-- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below) are FLOORED EUCLIDEAN:
+--   in range R iff floor(euclid) <= R, equivalently euclid < R+1. SETTLED in-game 2026-07-19 by
+--   the RangeProbe run (tests/data/range_probe.bsf; the measured minimal detecting ranges are the
+--   golden rows in test_mock_world_dispatch.py): (3,0)=3 (2,2)=2 (3,2)=3 (3,3)=4 (4,3)=5 (6,3)=6
+--   -- matches floor(Euclidean) exactly, while (3,3)/(4,3) rule out Chebyshev, (6,3) rules out
+--   floored-octile, and (2,2)/(3,2) rule out round/ceil/real-valued Euclidean. This also explains
+--   the magnifier's confirmed 5x5 coverage at range 2 (blight_magnifier_mining.md): the corner
+--   sits at 2*sqrt(2)~2.83, which floors to 2 -- a small-radius floor artifact of a circular
+--   gate, not a square metric.
 -- * "Closest" ordering among gate-passing candidates (get_closest_entity's winner) is EUCLIDEAN --
---   user-observed in-game (2026-07-19). So candidacy is a square; the winner inside it is the
---   straight-line-nearest.
+--   user-observed in-game (2026-07-19). Same family as the gate: candidacy is the floored-Euclidean
+--   disc, the winner inside it is the straight-line-nearest.
 -- * Map.GetDistance (the get_distance instruction delegates straight to it) is the UNOBSTRUCTED
 --   GRID PATH LENGTH -- user-observed in-game (2026-07-19): the length of the straight 8-connected
 --   walk over the grid, ignoring obstacles entirely (it does NOT run the pathfinder). That is the
@@ -95,12 +94,11 @@ local function euclid(a, b)
 	return math.sqrt(dx * dx + dy * dy)
 end
 
--- Chebyshev distance: the modeled range-gate metric (provisional -- see the distance-model note).
-local function cheb_distance(a, b)
-	local ax, ay = xy_of(a)
-	local bx, by = xy_of(b)
-	if ax == nil or bx == nil then return REG_INFINITE end
-	return math.max(math.abs(ax - bx), math.abs(ay - by))
+-- The range-gate measure: floored Euclidean (settled by the RangeProbe -- distance-model note).
+local function gate_distance(a, b)
+	local d = euclid(a, b)
+	if d == math.huge then return REG_INFINITE end
+	return math.floor(d)
 end
 
 --------------------------------------------------------------------------------------------------
@@ -455,15 +453,15 @@ end
 -- Closest entity to `owner` within `range` for which `pred(e)` is truthy, applying the broad-phase
 -- `filter` mask (MatchFilter) first exactly as the real callers rely on (get_closest_entity's pred
 -- only calls FilterEntity, trusting FindClosestEntity to have masked by frametype/faction already).
--- The owner is excluded -- radar returns OTHER units, never self. The range gate is modeled
--- Chebyshev (exact metric pending the RangeProbe run); "closest" ordering among gate-passers is
--- Euclidean (user-observed in-game) -- see the distance-model note above for both.
+-- The owner is excluded -- radar returns OTHER units, never self. The range gate is floored
+-- Euclidean and "closest" ordering among gate-passers is Euclidean -- both settled in-game, see
+-- the distance-model note above.
 function Map.FindClosestEntity(owner, range, pred, filter)
 	local best, best_d = nil, nil
 	for _, e in pairs(World.registry) do
 		if e ~= owner and e.exists then
 			local d = euclid(owner, e)
-			if cheb_distance(owner, e) <= range then
+			if gate_distance(owner, e) <= range then
 				if (not filter or e:MatchFilter(filter, owner.faction)) and (not pred or pred(e)) then
 					if best_d == nil or d < best_d then best, best_d = e, d end
 				end
@@ -475,11 +473,11 @@ end
 
 -- All entities within `range` of `center` (entity or coord), optionally masked by a filter and
 -- faction. Backs get_entities_in_range / the for_entities_in_range block driver and FilterEntity's
--- own internal Map.GetEntitiesInRange calls. Chebyshev gate, same as FindClosestEntity above.
+-- own internal Map.GetEntitiesInRange calls. Floored-Euclidean gate, same as FindClosestEntity.
 function Map.GetEntitiesInRange(center, range, filter, faction)
 	local out = {}
 	for _, e in pairs(World.registry) do
-		if e.exists and cheb_distance(center, e) <= range then
+		if e.exists and gate_distance(center, e) <= range then
 			if not filter or e:MatchFilter(filter, faction or (center.faction)) then
 				out[#out + 1] = e
 			end

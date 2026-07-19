@@ -121,8 +121,9 @@ suffix ("1x1"/"2x1"/"2x2"/"3x2") is normally reliable but a frame's *actual*
 footprint is only confirmed by its visual def.
 
 Per-tile throughput (`output × (cellsize - footprint) / (200 × cellsize)`,
-where `cellsize = (w+4)(h+4)` is the gapless-tiling cell for Chebyshev range 2
-— see "Range is Chebyshev distance" below) for the best-total-output
+where `cellsize = (w+4)(h+4)` is the gapless-tiling cell for the radius-2
+square coverage — see "Range is a square at radius 2" below) for the
+best-total-output
 configuration of each real building layout:
 
 | Building | Footprint | Best-total output | Throughput/total-land |
@@ -148,24 +149,27 @@ building for this purpose, full stop** — both for raw total output and for
 throughput per unit of land, because its 100% intrinsic boost and 4 Internal
 sockets more than compensate for its worse area-to-footprint ratio.
 
-### Range is Chebyshev distance, confirmed in-game
+### Range is a square at radius 2, confirmed in-game (metric: floored Euclidean)
 
-> **Precision caveat (2026-07-19):** what's confirmed is the *square shape* at
-> radius 2. That rules out round/ceil/real-valued Euclidean, but radius 2 is
-> exactly the degenerate size where Chebyshev and a floored-Euclidean compare
-> produce the identical square (corner at 2√2 ≈ 2.83 floors to 2) — the user
-> expects the engine measures everything in the Euclidean family. The two only
-> separate at range ≥ 3; the RangeProbe in-game test (`range_probe.bsf`, see
-> `todo.md`) decides. Everything below that depends only on the radius-2
-> square itself (the tiling math, node spacing) is unaffected either way.
+> **Resolved 2026-07-19 (in-game RangeProbe run — `tests/data/range_probe.bsf`,
+> results in `mock_world_spec.md`'s distance-metrics item):** the native range
+> gate is **floored Euclidean** (in range `R` ⟺ `floor(dist) ≤ R`), not
+> Chebyshev — an earlier version of this heading named the wrong metric. At
+> radius 2 the two are indistinguishable: the corner tile sits at 2√2 ≈ 2.83,
+> which floors to 2, so a radius-2 floored-Euclidean circle *is* the full 5×5
+> square. Everything below that depends only on that radius-2 square — the
+> gapless tiling cell, the node spacing, the duplicator's min-spacing
+> conclusions — is numerically unchanged; read this section's remaining
+> "Chebyshev" phrasing as "the radius-2 square coverage."
 
 User-confirmed: Magnifier `range = 2` means a square region extending 2
 tiles in *every* direction from the building's footprint (a 5×5 square
-centered on a 1×1 building) — Chebyshev/king-move distance, not Euclidean. A
-useful consequence: Chebyshev-range squares tile the plane with **zero gaps
+centered on a 1×1 building — per the resolution note above, the floor
+artifact of a circular gate at this small radius). A
+useful consequence: these radius-2 squares tile the plane with **zero gaps
 and zero overlap** when buildings are spaced exactly `(footprint + 2×range)`
-apart on a grid, unlike circular (Euclidean) coverage, which would need
-either gaps or overlap. For `f_building3x2a` (3×2 footprint), that's a 7×6
+apart on a grid — something true circular coverage at larger radii would not
+give you. For `f_building3x2a` (3×2 footprint), that's a 7×6
 tiling cell — 6 tiles for the building, 36 for resource nodes, fully
 covered, no waste.
 

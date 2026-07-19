@@ -477,10 +477,9 @@ Update this file directly as items are picked up/finished.
         out-of-range) — the proof the mocked surface satisfies a real func's contract. Distance
         model mostly settled 2026-07-19 (see `mock_world_spec.md`'s distance-metrics item, pinned
         by tests): "closest" selection is Euclidean and `Map.GetDistance` is the unobstructed
-        grid path length / octile (both user-observed in-game); range *gates* are modeled
-        Chebyshev but the exact metric (Chebyshev vs floored-Euclidean — indistinguishable at the
-        magnifier's radius 2, where the square coverage is confirmed) awaits the in-game
-        `range_probe.bsf` run. Remaining modeling choices flagged in `world.lua`:
+        grid path length / octile (both user-observed in-game); range *gates* are floored
+        Euclidean (settled by the in-game `range_probe.bsf` run, 2026-07-19 — see the RangeProbe
+        item below). Remaining modeling choices flagged in `world.lua`:
         vision is Euclidean "within any own entity's visibility_range" (bubble shape unverified);
         readout rounding rule unverified; no power-grid/base_id-family model yet. Next: Phase 2
         (interpreter op dispatch for the world ops; also unblocks `library/hexat.dcs`'s
@@ -524,16 +523,17 @@ Update this file directly as items are picked up/finished.
         (user, 2026-07-18) as Phase 3's golden differential fixture: the mock must reproduce the
         real log's tile sequence and tick totals from the same `.dcs` (details in
         `mock_world_spec.md`, Phase 3).
-- [ ] **Run the RangeProbe in-game to settle the range-gate metric (and `get_distance`
-      rounding).** `tests/data/range_probe.bsf`/`range_probe.dcs` (compiled + validated
-      against the mock 2026-07-19): paste the behavior onto a parked unit (vis ≥ 15), set the
-      `Probe` parameter to the probe target's frame type, park exactly one such unit at each
-      offset (3,0), (2,2), (3,2), (3,3), (4,3), (6,3) from the prober (one at a time), run, read
-      `@signal` (minimal detecting Range) and `@store` (`get_distance` readout). Prediction table
-      in `mock_world_spec.md`'s distance-metrics item / the 2026-07-19 conversation: Chebyshev
-      says 3/2/3/3/4/6, floored Euclidean says 3/2/3/4/5/6 — (3,3) and (4,3) are the deciders.
-      Update `world.lua`'s gate + `test_range_gate_is_chebyshev` + the spec/memory to whatever
-      wins.
+- [x] **Run the RangeProbe in-game to settle the range-gate metric.** Done 2026-07-19, same
+      day: measured minimal detecting ranges (3,0)=3, (2,2)=2, (3,2)=3, (3,3)=4, (4,3)=5,
+      (6,3)=6 — **floored Euclidean** exactly (in range R ⟺ floor(dist) ≤ R); Chebyshev,
+      floored-octile, and round/ceil Euclidean each contradicted by at least one row. The
+      magnifier's 5×5 square at range 2 is the floor artifact of this circular gate at small
+      radius. `world.lua`'s gate, the pinned tests (probe rows are now the in-game golden
+      values), `mock_world_spec.md`, `blight_magnifier_mining.md`, and the
+      `reference_distance_metrics` memory all updated. Still open (minor): the `@store`
+      (`get_distance` readout) rounding rule wasn't part of the reported results — the golden
+      distance column stays the mock's octile-rounded model until an in-game `@store` reading
+      says otherwise.
 - [ ] **Reuse the real `InstBeginBlock`/`GetFactionBehaviorAsm`** in `interpreter.py` rather
       than its current Python-simulated block stack and simplified `Memory`/mem-slot
       allocation — `for_number`'s own per-iteration decision is already delegated to real Lua,

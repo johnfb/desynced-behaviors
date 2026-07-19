@@ -251,20 +251,20 @@ def test_for_signal_match_membership_scan(engine):
 
 # The RangeProbe instrument (tests/data/range_probe.bsf, compiled copy alongside): sweeps
 # Loop Units (Range) with Range=1..15 and reports the smallest detecting Range on @signal plus the
-# get_distance readout on @store. Built 2026-07-19 to settle the range-gate metric in-game
-# (Chebyshev vs floored-Euclidean -- indistinguishable at the magnifier's radius 2; see
-# mock_world_spec.md's distance-metrics item and the todo.md run recipe). The expectations below
-# are the MOCK's model (gate Chebyshev, readout rounded octile); when the in-game run lands, its
-# numbers become the golden values here (same pattern as movement_circuit_test.dcs), and the gate/
-# these rows flip together if floored-Euclidean wins ((3,3) expects 4 and (4,3) expects 5 then).
+# get_distance readout on @store. The min_range column holds the GOLDEN in-game results
+# (user-run 2026-07-19), which settled the gate metric as floored Euclidean: they match
+# floor(euclid) exactly, while (3,3)/(4,3) rule out Chebyshev, (6,3) rules out floored-octile,
+# and (2,2)/(3,2) rule out round/ceil/real Euclidean. The distance column is still the mock's
+# model of the @store readout (rounded octile path length -- its exact rounding was not part of
+# the reported results; flip these if an in-game @store reading ever disagrees).
 @pytest.mark.parametrize(
     "offset,min_range,distance",
     [
         ((3, 0), 3, 3),
         ((2, 2), 2, 3),
         ((3, 2), 3, 4),
-        ((3, 3), 3, 4),
-        ((4, 3), 4, 5),
+        ((3, 3), 4, 4),
+        ((4, 3), 5, 5),
         ((6, 3), 6, 7),
     ],
 )
