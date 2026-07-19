@@ -163,8 +163,11 @@ covered, no waste.
 ### TICKS_PER_SECOND = 5
 
 User-confirmed as a stable engine constant, unlikely to ever change (many
-things would break). Not found in Lua source (native constant, same category
-as `REG_INFINITE`). Cancels out of any ratio comparing two tick-based rates
+things would break). Its *value* is defined nowhere in the Lua source
+(engine-native, same category as `REG_INFINITE`) — the Lua files do
+reference the `TICKS_PER_SECOND` global throughout (`get_work_time`'s
+seconds conversion, `c_portable_radar`'s re-arm quirk), they just never
+assign it. Cancels out of any ratio comparing two tick-based rates
 (e.g. magnifier regen supply vs. mining demand), so it mattered less than
 initially assumed for the throughput math above — it matters for converting
 to real seconds, not for the relative comparisons.

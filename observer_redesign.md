@@ -445,7 +445,8 @@ guesses — then `moveaway_range`. Finding an enemy skips Priority 2/3 entirely 
    - Weapon-range-if-armed (for the rare armed unit) remains flagged as a deferred follow-up
      refinement rather than silently dropped.
 2. **Ping throttling** — explicit minimum interval, not just hardware cadence. A persistent
-   `$LastPingTick` local: on an `S_ENEMY` report, only `ping()` if
+   `$LastPingTick` local: on an Enemy-stage report (tag `v_enemy_faction` — the `S_*` label family
+   this item originally named belonged to the superseded round-robin draft), only `ping()` if
    `simulation_tick() - $LastPingTick >= <min interval, e.g. ~10-20 ticks>`, then update
    `$LastPingTick`. Needed regardless of which radar is equipped (Portable Radar's 2-tick
    cadence would otherwise ping far more often than "every second or two").

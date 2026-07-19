@@ -475,10 +475,13 @@ Update this file directly as items are picked up/finished.
         `test_mock_world.py` covers the primitives *and* an end-to-end run of the unmodified real
         `get_closest_entity` func over the mock (returns the right nearest enemy, skipping friendly/
         out-of-range) — the proof the mocked surface satisfies a real func's contract. Modeling
-        choices flagged in `world.lua` for later in-game verification: distance is rounded Euclidean
-        (consistent with the movement model); vision is "within any own entity's visibility_range";
-        no power-grid/base_id-family model yet. Next: Phase 2 (interpreter op dispatch for the world
-        ops; also unblocks `library/hexat.dcs`'s unit-Origin path).
+        choices flagged in `world.lua` for later in-game verification: `Map.GetDistance` is rounded
+        Euclidean (consistent with the movement model) and so is "closest" ordering + vision;
+        range *gates* (`FindClosestEntity`/`GetEntitiesInRange`) were corrected to Chebyshev
+        2026-07-19 — that half is in-game-confirmed via the magnifier's square coverage, see
+        `mock_world_spec.md`'s distance-metrics open item; vision is "within any own entity's
+        visibility_range"; no power-grid/base_id-family model yet. Next: Phase 2 (interpreter op
+        dispatch for the world ops; also unblocks `library/hexat.dcs`'s unit-Origin path).
       - [x] **Phase 2 — extend the interpreter op dispatch.** Done 2026-07-19. Replaced the
         `interpreter.py` `else: raise` with a **metadata-driven generic dispatcher**: it reads each
         op's real `data.instructions[op].args` directions (in/out/exec), marshals the positional args

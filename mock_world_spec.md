@@ -343,10 +343,25 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   `RequestStateMove` sets it. One cheap in-game test (domove to a known-distance coord; note the
   stop distance and whether `range` widens it) closes it; the RALLY gate's testability depends on
   getting this tolerance right.
-- **`Map.GetDistance` tile semantics.** Real `get_distance` on an entity means closest-tile, and
-  center-tile after a `get_location` (rounds up on ties) — see the project memory on this. The mock
-  should reproduce at least the single-tile-entity case exactly and document any multi-tile
-  simplification.
+- **Distance metrics — the range gate is settled, the readout is not.** Two different native
+  functions, two different answers:
+  - **`Map.FindClosestEntity`'s range gate is Chebyshev — confirmed in-game, not a modeling
+    choice.** The Blight Magnifier's `range = 2` coverage is a user-confirmed Chebyshev square
+    (`blight_magnifier_mining.md`, "Range is Chebyshev distance"), and its implementation is
+    literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)` (`c_blight_magnifier`'s
+    `on_update`; the Virus Duplicator's min-spacing check rides the same call). Every sensing
+    instruction routed through that native function (`get_closest_entity`,
+    `for_entities_in_range`) therefore senses a **square** area, side `2·range+1` — the mock's
+    `Map.FindClosestEntity`/`GetEntitiesInRange` gates match (fixed 2026-07-19; they were
+    initially written rounded-Euclidean on the wrong assumption that no in-game evidence existed).
+  - **`Map.GetDistance` (the `get_distance` readout) is still unmeasured** — the mock uses rounded
+    Euclidean (consistent with the movement measurement's Euclidean path cost, but Chebyshev is
+    not ruled out for the readout the way it is for movement; a one-off in-game `get_distance` on
+    a known diagonal offset settles it). Also still unknown: which metric orders "closest" among
+    gate-passing candidates, and the faction-vision bubble's shape (mock uses Euclidean for both).
+  - Real `get_distance` on a multi-tile entity means closest-tile, and center-tile after a
+    `get_location` (rounds up on ties) — see the project memory on this. The mock should reproduce
+    at least the single-tile-entity case exactly and document any multi-tile simplification.
 - **Tile occupancy (ground-layer only).** Only one ground unit *or* building occupies a tile, but
   **multiple flyers can share a tile** (user-confirmed) — so occupancy constrains the ground layer
   only. The first sensing+movement version can skip occupancy (a lone unit approaching an enemy

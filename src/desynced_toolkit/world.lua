@@ -44,19 +44,41 @@ local function xy_of(target)
 	return nil
 end
 
--- MODELING CHOICE (flagged for in-game verification): distance is rounded Euclidean. The 2026-07-18
--- movement measurement pinned motion to Euclidean path-length accumulation (a diagonal step costs
--- ~sqrt(2)); circular sensor/visibility ranges are the matching read side. Manhattan/Chebyshev were
--- both ruled out for movement, so Euclidean is the consistent choice here until an in-game
--- get_distance test says otherwise. For a multi-tile entity the real engine measures to the closest
--- tile (see reference_get_distance_closest_tile) -- first-version mock entities are single-tile, so
--- closest == center and the distinction does not yet arise.
+-- Distance model -- TWO different metrics, deliberately (see mock_world_spec.md "Open items"):
+--
+-- * Range GATES (Map.FindClosestEntity / Map.GetEntitiesInRange, below) are CHEBYSHEV. This half is
+--   confirmed in-game, not a modeling choice: the Blight Magnifier's range=2 coverage is a
+--   user-confirmed square (blight_magnifier_mining.md, "Range is Chebyshev distance"), and its
+--   implementation is literally `Map.FindClosestEntity(owner, self.range, ..., FF_RESOURCE)`
+--   (components.lua, c_blight_magnifier's on_update; the Virus Duplicator's min-spacing check rides
+--   the same call) -- so the native FindClosestEntity's range test is a Chebyshev square, and every
+--   sensing instruction routed through it (get_closest_entity, for_entities_in_range) inherits that
+--   square sensing area.
+-- * Map.GetDistance (the get_distance instruction's backend, a separate native function) is rounded
+--   Euclidean -- a MODELING CHOICE still awaiting an in-game get_distance test. The 2026-07-18
+--   movement measurement pinned *movement cost* to Euclidean path accumulation (diagonal step
+--   ~sqrt(2)), so Euclidean is the consistent guess for the distance readout; Chebyshev is not
+--   ruled out for it the way it is for movement.
+--
+-- Still unverified: which metric orders "closest" among gate-passing candidates (the mock uses
+-- rounded-Euclidean GetDistance), and the faction-vision bubble's shape (IsSeen/IsVisible below use
+-- Euclidean). For a multi-tile entity the real engine measures to the closest tile (see
+-- reference_get_distance_closest_tile) -- first-version mock entities are single-tile, so the
+-- distinction does not yet arise.
 function Map.GetDistance(a, b)
 	local ax, ay = xy_of(a)
 	local bx, by = xy_of(b)
 	if ax == nil or bx == nil then return REG_INFINITE end
 	local dx, dy = ax - bx, ay - by
 	return math.floor(math.sqrt(dx * dx + dy * dy) + 0.5)
+end
+
+-- Chebyshev distance: the confirmed range-gate metric (see the distance-model note above).
+local function cheb_distance(a, b)
+	local ax, ay = xy_of(a)
+	local bx, by = xy_of(b)
+	if ax == nil or bx == nil then return REG_INFINITE end
+	return math.max(math.abs(ax - bx), math.abs(ay - by))
 end
 
 --------------------------------------------------------------------------------------------------
@@ -133,9 +155,21 @@ function World.SetTrust(a, b, level)
 	b.trust[a] = level
 end
 
-function Faction:GetTrust(other)
-	if self == other then return "OWN" end
-	return self.trust[other] or "NEUTRAL"
+-- Real call shapes in data/instructions.lua, all three of which must work here:
+--   faction:GetTrust(other_faction)        -> "ALLY"/"ENEMY"/"NEUTRAL"  (gettrust's dispatch)
+--   faction:GetTrust(entity)               -> same, via the entity's own faction (transfer checks)
+--   faction:GetTrust(entity, "ALLY")       -> boolean comparison form (for_inventory_item's
+--                                             `comp.faction:GetTrust(ent, "ALLY")`)
+-- The "OWN" return for self is a mock invention (the engine's own-faction return value is
+-- unobserved); real consumers only ever dispatch on ALLY/ENEMY/NEUTRAL, so anything else falls
+-- through their branches, which "OWN" reproduces safely.
+function Faction:GetTrust(other, compare)
+	local f = other
+	if f ~= nil and f.faction ~= nil then f = f.faction end -- an entity: resolve to its faction
+	local level
+	if f == self then level = "OWN" else level = self.trust[f] or "NEUTRAL" end
+	if compare ~= nil then return level == compare end
+	return level
 end
 
 -- First-version vision model (mock_world_spec.md Phase 1): an entity is "seen" if it is on this
@@ -390,13 +424,15 @@ end
 -- Closest entity to `owner` within `range` for which `pred(e)` is truthy, applying the broad-phase
 -- `filter` mask (MatchFilter) first exactly as the real callers rely on (get_closest_entity's pred
 -- only calls FilterEntity, trusting FindClosestEntity to have masked by frametype/faction already).
--- The owner is excluded -- radar returns OTHER units, never self.
+-- The owner is excluded -- radar returns OTHER units, never self. The range gate is Chebyshev
+-- (confirmed in-game via the magnifier -- see the distance-model note above); "closest" ordering
+-- among gate-passers uses rounded-Euclidean GetDistance (unverified, flagged there).
 function Map.FindClosestEntity(owner, range, pred, filter)
 	local best, best_d = nil, nil
 	for _, e in pairs(World.registry) do
 		if e ~= owner and e.exists then
 			local d = Map.GetDistance(owner, e)
-			if d <= range then
+			if cheb_distance(owner, e) <= range then
 				if (not filter or e:MatchFilter(filter, owner.faction)) and (not pred or pred(e)) then
 					if best_d == nil or d < best_d then best, best_d = e, d end
 				end
@@ -408,11 +444,11 @@ end
 
 -- All entities within `range` of `center` (entity or coord), optionally masked by a filter and
 -- faction. Backs get_entities_in_range / the for_entities_in_range block driver and FilterEntity's
--- own internal Map.GetEntitiesInRange calls.
+-- own internal Map.GetEntitiesInRange calls. Chebyshev gate, same as FindClosestEntity above.
 function Map.GetEntitiesInRange(center, range, filter, faction)
 	local out = {}
 	for _, e in pairs(World.registry) do
-		if e.exists and Map.GetDistance(center, e) <= range then
+		if e.exists and cheb_distance(center, e) <= range then
 			if not filter or e:MatchFilter(filter, faction or (center.faction)) then
 				out[#out + 1] = e
 			end

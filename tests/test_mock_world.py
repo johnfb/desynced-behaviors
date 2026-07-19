@@ -46,6 +46,36 @@ def test_find_closest_picks_nearest_in_range(engine):
     assert w.find_closest(me, 40).eid != far.eid
 
 
+def test_range_gate_is_chebyshev(engine):
+    # The range gate is Chebyshev, confirmed in-game via the Blight Magnifier's square range=2
+    # coverage (blight_magnifier_mining.md "Range is Chebyshev distance"), whose implementation is
+    # Map.FindClosestEntity itself. A diagonal placement distinguishes the metrics: (3,3) is
+    # Chebyshev 3 but rounded-Euclidean 4.
+    w = MockWorld(engine)
+    me = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=40)
+    diag = w.spawn("f_bot_1m_c", "player", 3, 3)
+    assert w.distance(me, diag) == 4  # the Euclidean readout still says 4...
+    assert w.find_closest(me, 3).eid == diag.eid  # ...but the gate admits it at range 3
+    assert w.find_closest(me, 2) is None
+
+
+def test_gettrust_accepts_entity_and_compare_forms(engine):
+    # Real call shapes in data/instructions.lua: GetTrust(faction), GetTrust(entity), and the
+    # two-arg comparison form GetTrust(ent, "ALLY") used by for_inventory_item.
+    w = MockWorld(engine)
+    player = w.faction("player")
+    bugs = w.faction("bugs")
+    w.set_trust(player, bugs, "ENEMY")
+    bug = w.spawn("f_bot_1m_c", bugs, 5, 0)
+    friend = w.spawn("f_bot_1m_c", player, 6, 0)
+
+    assert player.GetTrust(player, bugs) == "ENEMY"  # faction arg
+    assert player.GetTrust(player, bug) == "ENEMY"  # entity arg resolves to its faction
+    assert player.GetTrust(player, bug, "ALLY") is False  # comparison form -> boolean
+    assert player.GetTrust(player, friend, "ALLY") is False  # own faction is not "ALLY"
+    assert bugs.GetTrust(bugs, friend, "ENEMY") is True
+
+
 def test_matchfilter_enemy_faction_agrees_with_prepare(engine):
     w = MockWorld(engine)
     player = w.faction("player")
