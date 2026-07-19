@@ -525,7 +525,7 @@ Update this file directly as items are picked up/finished.
         real log's tile sequence and tick totals from the same `.dcs` (details in
         `mock_world_spec.md`, Phase 3).
 - [ ] **Run the RangeProbe in-game to settle the range-gate metric (and `get_distance`
-      rounding).** `range_probe.bsf`/`range_probe.dcs` (workspace root, compiled + validated
+      rounding).** `tests/data/range_probe.bsf`/`range_probe.dcs` (compiled + validated
       against the mock 2026-07-19): paste the behavior onto a parked unit (vis ≥ 15), set the
       `Probe` parameter to the probe target's frame type, park exactly one such unit at each
       offset (3,0), (2,2), (3,2), (3,3), (4,3), (6,3) from the prober (one at a time), run, read
@@ -597,8 +597,11 @@ Update this file directly as items are picked up/finished.
 ## Repository split & `blz` namespacing
 
 - [ ] **Split this repo into a shareable toolkit and a me-specific repo, and rename the toolkit
-      under the `blz` namespace** (user, 2026-07-16). Two concerns are currently entangled and
-      should live in separate repositories:
+      under the `blz` namespace** (user, 2026-07-16). **Priority raised (user, 2026-07-19):** the
+      range-probe-committed-at-root incident (see `feedback_probe_behaviors_are_test_fixtures`
+      memory) is exactly the file-placement ambiguity the split dissolves — "tooling anyone can
+      use on their behaviors" vs. "work on my own behaviors" each get an unambiguous home. Two
+      concerns are currently entangled and should live in separate repositories:
       - *Shareable* — the `desynced_toolkit` package (wire codec, BSF pipeline, Lua-backed
         interpreter/runtime), its tests, and the format/spec docs that document the tooling
         itself (`behavior_format.md`, `behavior_source_format.md`, `instructions_index.md`).

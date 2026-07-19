@@ -356,7 +356,7 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
     round/ceil/real-valued Euclidean; the user expects the Euclidean family engine-wide. The
     metrics first separate at range 3. The mock's gates are Chebyshev for now (they were
     initially rounded-Euclidean, which the confirmed square genuinely refutes); the RangeProbe
-    behavior (`range_probe.bsf`/`.dcs`, workspace root — sweeps `for_entities_in_range` Range
+    behavior (`tests/data/range_probe.bsf`/`.dcs` — sweeps `for_entities_in_range` Range
     1..15 and reports the minimal detecting Range on `@signal`, plus the `get_distance` readout
     on `@store`) measures the truth in-game — switch the gate to `floor(Euclidean)` if a target
     at offset (3,3) first appears at Range 4 rather than 3.

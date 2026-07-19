@@ -5,10 +5,16 @@ the real compiler, and run through the real instruction funcs over a MockWorld-b
 (comp.owner is a genuine mock entity). The dispatch itself is metadata-driven, so these also guard
 the generic marshaller (in/out/exec + hidden make_asm args)."""
 
+from pathlib import Path
+
+import pytest
+
 from desynced_toolkit import Interpreter, MockWorld
 from desynced_toolkit.bsf.argcache import ArgCache
 from desynced_toolkit.bsf.compile import compile_behavior
 from desynced_toolkit.bsf.parse_text import parse_behavior
+
+DATA_DIR = Path(__file__).parent / "data"
 
 
 def _compile(engine, text):
@@ -241,3 +247,35 @@ def test_for_signal_match_membership_scan(engine):
         "n4: exit()\n",
     )
     assert interp.read_param(1).num == 2
+
+
+# The RangeProbe instrument (tests/data/range_probe.bsf, compiled copy alongside): sweeps
+# Loop Units (Range) with Range=1..15 and reports the smallest detecting Range on @signal plus the
+# get_distance readout on @store. Built 2026-07-19 to settle the range-gate metric in-game
+# (Chebyshev vs floored-Euclidean -- indistinguishable at the magnifier's radius 2; see
+# mock_world_spec.md's distance-metrics item and the todo.md run recipe). The expectations below
+# are the MOCK's model (gate Chebyshev, readout rounded octile); when the in-game run lands, its
+# numbers become the golden values here (same pattern as movement_circuit_test.dcs), and the gate/
+# these rows flip together if floored-Euclidean wins ((3,3) expects 4 and (4,3) expects 5 then).
+@pytest.mark.parametrize(
+    "offset,min_range,distance",
+    [
+        ((3, 0), 3, 3),
+        ((2, 2), 2, 3),
+        ((3, 2), 3, 4),
+        ((3, 3), 3, 4),
+        ((4, 3), 4, 5),
+        ((6, 3), 6, 7),
+    ],
+)
+def test_range_probe_fixture_against_mock_model(engine, offset, min_range, distance):
+    _, prog = engine.decode_dcs((DATA_DIR / "range_probe.dcs").read_text().strip())
+    w = MockWorld(engine)
+    owner = w.spawn("f_bot_1m_c", "player", 0, 0, visibility_range=15)
+    comp = w.add_component(owner, "c_behavior")
+    w.spawn("f_bot_1m_b", "player", offset[0], offset[1])  # the probe target (a Hauler)
+    interp = Interpreter(engine, prog, comp=comp)
+    interp.state.mem[1] = engine.new_value(0, id_="f_bot_1m_b")  # Probe param = Hauler frame id
+    interp.run()
+    assert owner.registers[4].num == min_range  # @signal (wire -4)
+    assert owner.registers[2].num == distance  # @store (wire -2)

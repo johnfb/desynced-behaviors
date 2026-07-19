@@ -57,7 +57,7 @@ end
 --   identical square (the corner sits at 2*sqrt(2)~2.83, which floors to 2): the square only RULES
 --   OUT round/ceil/real-valued Euclidean, and the user expects the Euclidean family engine-wide.
 --   The metrics first separate at range 3 ((3,3): Chebyshev 3 vs floor-Euclid 4) -- the RangeProbe
---   behavior (range_probe.bsf, workspace root) measures exactly this in-game; switch this gate to
+--   behavior (tests/data/range_probe.bsf) measures exactly this in-game; switch this gate to
 --   floor(Euclidean) if it reports (3,3) undetected at Range 3.
 -- * "Closest" ordering among gate-passing candidates (get_closest_entity's winner) is EUCLIDEAN --
 --   user-observed in-game (2026-07-19). So candidacy is a square; the winner inside it is the
@@ -95,7 +95,7 @@ local function euclid(a, b)
 	return math.sqrt(dx * dx + dy * dy)
 end
 
--- Chebyshev distance: the confirmed range-gate metric (see the distance-model note above).
+-- Chebyshev distance: the modeled range-gate metric (provisional -- see the distance-model note).
 local function cheb_distance(a, b)
 	local ax, ay = xy_of(a)
 	local bx, by = xy_of(b)
