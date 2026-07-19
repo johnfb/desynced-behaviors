@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import resources
 
+import lupa.lua54 as lupa
+
 from .interpreter import Interpreter
 from .lua_runtime import LupaEngine
 
@@ -62,10 +64,16 @@ class MockWorld:
         """Route the real debug_print func's global `print` into `self.prints` with tick/entity
         attribution (behavior_runtime.lua's sink; one sink per engine, so the most recently
         constructed MockWorld on a shared engine owns it -- fine for one-world-per-test use)."""
+        tool_copy = self.engine.lua.globals().Tool.Copy
 
         def sink(comp, *args):
-            # the real func prints ("[DEBUGPRINT]", reg) -- the register value is the last arg
+            # The real func prints ("[DEBUGPRINT]", reg) -- the register value is the last arg.
+            # SNAPSHOT it (deep copy; entity refs survive as references): the printed table is a
+            # live register box that the behavior keeps Init()-ing in place, so storing the raw
+            # reference would make every captured print retroactively show the final value.
             value = args[-1] if args else None
+            if value is not None and lupa.lua_type(value) == "table":
+                value = tool_copy(value)
             eid = None
             if comp is not None and comp.owner is not None:
                 eid = comp.owner.eid
