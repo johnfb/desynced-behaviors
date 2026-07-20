@@ -241,15 +241,49 @@ def test_lint_label_sections_are_not_unreachable(engine, argcache):
     from desynced_toolkit.bsf.parse_text import parse_behavior
 
     # computed dispatch: the label-headed section is only reachable via jump(Label=$State),
-    # which no static walk resolves -- must NOT be flagged
+    # which no static walk resolves -- must NOT be flagged. (The set_reg is fallthrough-only, so
+    # it carries no id -- an unreferenced id would be a separate, legitimate warning.)
     b = parse_behavior(
         "behavior T():\n\n"
-        "n1: jump(Label=$State)  >POP (next)\n"
+        "jump(Label=$State)  >POP (next)\n"
         "n2: label(Label=v_arrow_up)\n"
-        "n3: set_reg(Value=1, Target=$B)  >POP (next)\n",
+        "set_reg(Value=1, Target=$B)  >POP (next)\n",
         argcache,
     )
     assert lint_behavior(b, argcache) == []
+
+
+def test_lint_flags_unreferenced_declared_id(engine, argcache):
+    from desynced_toolkit.bsf.lint import lint_behavior
+    from desynced_toolkit.bsf.parse_text import parse_behavior
+
+    # `stray` is given an id but nothing branches/jumps to it -- flagged. The entry node and the
+    # target `hit` are not (entry is exempt; `hit` is referenced).
+    b = parse_behavior(
+        "behavior T():\n\n"
+        "check_number(Value=$A, Compare=5)  >hit (If Larger) >NEXT (If Smaller) >NEXT (If Equal)\n"
+        "stray: set_reg(Value=1, Target=$B)  >POP (next)\n"
+        "hit: exit()\n",
+        argcache,
+    )
+    warnings = lint_behavior(b, argcache)
+    assert any("'stray' has an id but nothing references it" in w for w in warnings)
+    assert not any("'hit'" in w for w in warnings)
+
+
+def test_lint_does_not_flag_entry_or_label_ids(engine, argcache):
+    from desynced_toolkit.bsf.lint import lint_behavior
+    from desynced_toolkit.bsf.parse_text import parse_behavior
+
+    # entry node named `start`, and a label reached only dynamically -- neither is a dangling id
+    b = parse_behavior(
+        "behavior T():\n\n"
+        "start: jump(Label=$State)  >POP (next)\n"
+        "spot: label(Label=v_arrow_up)\n"
+        "set_reg(Value=1, Target=$B)  >POP (next)\n",
+        argcache,
+    )
+    assert not any("nothing references it" in w for w in lint_behavior(b, argcache))
 
 
 def test_lint_flags_literal_jump_without_matching_label(engine, argcache):

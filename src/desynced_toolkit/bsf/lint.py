@@ -13,7 +13,7 @@ from __future__ import annotations
 from .argcache import ArgCache
 from .ir import BsfBehavior
 from .render_mermaid import _declared_pins, _resolve_pin_target
-from .render_text import _jump_label_targets, _literal_key
+from .render_text import _jump_label_targets, _literal_key, referenced_node_ids
 from .values import IdLit, Num, Param
 
 
@@ -40,6 +40,16 @@ def _lint_one(b: BsfBehavior, argcache: ArgCache, prefix: str, warnings: list[st
     def warn(msg: str) -> None:
         warnings.append(f"{prefix}{msg}")
 
+    # How a warning names a node. An id-less (fallthrough-only) node has only a hidden synthesized
+    # id (`__nN`) that appears nowhere the user can see, so referencing it that way would be
+    # useless -- describe it by op + its 1-based position in the listing instead. A node with a
+    # real surface id is named by it.
+    _pos = {nid: i + 1 for i, nid in enumerate(b.order)}
+
+    def ref(nid: str) -> str:
+        node = b.nodes[nid]
+        return f"node {nid!r}" if node.id_explicit else f"the {node.op}() at listing position {_pos[nid]}"
+
     if b.order:
         # Roots: Program Start plus every label -- a label is reachable through computed
         # `jump(Label=$var)` dispatch that no static walk can resolve, so a label-headed
@@ -48,7 +58,7 @@ def _lint_one(b: BsfBehavior, argcache: ArgCache, prefix: str, warnings: list[st
         roots = {b.order[0]} | {n.id for n in b.nodes.values() if n.op == "label"}
         unreachable = [nid for nid in b.order if nid not in _forward_reachable(b, argcache, roots)]
         for nid in unreachable:
-            warn(f"node {nid!r} is unreachable (not reached from Program Start or any label)")
+            warn(f"{ref(nid)} is unreachable (not reached from Program Start or any label)")
 
     # A literal jump whose (id, num) matches no label in this same behavior restarts the
     # program at runtime (jump falls back to Program Start on no match) -- almost always a
@@ -65,7 +75,7 @@ def _lint_one(b: BsfBehavior, argcache: ArgCache, prefix: str, warnings: list[st
         if not isinstance(v, (IdLit, Num)):
             continue  # computed dispatch -- genuinely unresolvable statically, not suspicious
         if _literal_key(v) not in label_keys:
-            warn(f"node {n.id!r} jumps to a literal label with no matching label node in this behavior")
+            warn(f"{ref(n.id)} jumps to a literal label with no matching label node in this behavior")
 
     # A constant-Label jump always dispatches to its label -- its top-level `next` can never
     # fire, so a wired/fallthrough `next` there is a dead edge cluttering the visual editor
@@ -79,9 +89,26 @@ def _lint_one(b: BsfBehavior, argcache: ArgCache, prefix: str, warnings: list[st
             continue
         if _resolve_pin_target(n.id, "next", n, b.order) is not None:
             warn(
-                f"node {n.id!r}: constant jump never falls through -- its 'next' is a dead "
+                f"{ref(n.id)}: constant jump never falls through -- its 'next' is a dead "
                 f"edge; write >POP (next)"
             )
+
+    # A node carrying a surface id that nothing references is either dead bookkeeping or a wiring
+    # mistake -- once ids exist only where something targets them (optional node ids), a declared
+    # yet-unreferenced id is anomalous. Two exemptions: the Program Start entry node (naming the
+    # entry is legitimate, not a dangling anchor), and `label` nodes (a dispatch target by nature,
+    # reachable via a dynamic `jump(Label=$x)` no static walk resolves). For a plain human note on
+    # a node, use `cmt`, not an unwired id.
+    if b.order:
+        referenced = referenced_node_ids(b.nodes)
+        entry = b.order[0]
+        for nid in b.order:
+            node = b.nodes[nid]
+            if node.id_explicit and nid != entry and node.op != "label" and nid not in referenced:
+                warn(
+                    f"node {nid!r} has an id but nothing references it -- give the intended "
+                    f"target the id, or drop it (use cmt for a human note)"
+                )
 
     # A parameter-slot reference beyond the declared parameter list resolves to empty/0 at
     # runtime with no error -- the dangling-ref-via-copy-paste hazard (see
@@ -90,7 +117,7 @@ def _lint_one(b: BsfBehavior, argcache: ArgCache, prefix: str, warnings: list[st
         for name, v in n.args.items():
             if isinstance(v, Param) and v.slot > len(b.params):
                 warn(
-                    f"node {n.id!r} arg {name!r} references undeclared parameter slot {v.slot} "
+                    f"{ref(n.id)} arg {name!r} references undeclared parameter slot {v.slot} "
                     f"(behavior declares {len(b.params)}) -- resolves to empty/0 at runtime"
                 )
 

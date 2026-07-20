@@ -494,9 +494,12 @@ legal-but-suspicious tier: nodes unreachable from Program Start or any
 label (labels are never "unreachable" — computed `jump` dispatch can reach
 them), a literal `jump` whose `(id, num)` matches no `label` in the same
 behavior (falls back to Program Start at runtime — usually a typo, not an
-intended restart), and references to undeclared parameter slots (the
+intended restart), references to undeclared parameter slots (the
 dangling-ref-via-copy-paste hazard, which resolves to empty/0 in-game with
-no error).
+no error), and **a declared node id that nothing references** (once ids
+appear only on genuine targets — see "Optional node ids" — an unwired id is
+anomalous; the Program Start entry node and `label` nodes are exempt, and a
+plain human note belongs in `cmt`, not a dangling id).
 
 ## Dynamic `jump`/`label` dispatch
 

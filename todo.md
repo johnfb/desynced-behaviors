@@ -460,14 +460,15 @@ per-node identity token, not computed dispatch.
       `parse_text.py` (accept a node line with no `NODE_ID:` prefix), and the grammar in
       `behavior_source_format.md`. Note: a node still needs a synthesizable internal identity
       even when id-less (for graph edges/IR) — only the *text surface* omits it.
-- [ ] **Warn (lint) when a declared node id has nothing pointing at it.** Once ids exist only
-      where something references them, an id no pin/jump/call targets is anomalous by
-      construction — either dead bookkeeping or a wiring mistake. Add it to `lint.py`'s
-      legal-but-suspicious tier (alongside unreachable nodes / literal jumps with no matching
-      `(id, num)` label), so it runs on every CLI compile. Interaction to settle: a node the
-      author id'd purely as a human-readable anchor (a `cmt`-substitute) is legal-but-unwired
-      by design — decide whether the warning is suppressible or whether that use case should
-      go through `cmt` instead.
+- [x] **Warn (lint) when a declared node id has nothing pointing at it.** Done 2026-07-20.
+      `lint.py` flags an `id_explicit` node that nothing references, with two exemptions: the
+      Program Start entry node, and `label` nodes (a dispatch target by nature — decompile now
+      always keeps a label's descriptive id for the same reason). The human-anchor interaction is
+      resolved per the `cmt`-paragraph decision: human notes go through `cmt`, so the warning is
+      unconditional (message points there). Also fixed a message-quality regression optional ids
+      introduced across all lint rules — an id-less node is now described as "the `<op>()` at
+      listing position N" instead of its meaningless synthesized `__nN`. Covered by two new tests
+      in `test_bsf_validation.py`.
 - [x] **Decompiler produces more descriptive ids than `n<line/pos>`.** Done 2026-07-20, in the
       same `decompile.py` pass as the optional-id item: `label` nodes → `label_<slug of Label>`,
       others → their op, occurrence-suffixed on collision (`test_bsf_optional_ids.py`). Still-open

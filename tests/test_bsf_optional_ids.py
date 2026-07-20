@@ -28,15 +28,16 @@ def argcache(engine):
 
 
 @pytest.mark.parametrize("fname", _REAL)
-def test_id_explicit_iff_referenced(engine, argcache, fname):
-    """The core invariant: after decompile, a node's id is surface-visible exactly when
-    something references it. This is what makes most instructions carry no id at all."""
+def test_id_explicit_iff_referenced_or_label(engine, argcache, fname):
+    """The core invariant: after decompile, a node's id is surface-visible exactly when something
+    references it -- plus `label` nodes, which always keep their id (a dispatch target by nature).
+    This is what makes most non-label instructions carry no id at all."""
     b = decompile_dcs(engine, (DATA_DIR / fname).read_text().strip())
 
     def check(bb):
         referenced = referenced_node_ids(bb.nodes)
         for nid, node in bb.nodes.items():
-            assert node.id_explicit == (nid in referenced), (fname, nid, node.op)
+            assert node.id_explicit == (nid in referenced or node.op == "label"), (fname, nid, node.op)
         for sub in bb.subs:
             check(sub)
 

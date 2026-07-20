@@ -145,12 +145,16 @@ def _assign_descriptive_ids(nodes: dict[str, BsfNode], order: list[str]) -> tupl
     suffix (`set_reg`, `set_reg_2`) in wire order -- rare (most targets are labels named by a
     unique Label value), and fully wire-order-independent disambiguation is the sequenced
     canonical-decompile follow-up (todo)."""
-    referenced = referenced_node_ids(nodes)
-    used = {nid for nid in order if nid not in referenced}  # reserve the kept positional ids
+    # A `label` node is a dispatch target by nature -- a dynamic `jump(Label=$x)` no static walk
+    # resolves can still land on it -- so it always earns its descriptive id, even when nothing
+    # statically references it. (lint.py exempts labels from the unreferenced-id warning for the
+    # same reason.)
+    should_id = referenced_node_ids(nodes) | {nid for nid, n in nodes.items() if n.op == "label"}
+    used = {nid for nid in order if nid not in should_id}  # reserve the kept positional ids
     rename: dict[str, str] = {}
     explicit: dict[str, bool] = {}
     for nid in order:
-        if nid not in referenced:
+        if nid not in should_id:
             rename[nid] = nid
             explicit[nid] = False
             continue
