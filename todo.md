@@ -189,6 +189,9 @@ Update this file directly as items are picked up/finished.
           `feedback_node_references_user_vocabulary`). The ids that remain are exactly the
           meaningful targets, and canonically named per the point above. Needs a decompiler change
           (suppress ids on non-referenced nodes) and a parser that accepts id-less node lines.
+          **The concrete work items — plus the warn-on-unreferenced-id, descriptive-id, and
+          multi-line-instruction extensions the user added 2026-07-20 — are now tracked under
+          `desynced_toolkit` / BSF infrastructure → "Node-id readability overhaul".**
         - **Quick win that needs none of the above: a git `textconv` diff driver.** A `.gitattributes`
           rule running `bsf decompile` on `*.dcs` makes `git diff`/`git log -p`/PR views render the
           BSF diff while still storing the lossless canonical `.dcs` (keeps editor `nx`/`ny` layout,
@@ -428,6 +431,94 @@ Update this file directly as items are picked up/finished.
       hundreds).
 
 ## `desynced_toolkit` / BSF infrastructure
+
+### Node-id readability overhaul (user, 2026-07-20)
+
+Motivated directly by the user being tired of instructions being referred to by the
+compiler-assigned `n<pos>` id, which renumbers every time nodes serialize in a different
+order (the exact instability behind `feedback_node_references_user_vocabulary` and
+`feedback_resave_reencodes_unrelated_wiring`). Extends the "make node ids optional" bullet
+under Local behavior-library storage above — that bullet holds the fuller motivation; these
+are the concrete, now-prioritized work items. Terminology: "node id" is BSF's `NODE_ID`
+token (`n27`), **not** the real `jump`/`label` instruction — this whole group is about the
+per-node identity token, not computed dispatch.
+
+- [ ] **Make node ids optional — decompiler emits one only when a pin actually targets the
+      node; parser/compiler accept id-less node lines.** A node reached solely by positional
+      fallthrough gets no id. Only genuine connection points (jump/branch/`>node` targets,
+      `call`-target nodes, resolved `jump→label` destinations) get one. Minimizes diff churn
+      (inserting/removing a fallthrough-only node renumbers nothing) and deliberately stops
+      agents/users referring to instructions by an unstable id — most instructions won't have
+      one, forcing references into the stable vocabulary (display name, `cmt`, enclosing
+      `label` section). Touches `render_text.py` (suppress the id on non-targeted nodes),
+      `parse_text.py` (accept a node line with no `NODE_ID:` prefix), and the grammar in
+      `behavior_source_format.md`. Note: a node still needs a synthesizable internal identity
+      even when id-less (for graph edges/IR) — only the *text surface* omits it.
+- [ ] **Warn (lint) when a declared node id has nothing pointing at it.** Once ids exist only
+      where something references them, an id no pin/jump/call targets is anomalous by
+      construction — either dead bookkeeping or a wiring mistake. Add it to `lint.py`'s
+      legal-but-suspicious tier (alongside unreachable nodes / literal jumps with no matching
+      `(id, num)` label), so it runs on every CLI compile. Interaction to settle: a node the
+      author id'd purely as a human-readable anchor (a `cmt`-substitute) is legal-but-unwired
+      by design — decide whether the warning is suppressible or whether that use case should
+      go through `cmt` instead.
+- [ ] **Decompiler produces more descriptive ids than `n<line/pos>`.** Derive the emitted id
+      from something durable and human-meaningful rather than wire position. **Decided
+      2026-07-20 (user-confirmed): name a node after its own role, NOT after what jumps to
+      it.** The user's first instinct was "shorthand describing what jumps there," but that
+      reintroduces the churn this whole overhaul kills: (a) real behaviors have arbitrary
+      control-flow fan-in, so a join point has no single incoming edge to name it after, and
+      (b) naming a node after its predecessor's pin means editing the *predecessor* renames the
+      *target* — instability relocated, not removed. Role-based naming instead reads best where
+      ids are actually read most — the reference site: `>engage_target (If Larger)` explains
+      itself and stays stable when the compare is edited. Scheme: op display name + short
+      disambiguator, scoped by enclosing `label` section (`engage_target`, `search_scan`,
+      `search_scan2`). **One special case that *is* stable "what jumps there": a real `label`
+      node takes its id from its `Label` value** (`state_transport_route`) — for a label the
+      dispatch key genuinely is its identity. The predecessor info the user wanted is still
+      worth surfacing, but as a **back-reference annotation in `--annotate` mode** (`# ← If
+      Larger from compare_dist`), computed fresh on render, never baked into the id. Hard
+      requirement unchanged: ids must stay stable across the editor's untouched-node reordering
+      (same durability the canonical-decompile item under Local behavior-library storage needs
+      — sequence the two together). Remaining: the exact disambiguator/collision-suffix rule.
+- [ ] **Allow a BSF instruction to span multiple physical lines, terminated by `;`.** So a
+      descriptive id can sit on its own line *above* the instruction while the instruction
+      bodies still line up in a column (a long id no longer shoves its `op(...)` to the right),
+      and a node's args/branch-notes/comment can wrap for readability. **Terminator decided
+      2026-07-20 (user-confirmed): `;`, and its real job is to keep whitespace non-semantic.**
+      The tempting alternative — significant indentation (Python-style, no terminator) — would
+      give the layout directly but makes whitespace load-bearing, a bad trade for a format built
+      for machine/agent editing and diffing; rejected. With `;`, the **parser scans for the
+      terminator and never counts spaces**, so indentation and blank lines stay purely cosmetic
+      (matches the grammar's existing promise that blank lines are non-structural) and the
+      *renderer* does the column alignment. Rules to pin: (1) `;` is required **only** for a node
+      that spans multiple lines or carries a `cmt` block — a node written entirely on one line
+      stays bare and newline-terminated, so every existing file parses unchanged (backward
+      compatible); (2) a missing `;` on a multi-line node is a hard parse error with a line
+      number, not silent recovery (strict-by-design). Still to settle: how a bare id-on-its-own-
+      line reads (is `foo:` alone a node-id declaration binding the *next* instruction, and how
+      does that coexist with `label` sections?). Touches the `parse_text.py` tokenizer,
+      `render_text.py` layout, and the grammar block in `behavior_source_format.md`.
+- [ ] **Give node comments (`cmt`) a first-class multi-line paragraph syntax.** Every node can
+      carry a `cmt`; in the in-game editor it renders as a paragraph *under* the node, wrapped to
+      node width — BSF should let it be authored/rendered as a free-form paragraph too, not
+      today's single-quoted `cmt="..."` hidden-field one-liner. **Hazard to avoid (design
+      discussion 2026-07-20): do NOT use a `#`-prefix for this** — `#` already means a
+      throwaway comment that is dropped on parse and never emitted, whereas `cmt` is *structural
+      data* that round-trips to the wire and shows in-game; the two must stay visually distinct,
+      so `#`-lines-as-cmt is out. **Decided 2026-07-20 (user-confirmed): extend the existing
+      `cmt=` to a triple-quoted block** (`cmt="""…multi-line…"""`), kept **explicit** (the `cmt=`
+      stays, so the field mapping is unambiguous — no bare `"""…"""`-block form), rendered under
+      the node's branch notes and closed by the `;` terminator from the item above — lowest new
+      concept (it's the same `cmt` arg, multiline), stays distinct from `#`, no significant
+      whitespace. Rejected alternatives: heredoc (`cmt <<END … END`) — more robust to a comment
+      literally containing `"""` but a whole new syntactic device, over-engineered for how rare
+      that is; indented block — reintroduces semantic whitespace; bare `"""…"""` block with no
+      `cmt=` — cleaner visually but loses the explicit field mapping a strict format wants.
+      Resolves the "human-anchor node" open question in
+      the warn-on-unreferenced-id item above: with real paragraph `cmt` available, human notes
+      go through `cmt` and ids are reserved for genuine jump targets, so that lint warning can be
+      unconditional.
 
 - [ ] **Add the BSF envelope/sidecar layer**: `nx`/`ny` node positions and full
       blueprint/component wrapping beyond a bare behavior plus its `dependencies`. The pipeline
