@@ -122,7 +122,8 @@ def test_render_emits_next_token_for_all_multi_pin_ops(engine, argcache):
     n2 = BsfNode(id="n2", op="set_reg", args={"Value": Num(1), "Target": Var("B")})
     b = BsfBehavior(name="T", nodes={"n1": n1, "n2": n2}, order=["n1", "n2"])
     text = render_behavior(b, argcache)
-    n1_line = next(line for line in text.split("\n") if line.startswith("n1:"))
+    lines = text.split("\n")
+    n1_line = lines[lines.index("n1:") + 1]  # id on its own line; instruction is the line below
     assert ">NEXT (If Larger)" in n1_line
     assert ">POP (If Smaller)" in n1_line
     assert ">NEXT (If Equal)" in n1_line
@@ -383,8 +384,9 @@ def test_annotate_translates_opaque_ids_but_not_obvious_ones(engine, argcache):
     )
     text = render_behavior(b, argcache, annotate=True)
     lines = text.split("\n")
-    n1_line = next(line for line in lines if line.startswith("n1:"))
-    n2_line = next(line for line in lines if line.startswith("n2:"))
+    # id on its own line; the annotation rides on the instruction line below it
+    n1_line = lines[lines.index("n1:") + 1]
+    n2_line = lines[lines.index("n2:") + 1]
     assert 'c_radar="Long-Range Radar"' in n1_line  # opaque: annotated
     assert 'v_resource="Resource"' not in n2_line  # derivable by inspection: quiet
 

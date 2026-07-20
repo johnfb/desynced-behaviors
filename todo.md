@@ -500,9 +500,15 @@ per-node identity token, not computed dispatch.
       (backward compatible). Whitespace stays non-semantic (the parser never counts indentation).
       Multi-line-without-`;`, content-after-`;`, and unterminated quotes/parens are all hard
       errors. Wrapped arg lists and branch-notes-on-their-own-lines both work. Covered by
-      `test_bsf_multiline.py`. **The id-on-its-own-line layout is still deliberately not done**
-      (the one open design question below — how a bare `foo:` line coexists with `label`
-      sections — is unresolved, so ids stay inline for now). Original notes preserved. So a
+      `test_bsf_multiline.py`. **The id-on-its-own-line layout is also done (2026-07-20).** The
+      decompiler now emits each id'd node's id on the line above its instruction (so bodies align
+      at column 0, reading like assembly labels); the parser accepts both the own-line and the
+      inline `id: op(...)` forms. The "open design question" flagged earlier — how a bare `foo:`
+      line coexists with `label` sections — was a conflation (user): a `foo:` id-declaration line
+      and a `label(...)` op are syntactically disjoint (`identifier:` vs `identifier(`), and the
+      annotate "label section" is just cosmetic whitespace, so there was nothing to reconcile.
+      Dangling/duplicate/id+inline declarations are parse errors. Covered by
+      `test_bsf_optional_ids.py`. Original notes preserved. So a
       descriptive id can sit on its own line *above* the instruction while the instruction
       bodies still line up in a column (a long id no longer shoves its `op(...)` to the right),
       and a node's args/branch-notes/comment can wrap for readability. **Terminator decided

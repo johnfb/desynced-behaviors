@@ -227,14 +227,19 @@ def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, s
     # The `id:` prefix appears only for a node something actually references (id_explicit) --
     # every branch/jump target has it set, so a `>id (Pin)` note above always names a node whose
     # own line still shows that id. A fallthrough-only node renders bare, as just `op(args)`.
-    prefix = f"{node.id}: " if node.id_explicit else ""
-    line = f"{prefix}{node.op}({args_str})"
+    line = f"{node.op}({args_str})"
     if notes:
         line += "  " + " ".join(notes)
     if cmt_as_block:
         # A node with a cmt block spans lines, so it must be `;`-terminated (the parser scans for
         # `;`, keeping indentation/blank lines non-semantic).
         line += "\n  " + _render_cmt_block(cmt_val) + ";"
+    if node.id_explicit:
+        # The id sits on its own line ABOVE the instruction (behavior_source_format.md's
+        # id-on-own-line, user 2026-07-20), so every instruction body starts at column 0 and
+        # they line up regardless of how long the ids are. A referenced/target node reads like an
+        # assembly label -- `>engage_target (If Larger)` jumps to the `engage_target:` line.
+        line = f"{node.id}:\n{line}"
     return line
 
 
@@ -309,9 +314,12 @@ def _render_into(
             parts = _annotation_parts(node, argcache)
             if parts:
                 ann = f"  # {' · '.join(parts)}"
-                # keep the annotation on the op line, ahead of any multi-line cmt block
-                head, sep, tail = line.partition("\n")
-                line = head + ann + sep + tail
+                # keep the annotation on the op line -- which is the 2nd physical line when the id
+                # sits on its own line above it, the 1st otherwise -- ahead of any cmt block
+                phys = line.split("\n")
+                op_idx = 1 if node.id_explicit else 0
+                phys[op_idx] += ann
+                line = "\n".join(phys)
         lines.append(line)
     for sub in b.subs:
         lines.append("")

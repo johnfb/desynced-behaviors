@@ -76,8 +76,9 @@ def test_jump_label_annotation_literal_vs_dynamic(engine):
     argcache = ArgCache(engine)
     text = render_behavior(behavior, argcache)
     lines = text.split("\n")
-    n2_line = next(line for line in lines if line.startswith("n2:"))
-    n3_line = next(line for line in lines if line.startswith("n3:"))
+    # id sits on its own line; the instruction (with its branch notes) is the line below it
+    n2_line = lines[lines.index("n2:") + 1]
+    n3_line = lines[lines.index("n3:") + 1]
     assert ">n1 (jump→label)" in n2_line  # literal Label, resolved statically
     assert "jump→label" not in n3_line  # dynamic Label ($Dynamic), never resolved
 
@@ -109,9 +110,9 @@ def test_jump_label_annotation_distinguishes_by_num(engine):
     argcache = ArgCache(engine)
     text = render_behavior(behavior, argcache)
     lines = text.split("\n")
-    assert ">n1 (jump→label)" in next(line for line in lines if line.startswith("n4:"))
-    assert ">n2 (jump→label)" in next(line for line in lines if line.startswith("n5:"))
-    assert ">n3 (jump→label)" in next(line for line in lines if line.startswith("n6:"))
+    assert ">n1 (jump→label)" in lines[lines.index("n4:") + 1]
+    assert ">n2 (jump→label)" in lines[lines.index("n5:") + 1]
+    assert ">n3 (jump→label)" in lines[lines.index("n6:") + 1]
 
     reparsed = parse_behavior(text, argcache)
     assert reparsed.nodes["n4"].args["Label"] == IdLit("v_broken")
@@ -233,8 +234,8 @@ def test_pop_vs_omission_distinct_through_text_roundtrip(engine):
 
     text = render_behavior(behavior, argcache)
     lines = text.split("\n")
-    a_line = next(line for line in lines if line.startswith("A:"))
-    b_line = next(line for line in lines if line.startswith("B:"))
+    a_line = lines[lines.index("A:") + 1]
+    b_line = lines[lines.index("B:") + 1]
     assert ">POP (next)" in a_line
     assert ">" not in b_line  # omitted -- no annotation at all
 

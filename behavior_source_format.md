@@ -102,10 +102,28 @@ A node's `NODE_ID :` prefix is **optional**, and the decompiler emits it only
 when some other edge actually references that node — a branch/pin target
 (`>id (Pin)`), or a resolved static `jump→label` destination. A node reached
 solely by positional fallthrough carries **no id at all**; it renders as a
-bare `OP(...)` line. The parser accepts both forms: a line with a `:` before
-its first `(` has an author-written id, a line starting straight with `OP(`
-is id-less and gets a hidden internal id (`__nN`, reserved — not addressable
-as a branch target) so graph edges still work. Rationale (user, 2026-07-18/20):
+bare `OP(...)` line. The parser accepts an id in either position: a bare `NODE_ID:` line **above**
+the instruction (the decompiler's own output — see below), or the inline
+`NODE_ID: OP(...)` form on one line; a line starting straight with `OP(` is
+id-less and gets a hidden internal id (`__nN`, reserved — not addressable as a
+branch target) so graph edges still work.
+
+**The decompiler puts the id on its own line, above the instruction**, so
+every instruction body starts at column 0 and they line up regardless of id
+length (user, 2026-07-20). A referenced node then reads like an assembly
+label — `>engage_target (If Larger)` jumps to the `engage_target:` line:
+
+```
+engage_target:
+check_number(Value=$dist, Compare=$standoff)  >attack (If Larger)  >POP (If Smaller)  >NEXT (If Equal)
+```
+
+A bare `NODE_ID:` line is unambiguous — it is neither an inline `id: op(...)`
+(which has an `op(...)` after the colon) nor a `label(...)` op (which has `(`,
+no bare colon), the two things the loose word "label" might suggest it
+collides with. It binds the next instruction; a declaration with no
+instruction after it, two in a row, or one paired with an inline id on the
+same node are all parse errors. Rationale (user, 2026-07-18/20):
 the decompiler-assigned id is unstable across re-exports (the editor reorders
 untouched nodes on every save), so most instructions carrying one at all was
 both diff noise and an invitation to anchor references on the unstable token.

@@ -128,6 +128,63 @@ def test_idless_line_can_still_carry_branch_notes(engine, argcache):
     assert b.nodes["done"].id_explicit
 
 
+def test_render_puts_id_on_its_own_line(engine, argcache):
+    """The decompiler emits a node's id on the line ABOVE its instruction, so instruction bodies
+    line up at column 0 (behavior_source_format.md's id-on-own-line, user 2026-07-20)."""
+    b = decompile_dcs(engine, (DATA_DIR / "mining_leader.dcs").read_text().strip())
+    text = render_behavior(b, argcache)
+    lines = text.split("\n")
+    # a referenced label appears as a bare `id:` line immediately followed by its op line
+    idx = lines.index("label_arrow_up:")
+    assert lines[idx + 1].startswith("label(")
+    # id-less nodes have no id line -- their op sits at column 0 directly
+    assert any(ln.startswith("unlock()") for ln in lines)
+
+
+def test_parse_own_line_id_form(engine, argcache):
+    text = (
+        "behavior T():\n\n"
+        "loop:\n"
+        "for_number(From=1, To=3, Value=$N)  >POP (Done) >NEXT (next)\n"
+        "set_reg(Value=$N, Target=$B)  >loop (next)\n"
+    )
+    b = parse_behavior(text, argcache)
+    assert b.order[0] == "loop"
+    assert b.nodes["loop"].op == "for_number" and b.nodes["loop"].id_explicit
+    assert b.nodes[b.order[1]].branches["next"] == "loop"
+
+
+def test_own_line_and_inline_id_forms_compile_identically(engine, argcache):
+    own_line = "behavior T():\n\nhit:\nexit()\ncheck_number(Value=$A, Compare=5)  >hit (If Larger) >NEXT (If Smaller) >NEXT (If Equal)\n"
+    inline = "behavior T():\n\nhit: exit()\ncheck_number(Value=$A, Compare=5)  >hit (If Larger) >NEXT (If Smaller) >NEXT (If Equal)\n"
+    a = parse_behavior(own_line, argcache)
+    c = parse_behavior(inline, argcache)
+    assert to_py(compile_behavior(engine, a, argcache)) == to_py(compile_behavior(engine, c, argcache))
+
+
+@pytest.mark.parametrize("fname", _REAL)
+def test_own_line_render_roundtrips(engine, argcache, fname):
+    b = decompile_dcs(engine, (DATA_DIR / fname).read_text().strip())
+    text = render_behavior(b, argcache)
+    b2 = parse_behavior(text, argcache)
+    assert to_py(compile_behavior(engine, b, argcache)) == to_py(compile_behavior(engine, b2, argcache))
+
+
+def test_dangling_id_declaration_is_rejected(engine, argcache):
+    with pytest.raises(BsfParseError, match=r"no instruction follows"):
+        parse_behavior("behavior T():\n\nset_reg(Value=1, Target=$B)\nlonely:\n", argcache)
+
+
+def test_two_id_declarations_in_a_row_rejected(engine, argcache):
+    with pytest.raises(BsfParseError, match=r"another id .* follows before any instruction"):
+        parse_behavior("behavior T():\n\nfoo:\nbar:\nexit()\n", argcache)
+
+
+def test_own_line_and_inline_id_both_rejected(engine, argcache):
+    with pytest.raises(BsfParseError, match=r"both a preceding id line .* and an inline id"):
+        parse_behavior("behavior T():\n\nfoo:\nbar: exit()\n", argcache)
+
+
 def test_branch_to_a_synthesized_id_is_rejected(engine, argcache):
     """A synthesized id (`__n1`) is never visible and deterministic, so pointing at one would be
     a fragile coupling to an internal detail -- the reserved `__n` prefix is rejected outright,

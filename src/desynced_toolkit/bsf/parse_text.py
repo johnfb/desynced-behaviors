@@ -372,6 +372,22 @@ def _split_post_paren(post: str, line_no, line) -> tuple[str, str | None]:
     return remainder, content
 
 
+def _bare_id_decl(line: str) -> str | None:
+    """A line that is just `NODE_ID:` -- an identifier terminated by a colon, nothing but an
+    optional trailing comment after -- declares the id for the FOLLOWING instruction (the
+    id-on-own-line layout, so instruction bodies align at column 0). Returns the id, or None if
+    the line isn't that shape. Unambiguous against the two things it could be confused with: an
+    inline `id: op(...)` has an `op(...)` after the colon (so a `(` is present), and a `label(...)`
+    op has `(` with no bare colon -- neither matches `identifier :` with nothing following."""
+    s = _strip_trailing_comment(line).strip()
+    if not s.endswith(":") or "(" in s:
+        return None
+    candidate = s[:-1].strip()
+    if candidate and " " not in candidate and ":" not in candidate:
+        return candidate
+    return None
+
+
 def _parse_number(s: str) -> int | float:
     s = s.strip()
     return float(s) if "." in s else int(s)
@@ -632,6 +648,8 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
     node_lines: dict[str, int] = {}
     order: list[str] = []
     auto_counter = 0
+    pending_id: str | None = None  # an id declared on its own line, awaiting its instruction
+    pending_line = 0
     # Blank lines between nodes are allowed (grouping aids readability; headers are unambiguous,
     # so blanks carry no structure) -- a block ends only at the next behavior/sub header or EOF.
     # An earlier version silently ended the node list at the first blank line, so a stray blank
@@ -643,6 +661,20 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
             continue
         if stripped.startswith(("sub ", "behavior ")):
             break
+        # A bare `NODE_ID:` line declares the id for the next instruction (id-on-own-line).
+        decl = _bare_id_decl(lines[i])
+        if decl is not None:
+            if pending_id is not None:
+                raise BsfParseError(
+                    f"node id {pending_id!r} declared on its own line, but another id {decl!r} "
+                    f"follows before any instruction",
+                    pending_line,
+                    lines[pending_line - 1],
+                )
+            pending_id = decl
+            pending_line = i + 1
+            i += 1
+            continue
         # Fresh synthesized id for a possibly-id-less line (parse_node uses it only when the line
         # carries no explicit `id:`); kept clear of any author id already parsed.
         auto_counter += 1
@@ -654,6 +686,17 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
         # them into one logical node text, terminated by `;` when multi-line.
         node_text, next_i = _consume_node(lines, i)
         node = parse_node(node_text, params, argcache, line_no=i + 1, known_ids=known_ids, auto_id=auto_id)
+        if pending_id is not None:
+            if node.id_explicit:
+                raise BsfParseError(
+                    f"node has both a preceding id line {pending_id!r} and an inline id "
+                    f"{node.id!r} -- use one or the other",
+                    i + 1,
+                    lines[i],
+                )
+            node.id = pending_id
+            node.id_explicit = True
+            pending_id = None
         if node.id in ("POP", "NEXT"):
             raise BsfParseError(
                 f"{node.id!r} is a reserved branch-target keyword and cannot be a node id",
@@ -680,6 +723,13 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
         node_lines[node.id] = i + 1
         order.append(node.id)
         i = next_i
+
+    if pending_id is not None:
+        raise BsfParseError(
+            f"node id {pending_id!r} declared on its own line, but no instruction follows",
+            pending_line,
+            lines[pending_line - 1],
+        )
 
     for node in nodes.values():
         for pin, target in node.branches.items():
