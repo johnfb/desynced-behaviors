@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
+
 import lupa.lua54 as lupa
 
 from .argcache import DYNAMIC_ARG_OPS, ArgCache, arg_pin_names, resolve_branch
 from .ir import BsfBehavior, BsfNode, BsfParam
-from .values import from_lua
+from .render_text import referenced_node_ids
+from .values import IdLit, Num, Var, from_lua
 
 # behavior_format.md's "Hidden literal fields (make_asm)" table: op -> the plain named key
 # (not part of data.instructions[op].args, so ArgCache never sees it) that op uses for its one
@@ -94,6 +97,87 @@ def _call_arg_names(table, inst, argcache: ArgCache) -> dict[int, str]:
     return names
 
 
+_ID_PREFIXES = ("v_", "c_", "f_", "t_")
+
+
+def _slug(s: str) -> str:
+    return re.sub(r"\W+", "_", s).strip("_") or "x"
+
+
+def _value_slug(v) -> str:
+    """A short, human-meaningful slug for a value used to name a node after its role -- mainly a
+    `label` node's own `Label` (`v_transport_route` -> `transport_route`, `v_broken[num=1]` ->
+    `broken_1`, `$State` -> `State`). Not round-trip data, purely the descriptive-id source."""
+    if isinstance(v, IdLit):
+        base = v.id
+        for p in _ID_PREFIXES:
+            if base.startswith(p):
+                base = base[len(p) :]
+                break
+        if v.num is not None:
+            base = f"{base}_{v.num}"
+        return _slug(base)
+    if isinstance(v, Num):
+        return _slug(str(v.n).replace("-", "neg"))
+    if isinstance(v, Var):
+        return _slug(v.name)
+    return "x"
+
+
+def _base_slug(node: BsfNode) -> str:
+    """The role-derived base name for a node that earns a surface id (behavior_source_format.md's
+    decided scheme, 2026-07-20): a `label` node is named after its `Label` value (for a label the
+    dispatch key genuinely is its identity), every other node after its op -- which is exactly
+    what reads well at the reference site (`>engage_target (If Larger)`). NOT named after what
+    jumps to it: fan-in has no single predecessor, and a predecessor-derived name would move on
+    an unrelated edit -- the instability this whole change removes."""
+    if node.op == "label":
+        v = node.args.get("Label")
+        return "label_" + _value_slug(v) if v is not None else "label"
+    return node.op
+
+
+def _assign_descriptive_ids(nodes: dict[str, BsfNode], order: list[str]) -> tuple[dict, list[str]]:
+    """Replace the positional `n{idx}` decompile ids with role-derived ones, and mark
+    `id_explicit` = "is this node actually referenced". Only referenced nodes (branch/jump
+    targets) get a descriptive, surface-visible id; every other node keeps a positional id that
+    render_text.py won't print. Same-base collisions among referenced nodes get an occurrence
+    suffix (`set_reg`, `set_reg_2`) in wire order -- rare (most targets are labels named by a
+    unique Label value), and fully wire-order-independent disambiguation is the sequenced
+    canonical-decompile follow-up (todo)."""
+    referenced = referenced_node_ids(nodes)
+    used = {nid for nid in order if nid not in referenced}  # reserve the kept positional ids
+    rename: dict[str, str] = {}
+    explicit: dict[str, bool] = {}
+    for nid in order:
+        if nid not in referenced:
+            rename[nid] = nid
+            explicit[nid] = False
+            continue
+        base = _base_slug(nodes[nid])
+        cand, k = base, 2
+        while cand in used:
+            cand = f"{base}_{k}"
+            k += 1
+        used.add(cand)
+        rename[nid] = cand
+        explicit[nid] = True
+
+    def remap(t):
+        return t if not isinstance(t, str) or t == "POP" else rename.get(t, t)
+
+    new_nodes: dict[str, BsfNode] = {}
+    new_order: list[str] = []
+    for nid in order:
+        node = nodes[nid]
+        node.id = rename[nid]
+        node.id_explicit = explicit[nid]
+        node.branches = {pin: remap(t) for pin, t in node.branches.items()}
+        new_nodes[node.id] = node
+        new_order.append(node.id)
+    return new_nodes, new_order
+
+
 def decompile_behavior(engine, table, argcache: ArgCache | None = None) -> BsfBehavior:
     """Decompile one real Lua behavior table (as returned by dcs_wire.decode_dcs, or one entry
     of a `dependencies`/`subs` array) into a BsfBehavior graph. Recurses into embedded
@@ -159,6 +243,8 @@ def decompile_behavior(engine, table, argcache: ArgCache | None = None) -> BsfBe
 
         nodes[node_id] = node
         order.append(node_id)
+
+    nodes, order = _assign_descriptive_ids(nodes, order)
 
     subs = []
     subs_table = _sub_behaviors_table(table)

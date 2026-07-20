@@ -49,6 +49,17 @@ class BsfNode:
     hidden: dict[str, object] = field(default_factory=dict)
     # Keyed by the real exec pin name (e.g. "If Larger"), or "next" for the top-level field.
     branches: dict[str, Branch] = field(default_factory=dict)
+    # Whether this node's `id` is a surface-visible, meaningful name -- render_text.py emits the
+    # `id:` prefix only when this is True, so a node reached solely by positional fallthrough (no
+    # pin/jump targets it) carries no id in the text at all (behavior_source_format.md's "optional
+    # node ids", user 2026-07-18/20: stops references anchoring on an unstable id, and cuts diff
+    # churn). Every node still has an internal `id` for graph edges regardless -- this only
+    # governs the text surface. Default True so hand-built IR (tests, tooling) keeps showing its
+    # chosen ids; `decompile.py` sets it to "is this node an actual branch/jump target", and
+    # `parse_text.py` sets it True for an author-written id, False for a synthesized one on an
+    # id-less line. `lint.py` warns on a True-but-never-referenced id (a declared-yet-unwired
+    # anchor -- use `cmt` for a human note instead).
+    id_explicit: bool = True
 
 
 @dataclass

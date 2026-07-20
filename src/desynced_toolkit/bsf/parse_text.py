@@ -82,6 +82,11 @@ _KEEPVARS_RE = re.compile(r"^keepvars:\s*true\s*$")
 _KEEPARRAYS_RE = re.compile(r'^keeparrays:\s*"(startup|store)"\s*$')
 _BRANCH_RE = re.compile(r">\s*(\S+?)\s*\(([^)]*)\)")
 _SYMBOLIC_FRAME_REGS = {"goto": -1, "store": -2, "visual": -3, "signal": -4}
+# Prefix for the internal id synthesized for an id-less (fallthrough-only) node line. Reserved:
+# rejected as an author-written node id or branch target, so a fallthrough-only node stays
+# genuinely un-referenceable (its synthesized id is deterministic and would otherwise be a
+# fragile thing to point at -- exactly the unstable-reference hazard optional ids remove).
+_RESERVED_ID_PREFIX = "__n"
 
 
 def _unescape_string(s: str) -> str:
@@ -316,16 +321,26 @@ def parse_node(
     argcache: ArgCache,
     line_no: int | None = None,
     known_ids: frozenset[str] | None = None,
+    auto_id: str = "__auto",
 ) -> BsfNode:
-    if ":" not in line:
-        raise BsfParseError("expected a node line ('id: op(...)')", line_no, line)
-    node_id, rest = line.split(":", 1)
-    node_id = node_id.strip()
+    # An `id:` prefix is optional (behavior_source_format.md's optional node ids): a line that
+    # starts straight with `op(...)` -- no `:` before the first `(` -- is a node reached only by
+    # fallthrough, carrying no surface id. It still gets a synthesized internal id (`auto_id`,
+    # made unique per behavior by the caller) so graph edges and `order` work, with id_explicit
+    # False so render_text.py won't print it back. A `:` before the `(` means an author-written
+    # id (id_explicit True).
+    paren_pos = line.find("(")
+    if paren_pos >= 0 and ":" in line[:paren_pos]:
+        node_id, rest = line.split(":", 1)
+        node_id = node_id.strip()
+        id_explicit = True
+    else:
+        node_id, rest, id_explicit = auto_id, line, False
     rest = rest.strip()
     op_end = rest.find("(")
     if op_end < 0:
         raise BsfParseError(
-            f"expected 'op(...)' after node id {node_id!r} (no '(' found)", line_no, line
+            "expected a node line ('op(...)' or 'id: op(...)'; no '(' found)", line_no, line
         )
     op = rest[:op_end].strip()
     if not argcache.op_exists(op):
@@ -337,7 +352,7 @@ def parse_node(
     arg_list_str = after[:close]
     branch_notes_str = after[close + 1 :]
 
-    node = BsfNode(id=node_id, op=op)
+    node = BsfNode(id=node_id, op=op, id_explicit=id_explicit)
     branch_notes_str = _strip_trailing_comment(branch_notes_str)
     hidden_fields = {f for o, f in HIDDEN_FIELD_TABLE.items() if o == op} | {"cmt"}
     # A dynamic-arg op's value-arg names come from the *target* sub's own parameters, which may
@@ -437,6 +452,7 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
     nodes: dict[str, BsfNode] = {}
     node_lines: dict[str, int] = {}
     order: list[str] = []
+    auto_counter = 0
     # Blank lines between nodes are allowed (grouping aids readability; headers are unambiguous,
     # so blanks carry no structure) -- a block ends only at the next behavior/sub header or EOF.
     # An earlier version silently ended the node list at the first blank line, so a stray blank
@@ -448,7 +464,14 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
             continue
         if stripped.startswith(("sub ", "behavior ")):
             break
-        node = parse_node(lines[i], params, argcache, line_no=i + 1, known_ids=known_ids)
+        # Fresh synthesized id for a possibly-id-less line (parse_node uses it only when the line
+        # carries no explicit `id:`); kept clear of any author id already parsed.
+        auto_counter += 1
+        auto_id = f"{_RESERVED_ID_PREFIX}{auto_counter}"
+        while auto_id in nodes:
+            auto_counter += 1
+            auto_id = f"{_RESERVED_ID_PREFIX}{auto_counter}"
+        node = parse_node(lines[i], params, argcache, line_no=i + 1, known_ids=known_ids, auto_id=auto_id)
         if node.id in ("POP", "NEXT"):
             raise BsfParseError(
                 f"{node.id!r} is a reserved branch-target keyword and cannot be a node id",
@@ -462,6 +485,13 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
                 i + 1,
                 lines[i],
             )
+        if node.id_explicit and node.id.startswith(_RESERVED_ID_PREFIX):
+            raise BsfParseError(
+                f"node id {node.id!r} uses the reserved internal-id prefix {_RESERVED_ID_PREFIX!r} "
+                f"(synthesized for id-less lines) -- choose another name",
+                i + 1,
+                lines[i],
+            )
         if node.id in nodes:
             raise BsfParseError(f"duplicate node id {node.id!r}", i + 1, lines[i])
         nodes[node.id] = node
@@ -471,7 +501,19 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
 
     for node in nodes.values():
         for pin, target in node.branches.items():
-            if target is not None and target != "POP" and target not in nodes:
+            if target is None or target == "POP":
+                continue
+            if target.startswith(_RESERVED_ID_PREFIX):
+                # A fallthrough-only node has no referenceable surface id -- `__nN` is the
+                # internal synthesized id, deliberately not addressable. Give the intended
+                # target an explicit id instead.
+                raise BsfParseError(
+                    f"node {node.id!r} pin {pin!r} targets {target!r}, which uses the reserved "
+                    f"internal-id prefix {_RESERVED_ID_PREFIX!r}; a fallthrough-only node has no "
+                    f"referenceable id -- give the target node an explicit id",
+                    node_lines[node.id],
+                )
+            if target not in nodes:
                 raise BsfParseError(
                     f"node {node.id!r} pin {pin!r} targets unknown node {target!r}"
                     f"{_suggest(target, nodes)}",

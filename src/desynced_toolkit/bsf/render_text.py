@@ -105,6 +105,23 @@ def _literal_key(v: BsfValue):
     return None
 
 
+def referenced_node_ids(nodes: dict[str, BsfNode]) -> set[str]:
+    """Every node id that some *other* edge actually points at: a real branch/pin target
+    (`>id (Pin)`), or the resolved destination of a static `jump->label`. This is the set that
+    earns a surface-visible id under behavior_source_format.md's "optional node ids" rule -- a
+    node reached only by positional fallthrough is not in it. Shared by `decompile.py` (to set
+    each node's `id_explicit`) and `lint.py` (to flag a declared id nothing references). A `"POP"`
+    branch value and a `None` fallthrough are not references; a dangling target (not in `nodes`)
+    is ignored here (parse/compile reject it elsewhere)."""
+    refs: set[str] = set()
+    for node in nodes.values():
+        for target in node.branches.values():
+            if isinstance(target, str) and target != "POP" and target in nodes:
+                refs.add(target)
+    refs.update(_jump_label_targets(nodes).values())
+    return refs
+
+
 def _jump_label_targets(nodes: dict[str, BsfNode]) -> dict[str, str]:
     """Best-effort static jump->label resolution, scoped to one behavior/sub's own node set
     (never across a sub-behavior boundary). Only attempted when a `jump`'s `Label` arg is a
@@ -186,7 +203,11 @@ def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, s
             notes.append(f">{target} ({display_pin})")
     if node.id in jump_targets:
         notes.append(f">{jump_targets[node.id]} (jump→label)")
-    line = f"{node.id}: {node.op}({args_str})"
+    # The `id:` prefix appears only for a node something actually references (id_explicit) --
+    # every branch/jump target has it set, so a `>id (Pin)` note above always names a node whose
+    # own line still shows that id. A fallthrough-only node renders bare, as just `op(args)`.
+    prefix = f"{node.id}: " if node.id_explicit else ""
+    line = f"{prefix}{node.op}({args_str})"
     if notes:
         line += "  " + " ".join(notes)
     return line

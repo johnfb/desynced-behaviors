@@ -57,12 +57,14 @@ def test_end_to_end_reorder_edit_on_hexat_test(engine):
     # A real, deliberate edit -- swap the two debug_print lines that print R and T, wired purely
     # by implicit fallthrough. This specifically exercises the reorder/fallthrough-recompute
     # machinery (see test_bsf_text_roundtrip.py's dedicated reorder tests) as part of a real
-    # decode->edit->recompile loop, not just a bare literal-value tweak.
-    original_pair = "n7: debug_print(Print Value=R)\nn8: debug_print(Print Value=T)"
+    # decode->edit->recompile loop, not just a bare literal-value tweak. Both are fallthrough-only
+    # (nothing branches/jumps to them), so under optional node ids they render with no `id:`
+    # prefix -- swapping the two bare lines is exactly the reorder the test wants.
+    original_pair = "debug_print(Print Value=R)\ndebug_print(Print Value=T)"
     assert original_pair in text
     edited_text = text.replace(
         original_pair,
-        "n8: debug_print(Print Value=T)\nn7: debug_print(Print Value=R)",
+        "debug_print(Print Value=T)\ndebug_print(Print Value=R)",
     )
     assert edited_text != text
 

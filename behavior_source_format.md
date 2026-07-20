@@ -50,7 +50,11 @@ param := NAME "*"?                 -- from pnames[i], or "param<i>" if absent; t
                                     -- and ignored (stripped, not stored) on parse -- see
                                     -- "Parameter direction" below
 
-instruction := NODE_ID ":" OP "(" arg_list? ")" branch_note*
+instruction := (NODE_ID ":")? OP "(" arg_list? ")" branch_note*
+             -- the "NODE_ID :" prefix is OPTIONAL: emitted (and required) only for a node
+             -- something actually references (a branch/jump target); a node reached solely by
+             -- positional fallthrough is written bare, as just "OP(...)". See "Optional node
+             -- ids" below.
 arg_list := arg ("," arg)*
 arg := ARGNAME "=" value
      | HIDDEN_FIELD_NAME "=" (NUMBER | BOOL | STRING)  -- make_asm hidden literal field, see
@@ -81,7 +85,37 @@ allowed and carry no structure (a block ends only at the next
 
 `NODE_ID` is an arbitrary, stable identifier — not a number, not required to
 be sequential, not tied to the node's position in the listing. See "Node
-identity vs. wire position" below for why, and for how it's assigned.
+identity vs. wire position" below for why, and for how it's assigned, and
+"Optional node ids" directly below for when it appears at all.
+
+### Optional node ids
+
+A node's `NODE_ID :` prefix is **optional**, and the decompiler emits it only
+when some other edge actually references that node — a branch/pin target
+(`>id (Pin)`), or a resolved static `jump→label` destination. A node reached
+solely by positional fallthrough carries **no id at all**; it renders as a
+bare `OP(...)` line. The parser accepts both forms: a line with a `:` before
+its first `(` has an author-written id, a line starting straight with `OP(`
+is id-less and gets a hidden internal id (`__nN`, reserved — not addressable
+as a branch target) so graph edges still work. Rationale (user, 2026-07-18/20):
+the decompiler-assigned id is unstable across re-exports (the editor reorders
+untouched nodes on every save), so most instructions carrying one at all was
+both diff noise and an invitation to anchor references on the unstable token.
+With ids only on genuine targets, the bulk of a listing has none, and what a
+reference *can* name is exactly a meaningful destination.
+
+**Descriptive ids for the nodes that keep one.** A referenced node is named
+after its own **role**, not after what jumps to it (naming by predecessor
+breaks under fan-in and moves on unrelated edits — the instability this
+removes): a `label` node takes its `Label` value (`v_transport_route` →
+`label_transport_route`, `v_broken[num=1]` → `label_broken_1`), every other
+node its op (`set_reg`, `jump`). This reads well at the reference site
+(`>label_broken_1 (jump→label)`) and is stable across the editor's node
+reordering. Same-base collisions among targets get an occurrence suffix
+(`set_reg`, `set_reg_2`) — rare, since most targets are labels named by a
+unique `Label`; fully wire-order-independent disambiguation is a sequenced
+follow-up (see `todo.md`'s canonical-decompile item). Hand-authored ids are
+free-form as always — this describes only what the decompiler *emits*.
 
 ## Six real gaps closed during implementation
 

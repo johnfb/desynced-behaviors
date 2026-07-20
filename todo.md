@@ -443,8 +443,14 @@ are the concrete, now-prioritized work items. Terminology: "node id" is BSF's `N
 token (`n27`), **not** the real `jump`/`label` instruction — this whole group is about the
 per-node identity token, not computed dispatch.
 
-- [ ] **Make node ids optional — decompiler emits one only when a pin actually targets the
-      node; parser/compiler accept id-less node lines.** A node reached solely by positional
+- [x] **Make node ids optional — decompiler emits one only when a pin actually targets the
+      node; parser/compiler accept id-less node lines.** Done 2026-07-20. `BsfNode.id_explicit`
+      gates the `id:` prefix in `render_text.py`; `decompile.py` sets it to "is this node
+      referenced" (shared `referenced_node_ids` helper) and renames referenced nodes to
+      role-derived ids; `parse_text.py` accepts an id-less `op(...)` line, synthesizing a hidden
+      `__nN` internal id (reserved prefix, rejected as an author id or branch target). Round-trips
+      unaffected (compiled tables are position-derived). Covered by `test_bsf_optional_ids.py`.
+      Original scope note below preserved. A node reached solely by positional
       fallthrough gets no id. Only genuine connection points (jump/branch/`>node` targets,
       `call`-target nodes, resolved `jump→label` destinations) get one. Minimizes diff churn
       (inserting/removing a fallthrough-only node renumbers nothing) and deliberately stops
@@ -462,8 +468,13 @@ per-node identity token, not computed dispatch.
       author id'd purely as a human-readable anchor (a `cmt`-substitute) is legal-but-unwired
       by design — decide whether the warning is suppressible or whether that use case should
       go through `cmt` instead.
-- [ ] **Decompiler produces more descriptive ids than `n<line/pos>`.** Derive the emitted id
-      from something durable and human-meaningful rather than wire position. **Decided
+- [x] **Decompiler produces more descriptive ids than `n<line/pos>`.** Done 2026-07-20, in the
+      same `decompile.py` pass as the optional-id item: `label` nodes → `label_<slug of Label>`,
+      others → their op, occurrence-suffixed on collision (`test_bsf_optional_ids.py`). Still-open
+      follow-up: fully wire-order-independent disambiguation, sequenced with the canonical-
+      decompile item under Local behavior-library storage. Decision notes preserved below. Derive
+      the emitted id from something durable and human-meaningful rather than wire position.
+      **Decided
       2026-07-20 (user-confirmed): name a node after its own role, NOT after what jumps to
       it.** The user's first instinct was "shorthand describing what jumps there," but that
       reintroduces the churn this whole overhaul kills: (a) real behaviors have arbitrary
