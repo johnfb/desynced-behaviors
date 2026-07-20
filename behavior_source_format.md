@@ -50,11 +50,19 @@ param := NAME "*"?                 -- from pnames[i], or "param<i>" if absent; t
                                     -- and ignored (stripped, not stored) on parse -- see
                                     -- "Parameter direction" below
 
-instruction := (NODE_ID ":")? OP "(" arg_list? ")" branch_note*
+instruction := (NODE_ID ":")? OP "(" arg_list? ")" branch_note* cmt_block? ";"?
              -- the "NODE_ID :" prefix is OPTIONAL: emitted (and required) only for a node
              -- something actually references (a branch/jump target); a node reached solely by
              -- positional fallthrough is written bare, as just "OP(...)". See "Optional node
              -- ids" below.
+             -- A node is a single physical line UNLESS it wraps its arg list across lines or
+             -- carries a cmt_block, in which case it MUST end with ";" (the terminator -- the
+             -- parser scans for it and never counts indentation). See "Multi-line nodes and
+             -- the cmt block" below.
+cmt_block := "cmt" "=" TRIPLE_QUOTED    -- a free-form node comment, rendered on its own line(s)
+                                         -- under the branch notes (mirrors the in-game
+                                         -- under-node comment); distinct from a "#" comment,
+                                         -- which is non-structural and dropped on parse
 arg_list := arg ("," arg)*
 arg := ARGNAME "=" value
      | HIDDEN_FIELD_NAME "=" (NUMBER | BOOL | STRING)  -- make_asm hidden literal field, see
@@ -103,6 +111,38 @@ untouched nodes on every save), so most instructions carrying one at all was
 both diff noise and an invitation to anchor references on the unstable token.
 With ids only on genuine targets, the bulk of a listing has none, and what a
 reference *can* name is exactly a meaningful destination.
+
+### Multi-line nodes and the cmt block
+
+A node's text may span multiple physical lines — a wrapped arg list, branch
+notes on their own lines, or a `cmt` block — and any node that does **must end
+with `;`**. A node written entirely on one line stays bare (newline-terminated,
+no `;`), so every pre-existing single-line behavior parses unchanged. The
+terminator's real purpose is to let indentation and blank lines stay **purely
+cosmetic**: the parser scans for `;` (quote/bracket/comment-aware) and never
+counts whitespace, so the renderer is free to indent a continuation line for
+readability without that indentation meaning anything. A multi-line node with
+no `;` is a hard parse error, as is content after the `;`.
+
+A **node comment** (`cmt`) renders as a triple-quoted block on its own line
+under the branch notes:
+
+```
+engage: check_number(Value=$dist, Compare=$standoff)  >attack (If Larger)  >flee (If Smaller)  >NEXT (If Equal)
+  cmt="""
+  Inside the standoff band — break off; gunners are fragile without the shield.
+  """;
+```
+
+A single-line comment renders compact (`cmt="""hold the line""";`). The body is
+literal text between the delimiters (exactly one leading and one trailing
+newline stripped, so both forms round-trip the exact string); a `#` or `;`
+inside it is content, not a comment or terminator — the whole reason a
+triple-quoted block was chosen over `#`-prefixed lines, which would collide
+with the non-structural `#` comment. `cmt` is still accepted inline as an
+ordinary `cmt="..."` arg (single-quoted, escaped), and a body that itself
+contains a triple-quote falls back to that inline form automatically (it can't
+be block-quoted).
 
 **Descriptive ids for the nodes that keep one.** A referenced node is named
 after its own **role**, not after what jumps to it (naming by predecessor

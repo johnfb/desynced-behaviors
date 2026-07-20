@@ -199,6 +199,179 @@ def _strip_trailing_comment(line: str) -> str:
     return line[:idx].rstrip() if idx >= 0 else line
 
 
+_CMT_OPEN_RE = re.compile(r'cmt\s*=\s*"""')
+
+
+def _scan_delims(text: str) -> tuple[int, bool, bool, int | None]:
+    """Bracket/quote/comment-aware scan of (possibly multi-line) node text. Returns
+    (paren_depth, in_triple_quote, in_single_string, first_top_level_semicolon_index). A
+    triple-quoted block is opaque literal content (only a closing triple-quote ends it); a
+    `"..."` single string honours backslash escapes (matching render_text's `_escape_string`); a
+    `#` outside any quote is a comment to end of that physical line (so a `;` inside a comment is
+    never mistaken for the terminator, while a `#` inside a triple-quoted cmt body stays content).
+    `depth` counts `()`/`[]`; the semicolon index is the first `;` at depth 0 outside any
+    quote/comment -- the node terminator."""
+    i, n = 0, len(text)
+    depth = 0
+    in_tri = in_str = False
+    semi = None
+    while i < n:
+        if in_tri:
+            if text.startswith('"""', i):
+                in_tri = False
+                i += 3
+                continue
+            i += 1
+            continue
+        if in_str:
+            if text[i] == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if text[i] == '"':
+                in_str = False
+            i += 1
+            continue
+        if text[i] == "#":
+            nl = text.find("\n", i)
+            if nl < 0:
+                break
+            i = nl
+            continue
+        if text.startswith('"""', i):
+            in_tri = True
+            i += 3
+            continue
+        c = text[i]
+        if c == '"':
+            in_str = True
+        elif c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == ";" and depth == 0 and semi is None:
+            semi = i
+        i += 1
+    return depth, in_tri, in_str, semi
+
+
+def _starts_continuation(line: str) -> bool:
+    """Whether a physical line continues the previous node rather than starting a new one. Only a
+    branch note (`>...`) or a cmt block (`cmt=...`) may open a continuation line -- neither can
+    begin a node-start line (`[id:] op(`), so this stays unambiguous."""
+    s = line.strip()
+    return s.startswith(">") or bool(re.match(r"cmt\s*=", s))
+
+
+def _consume_node(lines: list[str], start: int) -> tuple[str, int]:
+    """Group physical lines[start:] into one logical node's text. A node is a single physical line
+    unless it opens an unbalanced paren or quote (arg wrap / cmt block) or its next meaningful line
+    carries more branch notes or a cmt block; a node spanning multiple lines MUST end with `;` --
+    the parser scans for the terminator and never counts indentation, keeping whitespace
+    non-semantic (behavior_source_format.md, 2026-07-20). Returns (logical_text, next_line_index)."""
+    buf = [lines[start]]
+    i = start + 1
+    while True:
+        depth, in_tri, in_str, semi = _scan_delims("\n".join(buf))
+        if in_tri or in_str or depth > 0:
+            if i >= len(lines):
+                raise BsfParseError(
+                    "unterminated node (unbalanced '(' or unclosed '\"'/'\"\"\"' quote)",
+                    start + 1,
+                    lines[start],
+                )
+            buf.append(lines[i])
+            i += 1
+            continue
+        if semi is not None:
+            break
+        # balanced with no ';': continue only if the next meaningful line is a continuation
+        j = i
+        while j < len(lines) and (lines[j].strip() == "" or lines[j].strip().startswith("#")):
+            j += 1
+        if j < len(lines) and _starts_continuation(lines[j]):
+            buf.append(lines[j])
+            i = j + 1
+            continue
+        break
+    text = "\n".join(buf)
+    if len(buf) > 1 and _scan_delims(text)[3] is None:
+        raise BsfParseError(
+            "a node spanning multiple lines must end with ';'", start + 1, lines[start]
+        )
+    return text, i
+
+
+def _find_cmt_block(post: str, line_no, line) -> tuple[int, str, int] | None:
+    """Locate a top-level triple-quoted `cmt=` block in the post-close-paren region. Returns
+    (start_index, raw_content, end_index) or None. Skips over branch-note parens, single strings,
+    and comments so only a genuine top-level cmt block matches."""
+    i, n = 0, len(post)
+    depth = 0
+    in_str = False
+    while i < n:
+        if in_str:
+            if post[i] == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if post[i] == '"':
+                in_str = False
+            i += 1
+            continue
+        if post[i] == "#":
+            nl = post.find("\n", i)
+            if nl < 0:
+                break
+            i = nl
+            continue
+        if depth == 0:
+            m = _CMT_OPEN_RE.match(post, i)
+            if m:
+                content_start = m.end()
+                close = post.find('"""', content_start)
+                if close < 0:
+                    raise BsfParseError('unterminated cmt block (no closing """)', line_no, line)
+                return i, post[content_start:close], close + 3
+        if post.startswith('"""', i):  # a bare """ with no cmt= (malformed) -- skip its span
+            end = post.find('"""', i + 3)
+            i = (end + 3) if end >= 0 else n
+            continue
+        c = post[i]
+        if c == '"':
+            in_str = True
+        elif c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        i += 1
+    return None
+
+
+def _split_post_paren(post: str, line_no, line) -> tuple[str, str | None]:
+    """Split the region after a node's `op(...)` close paren into (branch_notes_str, cmt): strip
+    the optional trailing `;` terminator (nothing but whitespace/comment may follow it) and pull
+    out an optional triple-quoted `cmt=` block. `cmt` is None when absent; a block cmt has exactly
+    one leading and one trailing newline removed (the expanded-block render form), so both the
+    compact and expanded forms round-trip the exact string."""
+    _, _, _, semi = _scan_delims(post)
+    if semi is not None:
+        tail = _strip_trailing_comment(post[semi + 1 :])
+        if tail.strip():
+            raise BsfParseError(f"unexpected content after ';' terminator: {tail.strip()!r}", line_no, line)
+        post = post[:semi]
+    block = _find_cmt_block(post, line_no, line)
+    if block is None:
+        return post, None
+    lo, content, hi = block
+    remainder = post[:lo] + post[hi:]
+    if _find_cmt_block(remainder, line_no, line) is not None:
+        raise BsfParseError("cmt specified more than once on one node", line_no, line)
+    if content.startswith("\n"):
+        content = content[1:]
+    if content.endswith("\n"):
+        content = content[:-1]
+    return remainder, content
+
+
 def _parse_number(s: str) -> int | float:
     s = s.strip()
     return float(s) if "." in s else int(s)
@@ -350,7 +523,9 @@ def parse_node(
     after = rest[op_end + 1 :]
     close = _find_close_paren(after, 0)
     arg_list_str = after[:close]
-    branch_notes_str = after[close + 1 :]
+    # After the op's close paren: branch notes, an optional `cmt="""..."""` block, and (for a
+    # multi-line node) the `;` terminator. Split those apart before touching the args.
+    branch_notes_str, block_cmt = _split_post_paren(after[close + 1 :], line_no, line)
 
     node = BsfNode(id=node_id, op=op, id_explicit=id_explicit)
     branch_notes_str = _strip_trailing_comment(branch_notes_str)
@@ -387,6 +562,10 @@ def parse_node(
                 line,
             )
         node.args[name] = value
+    if block_cmt is not None:
+        if "cmt" in node.hidden:
+            raise BsfParseError("cmt specified both inline and as a block on one node", line_no, line)
+        node.hidden["cmt"] = block_cmt
     node.branches.update(_parse_branch_notes(branch_notes_str, op, argcache, line_no, line))
     return node
 
@@ -471,7 +650,10 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
         while auto_id in nodes:
             auto_counter += 1
             auto_id = f"{_RESERVED_ID_PREFIX}{auto_counter}"
-        node = parse_node(lines[i], params, argcache, line_no=i + 1, known_ids=known_ids, auto_id=auto_id)
+        # A node may span several physical lines (wrapped args, or a trailing cmt block); group
+        # them into one logical node text, terminated by `;` when multi-line.
+        node_text, next_i = _consume_node(lines, i)
+        node = parse_node(node_text, params, argcache, line_no=i + 1, known_ids=known_ids, auto_id=auto_id)
         if node.id in ("POP", "NEXT"):
             raise BsfParseError(
                 f"{node.id!r} is a reserved branch-target keyword and cannot be a node id",
@@ -497,7 +679,7 @@ def _parse_one(lines: list[str], i: int, keyword: str, argcache: ArgCache) -> tu
         nodes[node.id] = node
         node_lines[node.id] = i + 1
         order.append(node.id)
-        i += 1
+        i = next_i
 
     for node in nodes.values():
         for pin, target in node.branches.items():

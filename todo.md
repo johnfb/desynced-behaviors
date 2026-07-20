@@ -493,7 +493,16 @@ per-node identity token, not computed dispatch.
       requirement unchanged: ids must stay stable across the editor's untouched-node reordering
       (same durability the canonical-decompile item under Local behavior-library storage needs
       — sequence the two together). Remaining: the exact disambiguator/collision-suffix rule.
-- [ ] **Allow a BSF instruction to span multiple physical lines, terminated by `;`.** So a
+- [x] **Allow a BSF instruction to span multiple physical lines, terminated by `;`.** Done
+      2026-07-20. `parse_text.py` groups physical lines into one logical node (`_consume_node`),
+      terminating a multi-line node at a top-level `;` via a triple-quote/single-quote/comment/
+      bracket-aware scanner (`_scan_delims`); single-line nodes stay bare and newline-terminated
+      (backward compatible). Whitespace stays non-semantic (the parser never counts indentation).
+      Multi-line-without-`;`, content-after-`;`, and unterminated quotes/parens are all hard
+      errors. Wrapped arg lists and branch-notes-on-their-own-lines both work. Covered by
+      `test_bsf_multiline.py`. **The id-on-its-own-line layout is still deliberately not done**
+      (the one open design question below — how a bare `foo:` line coexists with `label`
+      sections — is unresolved, so ids stay inline for now). Original notes preserved. So a
       descriptive id can sit on its own line *above* the instruction while the instruction
       bodies still line up in a column (a long id no longer shoves its `op(...)` to the right),
       and a node's args/branch-notes/comment can wrap for readability. **Terminator decided
@@ -511,7 +520,12 @@ per-node identity token, not computed dispatch.
       line reads (is `foo:` alone a node-id declaration binding the *next* instruction, and how
       does that coexist with `label` sections?). Touches the `parse_text.py` tokenizer,
       `render_text.py` layout, and the grammar block in `behavior_source_format.md`.
-- [ ] **Give node comments (`cmt`) a first-class multi-line paragraph syntax.** Every node can
+- [x] **Give node comments (`cmt`) a first-class multi-line paragraph syntax.** Done 2026-07-20.
+      `cmt` renders as a triple-quoted block under the node's branch notes (compact for a
+      single-line body, expanded for multi-line), terminated by `;`; parse handles both plus the
+      legacy inline `cmt="..."` form, and a body containing `"""` falls back to inline
+      automatically. A `#`/`;` inside the body is literal content (the reason a block was chosen
+      over `#`-lines). Covered by `test_bsf_multiline.py`. Original notes preserved. Every node can
       carry a `cmt`; in the in-game editor it renders as a paragraph *under* the node, wrapped to
       node width — BSF should let it be authored/rendered as a free-form paragraph too, not
       today's single-quoted `cmt="..."` hidden-field one-liner. **Hazard to avoid (design

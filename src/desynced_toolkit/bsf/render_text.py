@@ -169,9 +169,30 @@ def render_hidden_value(v: object) -> str:
     return repr(v)
 
 
+def _render_cmt_block(s: str) -> str:
+    """A node comment as a triple-quoted block (behavior_source_format.md's cmt decision,
+    2026-07-20): rendered under the node's branch notes to mirror the in-game "comment under the
+    node". A body with newlines gets the expanded `\"\"\"\\n...\\n\"\"\"` form (content flush-left,
+    since indentation inside the quotes would be part of the comment); a single-line body stays
+    compact. The parser strips exactly one leading and one trailing newline, so both forms
+    round-trip the exact string."""
+    if "\n" in s:
+        return f'cmt="""\n{s}\n"""'
+    return f'cmt="""{s}"""'
+
+
 def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, str], argcache: ArgCache) -> str:
+    # A `cmt` renders as a triple-quoted block under the node UNLESS its body contains `"""`
+    # itself (unrepresentable in that form) or isn't a plain string -- those fall back to the
+    # inline, single-quoted, escaped `cmt="..."` arg form, which still round-trips.
+    cmt_val = node.hidden.get("cmt")
+    cmt_as_block = isinstance(cmt_val, str) and '"""' not in cmt_val
+
     parts = [f"{name}={render_value(v, params)}" for name, v in node.args.items()]
-    parts += [f"{name}={render_hidden_value(v)}" for name, v in node.hidden.items()]
+    for name, v in node.hidden.items():
+        if name == "cmt" and cmt_as_block:
+            continue  # emitted as a block after the branch notes below
+        parts.append(f"{name}={render_hidden_value(v)}")
     args_str = ", ".join(parts)
     notes = []
     # data.instructions[op].exec_arg (via next_pin_name): `false` means this op has no
@@ -210,6 +231,10 @@ def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, s
     line = f"{prefix}{node.op}({args_str})"
     if notes:
         line += "  " + " ".join(notes)
+    if cmt_as_block:
+        # A node with a cmt block spans lines, so it must be `;`-terminated (the parser scans for
+        # `;`, keeping indentation/blank lines non-semantic).
+        line += "\n  " + _render_cmt_block(cmt_val) + ";"
     return line
 
 
@@ -283,7 +308,10 @@ def _render_into(
             # annotated output still round-trips.
             parts = _annotation_parts(node, argcache)
             if parts:
-                line += f"  # {' · '.join(parts)}"
+                ann = f"  # {' · '.join(parts)}"
+                # keep the annotation on the op line, ahead of any multi-line cmt block
+                head, sep, tail = line.partition("\n")
+                line = head + ann + sep + tail
         lines.append(line)
     for sub in b.subs:
         lines.append("")
