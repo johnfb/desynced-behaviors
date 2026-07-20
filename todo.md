@@ -516,8 +516,9 @@ Update this file directly as items are picked up/finished.
         provenance in its movement-section header): integer tiles + fractional internal progress
         at `movement_speed/TICKS_PER_SECOND` per tick, √2 per diagonal step, diagonal-first-
         then-straight direction (read off the golden log), no pathfinding (blocked step ⇒
-        `repeat_blocked`/Path Blocked pin, flagged), PROVISIONAL arrival gate
-        (`get_distance ≤ range`, floored at 1 for entity targets) pending the ArrivalProbe run,
+        `repeat_blocked`/Path Blocked pin, flagged), arrival gate
+        (`get_distance ≤ range`, floored at 1 for entity targets) confirmed in-game by the
+        ArrivalProbe run (item below),
         `@goto` as persistent native move-to, ground occupancy shared with `Map.CountTiles`
         (flyers stack/overfly), frame-derived `flying` bit. `MockWorld`: `attach_behavior`
         (accepts table or raw `.dcs`), `step(n)` = tick++ → behaviors → movement → deferred,
@@ -542,14 +543,16 @@ Update this file directly as items are picked up/finished.
         (user, 2026-07-18) as Phase 3's golden differential fixture: the mock must reproduce the
         real log's tile sequence and tick totals from the same `.dcs` (details in
         `mock_world_spec.md`, Phase 3).
-- [ ] **Run the ArrivalProbe in-game to settle the sync-move arrival tolerance.** The instrument
-      is `tests/data/arrival_probe.bsf` (paste-ready `.dcs` alongside; protocol in its header
-      comment: clear area, 12+ open tiles east, optionally bind Target to a nearby unit, read the
-      debug log's marker/distance/coordinate triples). `tests/test_arrival_probe.py` currently
-      pins the PROVISIONAL model (arrived ⟺ `get_distance ≤ range`, entity targets floored at 1)
-      — swap in the measured numbers as goldens, and fix `world.lua`'s
-      `arrival_tolerance`/`arrived` if the game disagrees. Settles `mock_world_spec.md`'s last
-      open movement item; the squad RALLY gate depends on it.
+- [x] **Run the ArrivalProbe in-game to settle the sync-move arrival tolerance.** Done
+      2026-07-20: `tests/data/arrival_probe.bsf` run with a 2x2 Command Center as the entity
+      target. The measured log (`tests/data/arrival_probe_ingame.log`) **confirms the model** —
+      arrived ⟺ `get_distance ≤ range`, entity targets floored at 1: coordinate cases read 0/2/5,
+      entity cases 1/2/5 (range 0 floored to 1). No change to `world.lua`'s
+      `arrival_tolerance`/`arrived` was needed. `test_arrival_probe.py` is now a golden
+      differential (coordinate cases match the log tile-for-tile; entity cases match its arrival
+      gate — the stop tile diverges only because the mock approaches a point target where the game
+      approached a 2x2 footprint, the pre-flagged no-pathfinding divergence). Settled
+      `mock_world_spec.md`'s last open movement item; the squad RALLY gate is unblocked.
 - [x] **Run the RangeProbe in-game to settle the range-gate metric.** Done 2026-07-19, same
       day: measured minimal detecting ranges (3,0)=3, (2,2)=2, (3,2)=3, (3,3)=4, (4,3)=5,
       (6,3)=6 — **floored Euclidean** exactly (in range R ⟺ floor(dist) ≤ R); Chebyshev,

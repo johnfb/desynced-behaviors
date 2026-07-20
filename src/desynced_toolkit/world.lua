@@ -394,11 +394,14 @@ end
 --   (-9,60)->(-4,55) five diagonals then (-4,54)..(-4,51) four straight; never interleaved).
 --   No pathfinding: the mock walks the unobstructed octile line and BLOCKS if a step is blocked,
 --   it never routes around (a real-engine divergence, flagged; fine for flat test worlds).
--- * ARRIVAL (PROVISIONAL -- the one part not yet pinned by an in-game measurement; the arrival
---   probe instrument exists to close it, see mock_world_spec.md): arrived iff
+-- * ARRIVAL (MEASURED in-game 2026-07-20 by the arrival probe -- tests/test_arrival_probe.py
+--   diffs this model against the real run, tests/data/arrival_probe_ingame.log): arrived iff
 --   `Map.GetDistance(unit, target) <= tolerance`, tolerance = the `range` argument, floored at 1
---   for an entity target (its tile can't be entered by a ground unit). Whether the real
---   `need_move` uses this gate, and whether `range` widens it exactly like this, is unmeasured.
+--   for an entity target (its tile can't be entered by a ground unit). Confirmed exactly: the
+--   coordinate cases reproduce tile-for-tile; the entity cases reproduce the gate (readouts
+--   1/2/5 at range 0/2/5, the range-0 floor to 1), diverging only in the stop tile because the
+--   in-game target was a 3x3 building (closest-tile approach the mock's point pathing doesn't
+--   replicate -- the separate pathfinding divergence noted above, not an arrival difference).
 -- * Flying units ignore landscape blocking, ground occupancy, and (later) terrain modifiers.
 -- * Effective speed = base movement_speed only, for now: speed modules, pavement/blight terrain
 --   modifiers, and the unpowered penalty are explicitly later refinements (mock_world_spec.md's

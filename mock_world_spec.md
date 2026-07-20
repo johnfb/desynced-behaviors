@@ -8,8 +8,9 @@ was replaced by the **real game machinery** (`GetFactionBehaviorAsm`/`UploadBeha
 block-stack-reuse item as a side effect and made `call` work for the first time. Movement +
 `MockWorld.step` landed on top, and the golden differential acceptance test below passes (exact
 tile sequence; totals/deltas within the documented tolerance). Phase 4 (combat) not started. The
-arrival-tolerance probe (`tests/data/arrival_probe.bsf`) is authored and suite-wired but **not yet
-run in-game** — the arrival model is provisional until it is. Work state lives in `todo.md`
+arrival-tolerance probe (`tests/data/arrival_probe.bsf`) has now been **run in-game (2026-07-20)
+and confirms the arrival model** — `test_arrival_probe.py` is a golden differential against the
+real log (`tests/data/arrival_probe_ingame.log`). Work state lives in `todo.md`
 (§ `desynced_toolkit` / BSF infrastructure), not here.
 
 ## Goal
@@ -361,17 +362,20 @@ assert g1.weapon_component().get_register(1).entity is enemy # gunner focus-fire
   path) are the only way a behavior senses past its own visibility bubble. Mock consequence:
   `Map.FindClosestEntity`'s mock needs no faction-vision gating for the instruction callers, and
   a mocked radar must use the component def's `range`, not `visibility_range`.
-- **`RequestStateMove` arrival tolerance — probe authored, awaiting its in-game run.** The
-  per-tile advance is settled empirically (see the tick-step note), but *when* `need_move` flips
-  `false` — the arrival radius, and whether the `range` argument widens it — is still
-  engine-native and unmeasured. The mock ships a **provisional** model (`world.lua`:
-  arrived ⟺ `get_distance(unit, target) ≤ range`, floored at 1 for an entity target whose tile
-  can't be entered). The measuring instrument now exists: `tests/data/arrival_probe.bsf`
-  (paste-ready `.dcs` alongside) sync-moves to a coordinate at ranges 0/2/5 and to a bound
-  Target unit at ranges 0/2/5, printing case marker + `get_distance` readout + stop coordinate
-  per case; `tests/test_arrival_probe.py` pins the provisional model's predictions and is where
-  the in-game numbers drop in as goldens (fixing `world.lua`'s `arrival_tolerance` if they
-  disagree). The RALLY gate's testability depends on this tolerance being right.
+- **`RequestStateMove` arrival tolerance — settled 2026-07-20 (in-game ArrivalProbe run).** The
+  per-tile advance was already settled empirically (see the tick-step note); *when* `need_move`
+  flips `false` is now measured too. The mock's model (`world.lua`: arrived ⟺
+  `get_distance(unit, target) ≤ range`, floored at 1 for an entity target whose tile can't be
+  entered) is **confirmed exactly** by `tests/data/arrival_probe.bsf` run in-game: it sync-moves
+  to a coordinate at ranges 0/2/5 and to a bound Target unit at ranges 0/2/5, printing case
+  marker + `get_distance` readout + stop coordinate per case. The real log
+  (`tests/data/arrival_probe_ingame.log`, a 3x3 Command Center as the entity target) gives
+  distance readouts 0/2/5 (coordinate) and 1/2/5 (entity, range-0 floored to 1) — the model's
+  predictions. `tests/test_arrival_probe.py` is now a golden differential: the coordinate cases
+  reproduce the log tile-for-tile, the entity cases reproduce its arrival gate (the stop tile
+  differs only because the mock uses a point target where the game approached a 3x3 footprint —
+  the separate, already-flagged pathfinding divergence). The RALLY gate's testability is
+  unblocked.
 - **Distance metrics — settled 2026-07-19 (in-game RangeProbe run + user observations).**
   - **`Map.FindClosestEntity`'s range gate is floored Euclidean**: in range `R` ⟺
     `floor(dist) ≤ R`, equivalently `dist < R+1`. Settled by the in-game RangeProbe run
