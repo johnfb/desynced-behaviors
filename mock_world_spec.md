@@ -39,7 +39,7 @@ func bodies call engine-native primitives (`Map.FindClosestEntity`, `comp.factio
 `comp:RequestStateMove`, …) and traverse an entity graph that `engine_stub.lua` doesn't provide.
 The entire task is: **supply those primitives and that graph, backed by real game data, and let the
 unchanged instruction funcs run.** Same doctrine as the rest of the project (CLAUDE.md's "reuse the
-real Lua, both data and logic") — we mock only the genuinely-external leaves, never a decision the
+real Lua, both data and logic") — this mocks only the genuinely-external leaves, never a decision the
 game already makes.
 
 ## What is reusable game Lua vs. what must be mocked
@@ -54,8 +54,8 @@ Established by tracing the func bodies of the squad's instructions (`get_closest
 - **Every instruction `func` body.**
 - The argument getters `Get`/`GetNum`/`GetId`/`GetEntity`/`GetCoord` — all local aliases for the
   `InstGet*` functions defined in `instructions.lua` itself (the same reuse `engine_stub.lua`
-  already documents for `Get`/`GetNum`). `GetId`/`GetEntity`/`GetCoord` are simply not exposed as
-  globals to the harness yet.
+  already documents for `Get`/`GetNum`). `GetId`/`GetEntity`/`GetCoord` are not yet exposed as
+  globals to the harness.
 - **`FilterEntity` / `PrepareFilterEntity`** (`data/utilities.lua`) — the real radar/match/signal
   filtering logic, including the whole `FilterStringToNum` table (`v_enemy_faction`,
   `v_own_faction`, `v_damaged`, `v_infected`, `v_bot`, `v_building`, …). This is the largest reuse

@@ -169,7 +169,7 @@
 # Impact review against this repo (written 2026-07-14, extended 2026-07-16 for 1.0.18055; against the changelog above)
 
 Cross-referenced against `library/*.dcs` (op-usage counts from decompiled exports), the design
-docs, `behavior_format.md`, and project memory. Ordered by how much of our stuff each touches.
+docs, `behavior_format.md`, and project memory. Ordered by how much of this repo's deployed behaviors and tooling each touches.
 
 ## Likely behavioral changes to deployed behaviors — audit after update
 
@@ -196,8 +196,8 @@ docs, `behavior_format.md`, and project memory. Ordered by how much of our stuff
   crashes pause instead of stopping (17919). Changes `behavior_format.md` § "Stopping a
   behavior" (the "restart does not yield, can spin forever under unlock" claim), the
   STOP/dead-end and sequence-cascade notes, and `reference_jump_vs_pop_block_stack_leak`
-  (recursion-limit crash now pauses for inspection instead of stopping). Our deployed
-  behaviors all have explicit `wait` hubs, so the +1 tick is likely benign — but it's a
+  (recursion-limit crash now pauses for inspection instead of stopping). The deployed
+  behaviors in `library/` all have explicit `wait` hubs, so the +1 tick is likely benign — but it's a
   timing change to every POP-to-empty auto-restart.
 - **GOTO register semantics** (18020/18044): auto-clear after picking up the last of a dropped
   item; movement-distance num of infinity now means "infinitely far" (was 0); GOTO=1 no longer
@@ -234,11 +234,11 @@ docs, `behavior_format.md`, and project memory. Ordered by how much of our stuff
   checked-in export goes op-schema-stale at once and `semantic_diff` will report mass changes
   that are really conversions — don't misread that as user edits (cf.
   `feedback_resave_reencodes_unrelated_wiring`, now at op granularity).
-- **Removed (not deprecated) ops** break our argcache resolution for any old `.dcs` still
+- **Removed (not deprecated) ops** break BSF's argcache resolution for any old `.dcs` still
   using them: `is_unit_a`/`is_a`, `compare_unit`, `get_grid_efficiency`,
   `loop_repair/recipe/research_ingredients`, `loop_unlocked_components`,
   `connect`/`disconnect`/`enable_transport_route`/`disable_transport_route` (→ 'Set
-  Logistics'; `blight_magnifier_mining.md` documents the transport-route pair by name). Our
+  Logistics'; `blight_magnifier_mining.md` documents the transport-route pair by name).
   `tests/data/` fixtures use none of these; the gitignored `corpus/` almost certainly does.
 - **'Divide' rounding modes + remainder** (17919): op schema changes under
   `hex_expansion_math.md`'s integer-division-dependent math (7 `div` uses in the hex

@@ -229,7 +229,7 @@ just adding unused capability) but the findings below remain valid preparation:
           genuine connection points (jump/branch/`>node` targets) get one. This both minimizes diff
           churn (inserting/removing a fallthrough-only node renumbers nothing) and, deliberately,
           **stops agents from referring to instructions by the unstable node id** — most
-          instructions simply wouldn't have one, forcing references into the stable vocabulary
+          instructions wouldn't have one, forcing references into the stable vocabulary
           (display name, `cmt`, enclosing `label` section — matches
           `feedback_node_references_user_vocabulary`). The ids that remain are exactly the
           meaningful targets, and canonically named per the point above. Needs a decompiler change

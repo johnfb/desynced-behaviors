@@ -143,7 +143,7 @@ Sequence:                     # forks into independent X/Y chains, then combines
   computes `X`, `Second`/`Third` compute `Ynum` then `Y`, `Last` combines. Each leg ends with its
   own dead-end (`next: false`), which `sequence` chains through in order (see
   "Block-type instructions" in `behavior_format.md`) rather than a single straight-line
-  computation. This was simply how the in-game visual graph came out, not a hard requirement — a
+  computation. This is how the in-game visual graph came out, not a hard requirement — a
   flat chain would compute the same result.
 
 Verified by hand for `R=1, T=0..5` against the original per-side derivation (reproduces
@@ -246,7 +246,7 @@ err_z = Abs(rz*Den - r_num)
 # of rx/ry/rz has the largest rounding error and recomputes *that one* from the other two, to
 # restore the x+y+z=0 constraint exactly. When ry is the one with the largest error, its premise is
 # "rx and rz's own independent roundings were already the trustworthy pair" -- which is exactly the
-# case where nothing needs correcting for our purposes, since we only ever read rx/rz. So the
+# case where nothing needs correcting here, since only rx/rz are ever read. So the
 # middle case collapses to a true no-op (not just an unread assignment):
 if err_x > err_y and err_x > err_z:  rx = -ry - rz
 elif err_z >= err_y:                  rz = -rx - ry
@@ -533,7 +533,7 @@ sub HexIndexOf(Coord, Origin, d_half, R, T):
   reached only when `k` is genuinely `5`, already *is* the discriminator,
   exactly the same way each of `HexAt`'s six labels gets its own distinct
   arithmetic with no "which k is this?" check inside it. `label(5)`'s body
-  can simply be `k=5; t=r` with no gate/range-check tail at all, same as the
+  can be `k=5; t=r` with no gate/range-check tail at all, same as the
   real flat cascade — the loop's own iteration bookkeeping (this is the last
   value in `0..5`) is what routes to `Done` afterward, not an explicit
   `last()`/break or an added check. So this instruction span confirms the

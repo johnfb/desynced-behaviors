@@ -15,7 +15,7 @@ from .values import Param
 
 # ops whose argument count/shape is dynamic (depends on the *target* sub-behavior's own
 # declared parameters, not a fixed data.instructions[op].args list -- confirmed
-# `data.instructions.call.args` is simply absent) and therefore need bespoke handling
+# `data.instructions.call.args` is absent) and therefore need bespoke handling
 # wherever ArgCache-driven position/type lookup would otherwise apply.
 DYNAMIC_ARG_OPS = {"call", "load_behavior"}
 
@@ -143,7 +143,7 @@ def _scan_registrations(source, package_id: str = "Data") -> dict[str, str | Non
     """id -> display name (or None). The display name is the first `name = "..."` field between
     an id's registration and the next registration in the same file -- registrations are
     sequential table constructions, so that window is the entry's own body (a derived
-    registration that inherits its name simply yields None; acceptable, the fallback is just
+    registration that inherits its name yields None; acceptable, the fallback is
     'no translation available')."""
     pm = get_package_manifest(source, package_id)
     entry_text = source.read_text(pm.entry)

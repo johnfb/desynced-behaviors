@@ -1,5 +1,5 @@
-"""Strict parse/compile validation, added 2026-07-14 after a probe demonstrated that every
-case here was previously either accepted silently (compiling into a *wrong* behavior with no
+"""Strict parse/compile validation. A probe demonstrated that every
+case here was either accepted silently (compiling into a *wrong* behavior with no
 error at any stage) or rejected with a context-free/misleading error. The silent cases were the
 motivation -- see the review notes in behavior_source_format.md's "Validation" section:
   - a typo'd exec pin name compiled with that pin silently unwired

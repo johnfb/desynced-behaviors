@@ -181,7 +181,7 @@ def test_param_name_takes_precedence_over_id_literal(engine):
 def test_param_direction_is_recomputed_from_usage_not_trusted_from_text(engine):
     """The `*` a user types (or leaves off) in BSF text is display-only and gets stripped on
     parse, never stored -- compile.py always recomputes `parameters[i]` fresh from what the
-    body actually does (argcache.written_param_slots), so a stale or simply-wrong `*` left over
+    body actually does (argcache.written_param_slots), so a stale or wrong `*` left over
     from a hand-edit can't produce an incorrect wire bit. Two cases, both intentionally
     "lying": a param marked `*` that's only ever read, and a param left unmarked that's
     actually written."""

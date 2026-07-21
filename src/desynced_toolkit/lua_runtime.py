@@ -105,7 +105,7 @@ class LupaEngine:
         # engine-native functions that turn a `.dcs` clipboard string into the Lua `item` table
         # (and back) -- confirmed nowhere in this Lua extract, so `dcs_wire.py` is what actually
         # backs that missing logic here. The real signatures read/write the OS clipboard with no
-        # string argument; we're not simulating OS clipboard access, so these are exposed as
+        # string argument; OS clipboard access is out of scope here, so these are exposed as
         # plain, explicitly-named Python methods (taking/returning the string directly) rather
         # than bound onto `Tool.GetClipboard`/`SetClipboard` under a misleadingly-identical
         # calling convention.

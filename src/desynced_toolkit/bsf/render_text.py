@@ -203,8 +203,8 @@ def render_node(node: BsfNode, params: list[BsfParam], jump_targets: dict[str, s
     all_pins = argcache.exec_pin_names(node.op)
     if len(all_pins) >= 2:
         # An op with 2+ exec pins renders EVERY pin, with the explicit `NEXT` token for
-        # plain fall-to-physically-next -- the "the one visible pin looked complete so I
-        # forgot the second one exists" mistake (a loop's Done pin, twice; see
+        # plain fall-to-physically-next -- the "one visible pin looked complete, so the
+        # second one got forgotten" mistake (a loop's Done pin, twice; see
         # feedback_bsf_loop_done_pin_omission) is only preventable if absence is never
         # legal for these ops. Single-pin ops keep compact omission: with one pin there is
         # nothing to forget, and the text stays close to how sequential code reads.

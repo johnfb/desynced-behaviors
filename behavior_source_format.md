@@ -701,7 +701,7 @@ The caller writes the sub's `Result` directly into its own dispatch register
 top-level `jump(Label=@visual)` dispatch, so the sub's return value *is* the
 next state, no separate translation step needed) and loops back through
 `Begin` every tick regardless of outcome. **`Continue Value` is almost
-always just "whatever state we're already in"** (a bare self-reference, not
+always just a self-reference to the current state** (a bare self-reference, not
 a distinct label) — both real examples use this trick, since "keep doing
 what you were doing" doesn't need its own name.
 
@@ -832,7 +832,7 @@ shape:
   (`node_id -> (x, y)`) attached to the envelope, not part of instruction
   syntax — the same move DOT/Graphviz makes with `pos=`, and every visual
   node-graph tool (Blender, Houdini, Unreal Blueprint) makes with view-state
-  vs. graph topology. This only works cleanly because node identity is
+  vs. graph topology. This only works because node identity is
   stable across edits (see "Node identity vs. wire position" above) — a
   positional index couldn't anchor a sidecar table this way, since it
   shifts on every insertion. Write-back policy: untouched nodes keep their
@@ -864,7 +864,7 @@ drawing compared to the text listing:
   `ArgCache` uses elsewhere), not just whatever happens to be present in a
   node's own branch data, so a node's full pin set is always visible even
   when a pin isn't wired to anything. A node with an unwired pin and a node
-  that simply doesn't have that pin at all must not look identical.
+  that doesn't have that pin at all must not look identical.
 - **An unwired pin's edge goes to its own small, local marker node — never
   one shared terminal.** An earlier draft sent every `POP` edge in a
   diagram into a single shared node; on a real graph with several such

@@ -126,7 +126,7 @@ sidesteps both rejected designs' costs: no artificial delay (the register itself
 naturally one-step-behind state — reading it directly is enough), and no global/keyed
 storage (an ordinary persistent local, passed exactly like `Radar`/`Next Tick` already are).
 
-**A clean, useful property of this shape**: since parameters are passed by reference, a
+**A useful property of this shape**: since parameters are passed by reference, a
 caller with only one outstanding query at a time (like Mining Leader) can pass the *same*
 variable for both `Tag` and `Pending Tag` at a call site — the internal `Tag := Pending Tag`
 step becomes a genuine no-op (same storage, not "the second write wins" — they were never two
@@ -244,7 +244,7 @@ register into `Radar` (confirmed against `InstGet`: an unwired arg resolves via
 `Tool.NewRegisterObject()`, a real empty register with `is_empty=true`, not merely a numeric
 0). The hardware branch then opens with `is_empty(Value=Radar)` — `Has Value` → real polling;
 empty → falls straight into the *same* fallback node the gate's own `Failed` pin uses. One
-fallback implementation, two paths converging on it cleanly, no duplicated logic.
+fallback implementation, two paths converging on it, no duplicated logic.
 
 **One real gap, resolved as intentional:** the component family is bigger than the 8 ids in
 the cascade — `c_scout_radar` (`data/components.lua:4270`) shares the same `base_id` but was
@@ -415,9 +415,9 @@ guesses — then `moveaway_range`. Finding an enemy skips Priority 2/3 entirely 
     Result=@goto)` randomizes around that biased point. **`Config` is then set to `$D`
     (current position *before* this move), not the newly computed destination** — checked
     this deliberately since it looks backwards at first: comparing next cycle's position
-    against "where I was before this step" gives a real observed-movement vector; storing the
-    destination instead would compare "where I am" against "where I just said I'd go," which
-    collapses to ~zero once movement actually completes. Grounding the bias in observed
+    against the pre-move position gives a real observed-movement vector; storing the
+    destination instead would compare current position against the previously-intended
+    destination, which collapses to ~zero once movement actually completes. Grounding the bias in observed
     motion rather than intended motion is also more robust to interrupted/blocked movement.
 
 ## Resolved decisions

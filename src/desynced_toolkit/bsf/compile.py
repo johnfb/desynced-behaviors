@@ -11,7 +11,7 @@ class BsfCompileError(ValueError):
     """IR-level validation failure. parse_text.py already rejects most of these for text input;
     these checks exist so hand-built IR (tests, future tooling) fails just as loudly instead of
     silently compiling wrong -- notably an unknown branch-pin key, which an earlier version
-    simply never consulted (the compile loop iterates declared pins and checks membership, so a
+    never consulted (the compile loop iterates declared pins and checks membership, so a
     typo'd key was dropped without a trace; demonstrated 2026-07-14, see
     tests/test_bsf_validation.py)."""
 
@@ -22,14 +22,14 @@ def _resolve_branch_target(target, positions: dict[str, int], is_last: bool):
     set this key at all".
 
     The implicit-fallthrough case (`None`) never needs an explicit value -- the engine's own
-    dispatcher advances to the physically next instruction on its own when a key is simply
+    dispatcher advances to the physically next instruction on its own when a key is
     absent. `"POP"` is ambiguous by construction (behavior_source_format.md's decompiler
     collapses an explicit `false` and "fell off the true end of the array" into the same `POP`
     representation, since the real dispatcher treats them identically -- see `resolve_branch`)
     -- when this node is genuinely the last one in the compiled order, omitting the key
     reproduces that same "fell off the end" case exactly (and matches how real .dcs files are
     usually encoded); anywhere else in the middle of the array, `false` must be written
-    explicitly, since simply having a next instruction physically follow would otherwise change
+    explicitly, since a next instruction physically following would otherwise change
     the meaning to "fall through to it"."""
     if target is None:
         return _OMIT

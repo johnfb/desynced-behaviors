@@ -20,8 +20,8 @@ exists to resolve). The sequence order is a deterministic pre-order walk from Pr
 following declared exec pins and resolved `jump`/`label` edges, so two structurally-identical
 graphs produce the identical sequence regardless of what wire positions the compiler happened
 to assign this time. `difflib.SequenceMatcher` aligns the two sequences (robust to local
-insertions/deletions, unlike a positional/index comparison); only once that alignment exists do
-we compare branch targets, by mapping each pin's resolved target through the established
+insertions/deletions, unlike a positional/index comparison); only once that alignment exists are
+branch targets compared, by mapping each pin's resolved target through the established
 node-to-node correspondence rather than comparing raw ids."""
 
 from __future__ import annotations

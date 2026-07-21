@@ -216,7 +216,7 @@ like a garbled entity reference), because Lua distinguishes an array table
 reader looks for `.x`/`.y` fields specifically. `dsc_codec.py` happily
 encodes and round-trips a JSON list into a Lua array table — it has no
 instruction-semantics layer to know that's wrong for this slot — so this
-bug is invisible to our own encode→decode round-trip and only surfaces once
+bug is invisible to the codec's own encode→decode round-trip and only surfaces once
 the game itself tries to read the value. Confirmed fix: re-setting the same
 coordinate in the in-game register editor and re-exporting produced
 `{ "coord": { "x": 0, "y": 0 } }`. Always use the keyed-object form.
@@ -484,7 +484,7 @@ field or the value in an `exec`-typed argument slot — resolves the same way:
 - **omitted / not present** → fall through to the next instruction in
   sequence (dict key + 1). **This is not "nothing was decided, so it
   defaults arbitrarily" — it's a real, explicit wire the visual editor's
-  compiler simply doesn't spell out as an integer, because doing so would
+  compiler doesn't spell out as an integer, because doing so would
   be redundant with position** (user-confirmed from how the real editor
   behaves, not inferred from the wire bytes alone): the compiler only
   omits `next`/an `exec` arg when there genuinely is a connection to
@@ -510,7 +510,7 @@ field or the value in an `exec`-typed argument slot — resolves the same way:
   doesn't change any runtime-semantics claim already made here, but it does
   mean **the causal story "the original author chose not to wire this" is
   not a safe inference from an old behavior's own omission** — instruction
-  schemas gain new pins over time, and old saved data simply never had the
+  schemas gain new pins over time, and old saved data never had the
   argument slot to omit deliberately in the first place. There is no way to
   distinguish the two cases from the wire alone without independently
   knowing which game version the behavior was last compiled under.
@@ -595,8 +595,8 @@ if you subtract 1:
 Reading the raw values as direct dict keys would skip every scan but the
 first (each "No Result" would land one instruction *past* the next scan
 call, on that scan's post-processing step, with a stale/unset `A`). Reading
-them as `value - 1` chains cleanly through all four attempts into the
-random-walk fallback — which is obviously the intended behavior.
+them as `value - 1` chains through all four attempts in sequence into the
+random-walk fallback, consistent with each label's own name (one per scan type).
 
 **When decoding:** to find what dict key an `exec`/`next` integer targets,
 subtract 1. **When hand-authoring/encoding:** to jump to dict key `K`,
@@ -704,7 +704,7 @@ tick", not "crash"), and `unlock` itself gained two configured hidden-literal op
 limit" vs "Continue next tick") — a `Rework behavior unlocking` addition (1.0.17919/
 1.0.17933) that also **resets unlock state and waits 1 tick whenever an unlocked
 behavior ends and restarts**, i.e. every POP-to-empty auto-restart now costs a real
-tick it didn't before. Our deployed behaviors all have explicit `wait` hubs, so this
+tick it didn't before. The deployed behaviors in `library/` all have explicit `wait` hubs, so this
 extra tick is expected to be benign, but hasn't been confirmed against a live run.
 `n`/`c` are packed into one signed int only at `make_asm` (ASM-compile) time — same
 save-format shape as `memory_sift`'s `c`/`u` pair — and aren't yet captured by BSF's
@@ -730,7 +730,7 @@ fall-through) doesn't restart the whole program — it pops back to the
   wired, in order — each one runs to its own dead end, then control
   returns to `sequence` to start the next wired one, and finally jumps to
   `Last`. A pin wired **`false`** (genuinely unconnected in the editor) is
-  simply skipped — not pushed onto the internal step list at all (the
+  skipped — not pushed onto the internal step list at all (the
   func's own `if exec_first then ...` guard; this is also why unconnected
   stages cost zero ticks). An ***omitted*** pin is **not** skipped: per the
   universal omission rule above, `GetFactionBehaviorAsm` resolves it to the
@@ -952,7 +952,7 @@ suggestions), and lints the legal-but-suspicious tier. The normal loop:
 4. Optionally run the result through `Interpreter` against the real
    instruction semantics before spending an in-game test on it.
 5. Load it in-game (paste into the behavior library) to confirm it opens
-   cleanly in the visual editor and runs as expected.
+   without error in the visual editor and runs as expected.
 
 The raw-table route (decode with `LupaEngine.decode_dcs()`, edit the Lua
 table per this document, re-encode) remains available for work *on the wire

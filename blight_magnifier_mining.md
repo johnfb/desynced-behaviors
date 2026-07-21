@@ -384,7 +384,7 @@ Substantially higher than every earlier estimate in this doc — this lattice
 is dense and genuinely high-throughput. Not yet tested in-game as a running
 setup (drones + this exact blueprint + duplicated nodes at the confirmed
 positions together) — see the oversubscription-cap-as-parameter item above,
-now clearly necessary rather than a nice-to-have, since a hardcoded `2` would
+now necessary rather than a nice-to-have, since a hardcoded `2` would
 leave the large majority of this design's regen capacity unused.
 
 ### Obsidian and Laterite: neither is mineable by `c_miner`/`c_adv_miner` at all
@@ -520,7 +520,7 @@ since the filter names are misleading:**
    — while a genuine direct broadcast (`MagnifierSignal`'s
    `set_number(Value=Resource, Number=0, Result=$Sig)`) hits
    `for_signal_match`'s direct-match path and has `Signal2.id` genuinely
-   equal to `Resource`. One equality check on `.id` cleanly separates "real
+   equal to `Resource`. One equality check on `.id` separates "real
    id-based broadcast" from "only matched via the entity-embedded
    fallback," with no dependency on enumerating entity types — it would
    keep working even if some future behavior embeds a different kind of
@@ -536,7 +536,7 @@ since the filter names are misleading:**
 - **`get_distance` against a multi-tile entity (e.g. a building) measures to
   its closest tile, not a center point** — user-confirmed 2026-07-12, not
   visible from source (`get_distance` just delegates to the native
-  `Map.GetDistance`). Bit us in `MinerDrone`: a loose building-approach distance
+  `Map.GetDistance`). Caused a real bug in `MinerDrone`: a loose building-approach distance
   check (`Compare=8`) combined with a narrower node-search range
   (`Range=5`) meant the drone's "arrived" state could be satisfied near one
   edge of a large building while nodes on the *opposite* side (footprint
@@ -646,8 +646,8 @@ since the filter names are misleading:**
   purpose-built, faction-wide (no range limit at all) coordination
   mechanism**, exposed via the `Loop Signal` instruction
   (`for_signal_match`, `instructions.lua:2417-2508`) — exactly the
-  "broadcast which node I'm working on, let others check for oversubscription"
-  mechanism this design needed, once the direct-node-write idea above was
+  broadcast-which-node-a-drone-is-working-on mechanism needed to let other drones
+  check for oversubscription, once the direct-node-write idea above was
   ruled out. A drone writes its own Signal register to `{entity =
   target_node}` (a write to itself, always legal); any other drone runs
   `Loop Signal` with that same entity as the query and gets every faction
@@ -796,8 +796,8 @@ recording since they're easy to reintroduce by hand:
    which only checks `id`, never `num` at all. But `Mining Leader`'s own
    `Monitor mine` state (`set_reg(Value=Resource, Target=@signal)`) and the
    Hauler-facing pickup convention `Fendersons Transport` depends on
-   *already* use `num=0` on this exact same `Resource` id to mean "I'm
-   offering this for pickup" — a completely different, mobile-squad-facing
+   *already* use `num=0` on this exact same `Resource` id to mean "available
+   for pickup" — a completely different, mobile-squad-facing
    meaning. A drone would have genuinely traveled toward a roaming mining
    gang mid-pickup-broadcast, mistaking it for a stationary mining site.
    Fixed by reserving `num=-1` exclusively for the drone-facing "come mine

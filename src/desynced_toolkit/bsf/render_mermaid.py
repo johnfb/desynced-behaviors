@@ -9,7 +9,7 @@ diagram or a real behavior, not just described in prose):
 - **Every declared exec pin gets a real, labeled edge -- connected or not.** An early draft
   only drew edges for pins actually present in `node.branches`; a node with an unconnected pin
   (or a pin never even added to the dict by hand-built IR) then looked identical to a node that
-  simply doesn't have that pin at all, which is genuinely misleading -- you can't tell "this op
+  doesn't have that pin at all, which is genuinely misleading -- you can't tell "this op
   doesn't have an If Smaller pin" from "this op has one and it's just not wired." Fixed by
   walking `data.instructions[op].args` (`arg_pin_names`, hence needing `argcache` as a real
   parameter now) rather than only `node.branches`.

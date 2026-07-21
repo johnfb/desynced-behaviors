@@ -448,7 +448,7 @@ def _serialize_number(out, v):
     else:
         # The reference JS encoder emits MP_Uint64 here and calls a DataView
         # method (setUint64) that doesn't actually exist -- a dead/broken
-        # path for numbers below INT32_MIN. We implement it properly as a
+        # path for numbers below INT32_MIN. This implements it as a
         # signed Int64 instead of reproducing the crash.
         out.append(MP_Int64)
         out.extend(struct.pack("<q", n))
