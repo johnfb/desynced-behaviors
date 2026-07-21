@@ -311,3 +311,128 @@ docs, `behavior_format.md`, and project memory. Ordered by how much of our stuff
 `instructions_index.md`, then work through the audits above — Observer's `value_type`
 dispatch, the `is_empty`-on-destroyed-refs sweep (now including the two Get Unit Info sites),
 and `miner_drone`'s `for_signal_match` `c=2` comparison-mode index first.
+
+## Dry run against 1.0.18055, 2026-07-21 (still experimental — NOT landed)
+
+**1.0.17871 remains the release and the default `desynced-game-data` symlink target.**
+1.0.18055 is still the experimental branch this doc has been tracking since 2026-07-14, not
+yet promoted to release — all toolkit work continues to target 1.0.17871 until it is. This
+section records a one-off dry run: a temporary `desynced-game-data-1.0.18055` checkout was
+pointed at, the full audit below was worked through, and every code change it required was
+then **reverted** (some of it isn't safe to leave live against 1.0.17871 — e.g. `world.lua`'s
+`GetEntitiesWithRegister` signature and `engine_stub.lua`'s `is_empty` semantics actively
+break 1.0.17871 compatibility rather than just adding unused capability). Kept as prep for
+whenever the real release lands: the findings below, and `scripts/generate_instructions_index.py`
+(a genuinely reusable generator, harmless to keep — it only runs against whatever extract is
+current when invoked). `todo.md` has the actionable "re-apply this when it lands" item.
+
+Full test suite was green (`uv run pytest tests/`, 635 passed) against 1.0.18055 with these
+changes in place, before they were reverted — real toolkit fixes were required, not just a
+data swap:
+
+- **`engine_stub.lua`**: added `Value:Divide` (the new rounding-mode/remainder-returning
+  `div`), `Tool.NewRegisterObject`'s new 2-arg (source, num-override) form, `NOLOC`/`L`
+  (newly load-bearing at *compile* time via `call`'s branched-Return `var_args`, not just
+  UI code), a bare-`{x=,y=}`-coordinate coercion path (`get_location` now passes a mock
+  entity's `.location` straight into `Set` instead of pre-wrapping it), and — the big one —
+  split `.entity` (auto-nils once the target's `exists==false`, unchanged semantics) from a
+  new `.raw_entity` (persists through destruction) with `is_empty` switched to consult the
+  latter. This is the concrete implementation of the `is_empty`-no-longer-matches-destroyed-
+  refs flip flagged above; `reference_dangling_entity_reg_infinite` (project memory) is
+  updated to match. Also added `coord_x`/`coord_y` as computed get/set properties (new
+  `combine_register`/`data_type` usage) and `Faction:GetEntitiesWithRegister`'s id/comparison-
+  mode filtering (`world.lua`) — the real per-tick filtering logic moved server-side out of
+  `for_signal_match`'s own Lua func in this release, so the mock had to grow it.
+- **BSF (`bsf/decompile.py`/`compile.py`/`parse_text.py`/`render_mermaid.py`)**: `switch`
+  ("Diverts the program depending on the passed value") gained a genuinely dynamic Case-pin
+  count (`var_args`, no longer a fixed 5) — added bespoke (not `DYNAMIC_ARG_OPS`-generic,
+  since `call`'s mechanism assumes flat values, not switch's alternating value/exec-target
+  pairs) decompile/compile/parse support, plus a `_declared_pins` fix so lint's reachability
+  walk and Mermaid rendering see the dynamic pins too (found via `library/mining_leader.dcs`:
+  its `switch` node's case branches were silently invisible to both before the fix — a real,
+  concrete corpus bug, not a hypothetical). `HIDDEN_FIELD_TABLE` gained `div`/`memory_insert`/
+  `memory_remove`/`switch`/`last`'s new hidden-literal fields (rounding mode, array scope,
+  comparison mode, break count) — present since this release but not wired into BSF until now.
+  `memory_sift` and `unlock` have a *related*, still-open gap: both bit-pack two named fields
+  (`c`+`u`, `n`+`c`) into one `make_asm` int, which `HIDDEN_FIELD_TABLE`'s one-field-per-op
+  shape can't express — noted inline in `decompile.py`, unexercised by any current fixture.
+- **`instructions_index.md`**: test-regenerated (then reverted, along with everything else
+  here, to stay matched to 1.0.17871) via a new `scripts/generate_instructions_index.py` — no
+  such generator existed before this dry run (the checked-in file was apparently hand/one-off
+  generated originally); the script itself is kept, harmless, and should be the way this file
+  gets regenerated for real once 1.0.18055 (or whatever version ships) actually lands. Against
+  1.0.18055 it produced 207 instructions (current 1.0.17871 count is 196), grouped under the new
+  Flow/Logic/Loops/Values/Units/Movement/Inventory/Logistics/Components/Production/
+  Communication/World/Memory categories plus a new **Legacy / Deprecated** bucket (30
+  entries: every op with no `category` field, i.e. hidden from the in-game search but kept
+  for old-save compatibility) that also names each entry's real `convert` target where the
+  source states one plainly (scraped from the raw text, anchored to top-level
+  `data.instructions.X =` lines so an *internal* reference to another op inside some entry's
+  own `func` body — e.g. `combine_coordinate`'s and `separate_coordinate`'s both call
+  `combine_register.func`/`separate_register.func` directly — doesn't truncate the scan
+  early and silently drop the real target).
+
+### Audit findings (the "likely behavioral changes" list above, worked through against real `library/` data)
+
+- **`is_empty`-on-destroyed-refs**: implemented during the dry run (see `engine_stub.lua`
+  above — reverted from the tree along with everything else here, re-apply when the release
+  actually lands). Not independently re-verified in-game this session — the stub's split is
+  inferred from the new `data/instructions.lua` source (`.raw_entity` reads), the same
+  confidence level as any other source-only stub fact pending an in-game cross-check.
+- **`miner_drone`'s `for_signal_match` `c=2`**: confirmed safe. The new comparison-mode
+  table's mode 2 is "Number Equal"; the old table's mode 2 was "Exact" (also plain numeric
+  equality) — same position, same meaning, carried through the rework unchanged. No behavior
+  change for this call site.
+- **Get Unit Info empty-vs-0 on invalid input**: confirmed non-issue at both flagged sites.
+  `mining_leader` and `observer` each call `get_unit_info` with `Unit=` fed straight from
+  `get_self` — always a valid, never-invalid input — so the empty-vs-0 distinction never
+  triggers there.
+- **GOTO composite write** (`set_number(Value=Target, Number=3, Result=@goto)` in
+  `mining_leader`, now rendering as `set_number(arg1=Target, arg2=3, arg3=@goto)` — see the
+  next finding for why): still present, unreviewed for the REG_INFINITE-now-means-infinite
+  change; revisit alongside the Hauler's pickup flow per the original note.
+- **Observer's `value_type` dispatch — investigated, and this is the session's most
+  significant finding**: NOT a game-behavior bug, but a **real BSF decompile fidelity bug**,
+  newly exposed by this release and confirmed against `library/observer.dcs`'s actual wiring.
+  `value_type` is a legacy op id (auto-converts to `data_type` on next in-game save) whose
+  `args` table is aliased directly to `data.instructions.data_type.args` — i.e. it renders
+  with `data_type`'s *new* pin names — but old, not-yet-resaved wire data was written under
+  `value_type`'s *old* position layout, and the real in-game `convert` function for this op
+  does a genuine positional **reorder**, not just an append (old position 3 "Unit" splits
+  into new position 4 "Type" *and* new position 8 "Target Reference"; old position 4
+  "Component" moves to new position 3 "Component Item"; old 5/6 "Tech"/"Value" swap to new
+  6/5 "Research Value"/"Information Value"). `decompile.py` never calls a legacy op's
+  `convert` — it just reads raw positions under whatever `args` table is currently attached —
+  so for any old `value_type` node, **the pin labels decompile.py prints today are wrong**:
+  Observer's own `value_type(Data=Config) ... (Component Item) >get_distance ...` is labeled
+  as if the "Component Item" branch routes to the follow logic, but the wire value actually
+  sitting at that position is the *old* "Unit" branch's target (matching the node's own `cmt`,
+  "If Config is a unit, follow") — the in-game behavior is correct, only this tool's rendering
+  of it is misleading. Filed as a new `todo.md` item (below) rather than fixed this session:
+  the general fix (apply an op's own real `convert` Lua function during decompile, not just
+  read stale positions under a new schema) needs its own design pass — at minimum, checking
+  which of the ~10 other `args = data.instructions.X.args`-aliased legacy ops
+  (`equip_component_remotely`/`unequip_component_remotely`/`for_unlocked`'s and
+  `for_ingredients`'s aliased parents/`compare_unit`, at a glance) have the same
+  reorder-not-append shape, and whether silently mutating the rendered op id during decompile
+  (`value_type` → `data_type`) is even the right call given this project's "show what's
+  actually there" norm for BSF text. `set_number`/`combine_coordinate`/`separate_coordinate`
+  etc. are **not** affected the same way — they keep their own bare/unnamed `args` (not
+  aliased to their target's named schema), so they degrade to generic `arg1`/`arg2`/... labels
+  (unhelpful but not misleading) rather than plausible-but-wrong names.
+- **Unlocked behavior end/restart resets unlock state + waits 1 tick; crash-on-limit now
+  pauses instead of stopping**: `behavior_format.md`'s "Stopping a behavior" section updated
+  with the confirmed-from-source detail (not yet re-tested in-game).
+- **Mass deprecation/auto-convert rendering**: confirmed working as expected — `set_number`
+  (43 uses in `library/`) renders as generic `arg1=`/`arg2=`/`arg3=` against the new extract
+  (its own `args` stayed bare/unnamed, so no misleading relabeling, just less helpful display)
+  until the user's next in-game re-save migrates it to `Combine`. Test assertions in
+  `test_bsf_semantic_diff.py` updated to match.
+- **Divide rounding modes**: implemented and passing (`test_hex_expansion.py`'s full suite),
+  but only mode 1 (Floor, the pre-existing behavior) is exercised by real fixture data — modes
+  2-4 (Ceil/Truncate/Nearest-half-to-even) remain unconfirmed in-game, flagged inline in
+  `engine_stub.lua`.
+- **Not independently re-audited this session** (source-only confidence, same as before):
+  the `Mine` re-target fix's effect on `blight_magnifier_mining.md`'s rationale (still
+  accurate as *historical* record per that doc's own framing), and the GOTO
+  REG_INFINITE-as-infinite-distance change against Mining Leader's composite `@goto` write.

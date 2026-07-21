@@ -6,16 +6,61 @@ Update this file directly as items are picked up/finished.
 
 ## Next game release (experimental changelog reviewed 2026-07-14)
 
-- [ ] **Work through `upcoming-changes.md`'s "Impact review" section when the release
-      lands.** The experimental changelog (1.0.17919–1.0.18055) is copied there with a full
-      cross-reference against this repo appended: deployed-behavior audits (Observer's
-      `value_type` dispatch first, then the `is_empty`-on-destroyed-refs sweep,
-      `for_signal_match` num-comparison in Check Avoidance, GOTO semantics), toolkit/wire
-      impacts (the new branched-`Return` call pins are the big one; mass
-      deprecation/auto-convert of `set_number`/`combine_coordinate`/etc.; removed ops that
-      break argcache on old corpus data), `instructions_index.md` regeneration, and the
-      standing first step: update the extract, run the full test suite. Note: the
-      portable-radar timing bug is absent from the changelog — expect it still broken.
+**Status note (2026-07-21): 1.0.18055 is still the experimental branch, NOT the release.**
+1.0.17871 is the release and stays the default `desynced-game-data` symlink target /
+what all work targets until Stage Games actually promotes experimental to release. A
+2026-07-21 session did a full dry run against a temporary `desynced-game-data-1.0.18055`
+checkout (kept on disk alongside `-1.0.17871`, sibling directories) to see what the update
+will actually require — real toolkit code changes were needed, not just a data swap, so this
+is NOT a same-day flip when it does land. That work was **reverted** from the tree (it isn't
+safe to keep live: some of it, e.g. `world.lua`'s `GetEntitiesWithRegister` signature and
+`engine_stub.lua`'s `is_empty` semantics, actively breaks 1.0.17871 compatibility rather than
+just adding unused capability) but the findings below remain valid preparation:
+
+- [ ] **When 1.0.18055 (or whatever version actually ships as the release) lands for real**:
+      re-apply the dry-run fixes — `engine_stub.lua` needs `Value:Divide` (new rounding-mode/
+      remainder `div`), `Tool.NewRegisterObject`'s 2-arg form, `NOLOC`/`L` stubs, a bare-
+      coordinate coercion path, and a `.entity`/`.raw_entity` split (`is_empty` no longer
+      matches destroyed references, 1.0.17919); `world.lua`'s `GetEntitiesWithRegister` needs
+      real id/comparison-mode filtering (moved out of `for_signal_match`'s own Lua that
+      release); BSF (`decompile.py`/`compile.py`/`parse_text.py`/`render_mermaid.py`) needs
+      bespoke dynamic-Case-pin support for `switch` (confirmed via a real corpus bug: without
+      it, `library/mining_leader.dcs`'s `switch` case branches are invisible to both lint and
+      Mermaid); `instructions_index.md` needs regenerating (a reusable generator now exists,
+      `scripts/generate_instructions_index.py` — use it instead of hand-rolling one again).
+      Then work through the rest of `upcoming-changes.md`'s "Impact review" — Observer's
+      `value_type` dispatch, the `is_empty`-on-destroyed-refs sweep, `miner_drone`'s
+      `for_signal_match` `c=2` (confirmed safe: old mode 2 "Exact" and new mode 2 "Number
+      Equal" are the same numeric-equality check, carried through the comparison-mode rework
+      unchanged), and the two Get Unit Info sites (confirmed non-issue: both feed from
+      `get_self`, never an invalid input). Note: the portable-radar timing bug is absent from
+      the changelog — expect it still broken.
+- [ ] **Apply a legacy op's real `convert` function during BSF decompile, not just read raw
+      positions under whatever `args` schema it's currently aliased to.** Found 2026-07-21
+      during the 1.0.18055 dry run auditing Observer (this bug is about `decompile.py`'s own
+      logic, not tied to any specific game version — it'll matter again whenever any legacy
+      op's schema shifts this way, including possibly already on 1.0.17871 for older-still
+      corpus data): `value_type` (auto-converts to `data_type`) has its `args` table aliased
+      straight to `data.instructions.data_type.args`, so BSF renders it with the successor's
+      *new* pin names — but old wire data was written under `value_type`'s *old* position
+      layout, and the real in-game `convert` for this op **reorders** positions, not just
+      appends new ones. Net effect: `decompile.py` mislabels old `value_type` nodes' branches
+      (confirmed against `library/observer.dcs`'s real wiring under 1.0.18055 — the label
+      shown doesn't match the position's actual old-schema meaning, though the underlying
+      in-game behavior itself is unaffected, since the game's own compiled ASM is built from
+      the *converted* form). Scope for the fix: (1) survey the ~10 other legacy ops whose
+      `args` alias another op's table (`equip_component_remotely`/`unequip_component_remotely`
+      /`for_unlocked`'s and `for_ingredients`'s parents/`compare_unit`, at a glance) for which
+      ones reorder vs. only append — only reordering ones are actually broken today; (2)
+      decide whether decompile should call the op's real Lua `convert` function directly
+      (reuse-real-Lua doctrine, and it'd also silently normalize the rendered op id, e.g.
+      `value_type`→`data_type` — need to decide if that's desired or surprising given this
+      project's "BSF text shows what's actually there" norm elsewhere); (3) work out how this
+      interacts with `semantic_diff` (a decompile-time convert would make old-vs-resaved diffs
+      even quieter, which is probably right, but should be deliberate not incidental).
+      Workaround until fixed: re-save the affected behavior in-game first, which applies the
+      real conversion before export — a fresh export decompiles correctly today. Full repro
+      detail in project memory (`reference_legacy_convert_reorder_decompile_gap`).
 
 ## Mining Leader / Follower review
 

@@ -694,6 +694,24 @@ Practical rule of thumb: **any `unlock`ed behavior needs a reachable
 both loop back to the start without yielding, so neither one alone
 prevents the 1000-instruction crash.
 
+**1.0.18055 update, confirmed from source (not yet re-tested in-game):** hitting the
+step limit no longer stops the behavior — the changelog's "Instead of stopping a
+behavior on a crash (i.e. exceeding unlock step limit or call depth), keep it paused
+so the failure can be inspected in the behavior editor" (1.0.17919) is now literally
+what `unlock`'s own `explain` text says ("the behavior will abort or continue the next
+tick", not "crash"), and `unlock` itself gained two configured hidden-literal options
+(a custom step-limit `n`, default still 1000, and a `c` mode selecting "Pause on
+limit" vs "Continue next tick") — a `Rework behavior unlocking` addition (1.0.17919/
+1.0.17933) that also **resets unlock state and waits 1 tick whenever an unlocked
+behavior ends and restarts**, i.e. every POP-to-empty auto-restart now costs a real
+tick it didn't before. Our deployed behaviors all have explicit `wait` hubs, so this
+extra tick is expected to be benign, but hasn't been confirmed against a live run.
+`n`/`c` are packed into one signed int only at `make_asm` (ASM-compile) time — same
+save-format shape as `memory_sift`'s `c`/`u` pair — and aren't yet captured by BSF's
+`HIDDEN_FIELD_TABLE` (a documented gap, `bsf/decompile.py`), so a hand-edited
+non-default `unlock` step limit/mode won't round-trip through BSF text today; no
+checked-in fixture currently sets either.
+
 ## Block-type instructions: what `next: false` means *inside* one
 
 The "falls back to Program Start" story above is only true at the outermost
