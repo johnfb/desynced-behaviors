@@ -832,20 +832,21 @@ per-node identity token, not computed dispatch.
 
 ## Dev tooling
 
-- [ ] **Set up `ruff` (format + lint) and `mypy` (type checking) for `desynced_toolkit`.**
-      Neither is currently installed or configured (only `pytest` is declared as a dev
-      dependency in `pyproject.toml`). The stray `.ruff_cache/` directory already in the repo
-      isn't from a separately-installed `ruff` — `uv format` (confirmed via `uv format --help`:
-      "Additional arguments to pass to Ruff") wraps Ruff directly and has been invoked a couple
-      of times already, without ever being added as a project dependency or given a checked-in
-      config. `ruff` covers formatting + linting (replacing black/flake8/most of pylint's
-      ruleset in one fast tool); `mypy` is the separate, complementary type-checking pass ruff
-      doesn't do at all. Add both as explicit dev dependencies in `pyproject.toml`, add a
-      checked-in `ruff` config, and decide on `mypy` strictness. (A one-off `uvx ruff check`
-      during the 2026-07-14 repo review found a handful of findings — unused imports,
-      placeholder-less f-strings in `scripts/analyze_corpus.py`, and two annotation-only
-      `F821 undefined name 'lupa'` warnings fixable with a `TYPE_CHECKING` import — cheap to
-      burn down when this lands.)
+- [x] **Set up `ruff` (format + lint) and `mypy` (type checking) for `blz.desynced_toolkit`**
+      (done 2026-07-22, in `../blz-desynced-toolkit/`). Both added as dev dependencies with
+      checked-in config (`pyproject.toml`'s `[tool.ruff]`/`[tool.mypy]`); `ruff check`/`ruff
+      format`/`mypy` all clean, 633 tests still pass. `mypy` needed `explicit_package_bases`
+      + `mypy_path = "src"` to resolve the `blz` namespace package (otherwise a false "Source
+      file found twice under different module names" error) and `ignore_missing_imports` for
+      `lupa.*` (compiled extension, no stubs). Real findings fixed: an `F821 undefined name
+      'lupa'` (missing import, not `TYPE_CHECKING` — this project's convention is an
+      unconditional `import lupa.lua54 as lupa`, matching every other module), a handful of
+      loop-variable-reuse-across-different-typed-loops mypy false positives (renamed vars), and
+      one genuine `int|float` -> `int` narrowing bug in `values.py`'s `from_lua`.
+      **Not done:** `scripts/analyze_corpus.py` and the rest of this (me-specific) repo's own
+      `scripts/`/`tests/` — this pass only covered the toolkit repo; the placeholder-less
+      f-string finding originally noted for `analyze_corpus.py` is still live here if this repo
+      ever gets the same treatment.
 
 ## Tooling / cosmetic, low priority
 
