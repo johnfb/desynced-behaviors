@@ -1,5 +1,5 @@
 behavior Squad Gunner(Captain, Weapon, Home):
-  desc: "v2 squad member (combat_squad_spec.md). Set Captain to your squad's Captain unit and Weapon to this unit's weapon component type (e.g. c_turret variant) -- commands are written into that component's register 1. Broadcasts membership by pointing @signal at the Captain. Coord command = move there (weapon cleared: auto-acquire self-defense, no pursuit); Unit command = focus-fire it (native pursue+attack); empty = hold; Captain dead = clear and go Home."
+  desc: "v2 squad member (combat_squad_spec.md). Set Captain to your squad's Captain unit and Weapon to this unit's weapon component type (e.g. c_turret variant) -- commands are written into that component's register 1. Broadcasts membership by pointing @signal at the Captain. Coord command = move there (weapon cleared: auto-acquire self-defense, no pursuit); Unit command = focus-fire an enemy (native pursue+attack), or hold formation around a non-enemy rally point via Formation Hold (each member keeps its own random slot instead of every member converging on the same tile); empty = hold formation around the Captain the same way; Captain dead = clear and go Home."
 
 unlock()
 get_item_info(Item=Weapon, Result=$Range, c=2)
@@ -11,7 +11,9 @@ set_reg(Value=Captain, Target=@signal)
 label_arrow_right:
 label(Label=v_arrow_right)
 wait(Time=1)
-sequence()  >NEXT (First) >read_signal (Second) >POP (Third) >POP (Fourth) >domove (Last)
+set_reg(Target=$RallyAnchor)
+  cmt="""Pre-clear before the block below even opens: only a RALLY branch sets this, and only for this tick -- domove: (the sequence's real Last pin) reads it to decide whether to call Formation Hold instead of the normal domove""";
+sequence()  >NEXT (First) >read_signal (Second) >POP (Third) >POP (Fourth) >is_empty_2 (Last)
 is_empty(Value=Captain)  >NEXT (Empty) >get_closest_entity (Has Value)
   cmt="""Unset, or Captain died (dangling ref reads empty on current build -- next release inverts this, see spec)""";
 set_comp_reg(To=$W)
@@ -75,23 +77,32 @@ read_signal(Unit=Captain, Result=$Cmd)
 is_empty(Value=$Cmd)  >NEXT (Empty) >value_type (Has Value)
 set_comp_reg(To=$W)
   cmt="""Weapon target overrides GOTO (engine fact, user-confirmed) -- must clear before any move""";
-set_number(Value=Captain, Number=5, Result=$Dest)  >POP (next)
-  cmt="""Unoccupied: hang out around the Captain at 5 (inside the gather radius 8, outside its pathing)""";
+set_reg(Value=Captain, Target=$RallyAnchor)  >POP (next)
+  cmt="""Unoccupied: hold formation around the Captain (Formation Hold, below) instead of everyone converging on one point""";
 value_type:
 value_type(Data=$Cmd)  >NEXT (Item) >match (Unit) >NEXT (Component) >NEXT (Tech) >NEXT (Value) >NEXT (Coord) >NEXT (No Match)
   cmt="""Unit = focus target; Coord = rally point; other types fall to rally harmlessly""";
 set_reg(Value=$Cmd, Target=$Dest)
-set_comp_reg_2:
 set_comp_reg(To=$W)  >POP (next)
 match:
-match(Unit=$Cmd, Filter=v_enemy_faction)  >set_number (Failed) >NEXT (next)
+match(Unit=$Cmd, Filter=v_enemy_faction)  >set_comp_reg_2 (Failed) >NEXT (next)
   cmt="""Enemy: kill it. Anything else (the Captain broadcasting itself) = mobile rally point""";
 set_comp_reg(Value=$Cmd, To=$W)
   cmt="""Focus fire: native pursue+attack via the weapon's own register""";
 set_number(Value=$Cmd, Number=$Range, Result=$Dest)  >POP (next)
-set_number:
-set_number(Value=$Cmd, Number=5, Result=$Dest)  >set_comp_reg_2 (next)
-  cmt="""Rally on a unit at distance 5, never 0 -- crowding at the Captain's feet blocks its pathing""";
-domove:
+set_comp_reg_2:
+set_comp_reg(To=$W)
+  cmt="""Weapon target overrides GOTO -- clear before any move""";
+set_reg(Value=$Cmd, Target=$RallyAnchor)  >POP (next)
+  cmt="""Rally on a unit: hold formation around it (Formation Hold, below) instead of every member converging on the same tile""";
+is_empty_2:
+is_empty(Value=$RallyAnchor)  >NEXT (Empty) >call (Has Value)
+  cmt="""By the time control reaches here the sequence's block is already closed (natural exhaustion or an explicit last() above already popped it) -- safe to branch and jump freely from this point on""";
 domove(Target=$Dest, c=2)  >NEXT (Path Blocked) >NEXT (next)
+jump:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+call:
+call(Anchor=$RallyAnchor, Offset=$RallyOffset, Radius=5, Tolerance=2, sub=1)  >jump (next)
+  cmt="""Each member independently rolls (and keeps) its own slot around the anchor instead of every member's Dest converging on the same tile -- sidesteps the enumeration-order-stability question the earlier ring-spacing design was blocked on""";
+
+sub Formation Hold from "formation-hold.bsf"

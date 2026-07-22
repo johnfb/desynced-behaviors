@@ -210,6 +210,33 @@ present state, this file for how something got decided.
       seen on the other frames running the same behavior. Follow-up (hypothesis: panic-
       disengage range needs to scale with frame speed) tracked as its own open item above,
       and folded into `combat_squad_spec.md` §5/§7.
+- [x] **Gunner spread on rally (anti-bunch).** Resolved 2026-07-22 via `library/formation-hold.bsf`,
+      a new sub called from `squad-gunner.bsf`'s two entity-anchored RALLY paths. Sidesteps the
+      ring-vs-emergent design fork entirely (no need to resolve whether member enumeration order
+      is stable): each member rolls a random offset from the anchor once (persisted via a
+      pass-by-reference `Offset` parameter) and holds that slot, re-homing only when drifted past
+      a tolerance. See `combat_squad_spec.md` §7 for the shipped shape and its accepted limits (no
+      collision avoidance, RALLY-paths-only scope). Two real implementation bugs surfaced and were
+      fixed during the in-game import/export/review cycle, both about `sequence()`'s block-stack
+      semantics — confirmed against the real engine source (`data/instructions.lua`,
+      `data/components.lua`), not guessed:
+      1. `sequence()` genuinely calls `BeginBlock`/pushes a frame onto `state.blocks`, the same
+         family as a loop instruction. The only sanctioned way to jump out of it before natural
+         exhaustion is `last()` (Break), which does `table.remove(blocks)` *before* jumping to the
+         Last pin. A bare `jump()` added to route the RALLY branches around the shared `domove`
+         tail skipped that removal — leaking one block frame per RALLY tick and hitting "Behavior
+         exceeded loop recursion limit" after the real 40-deep cap. Fixed by letting both RALLY
+         branches fall through normally (`POP`) so the sequence's own machinery closes the block,
+         and branching on a pre-cleared `$RallyAnchor` register at the sequence's actual Last pin
+         instead of adding a side-door exit.
+      2. A second, unrelated mis-wiring introduced while manually simplifying `formation-hold.bsf`
+         in the in-game editor (removing its now-redundant internal `sequence()`/`wait()` wrapper,
+         found unnecessary once the caller's own per-tick `wait(1)` already provided the only
+         throttle needed) — user-diagnosed and fixed directly; not a block-stack issue.
+      `c_behavior:on_update`'s stepping loop (`components.lua`) confirms a dead/nil
+      `state.counter` resolves via a synchronous `while not inst do ... end` retry, so a
+      `sequence()` with only 2 of 4 stages wired is not itself defective — the leak was strictly
+      from bypassing the block's own closing mechanism, not from stage count.
 
 ## `desynced_toolkit` / BSF infrastructure
 

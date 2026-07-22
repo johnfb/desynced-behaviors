@@ -187,20 +187,6 @@ detection (now fixed).
 
 ## Combat Squad (`combat_squad_spec.md`)
 
-- [ ] **Gunner spread on rally (anti-bunch)** (user, 2026-07-18): members currently `@goto` the
-      rally entity directly, so all ground gunners aim at the Captain's single tile and jam under
-      ground occupancy — no pushing; a stopped unit only yields to a mover one at a time — making a
-      large squad's assembly gate fill slowly (arrivals pile on the approach side, shuffle inward as
-      stopped units step aside; live-observed). Fix: give each member a distinct fanned target tile
-      (ring/formation offset, radius from roster count, which the Captain can pack into the rally
-      entity's `num` for free). Design fork captured in `combat_squad_spec.md` §7: self-index even
-      spacing *if* member enumeration order is stable/consistent across members, else emergent
-      (keepvars-latched random ring with collision re-roll, or boids separation). One-value
-      broadcast means the Captain can't assign slots — must be member-side. Testing any fix
-      automatically needs the mock to model ground occupancy + the stopped-unit-yields mechanic
-      (`mock_world_spec.md` open items; exact yield rule still unknown). Ground squads only —
-      flyers stack, so an all-flyer squad converges on one tile.
-
 - [ ] **Early-tech squad variant** (user, 2026-07-15): make the squad behavior set work with
       Cubs/Dashbots/Haulers carrying Small Advanced Turrets or Pulse Lasers (~half the beam
       cannon's 15 range) — parameterize the range-derived constants (gunner engage/panic
@@ -222,8 +208,11 @@ detection (now fixed).
       in `combat_squad_spec.md` §5/§7, not yet isolated: (1) (user hypothesis) squad congestion
       — the cluster needed to get a short-range turret in range can physically block a
       panicking member's retreat path under ground occupancy (no pushing, one-at-a-time
-      yielding), the same jamming mechanic already flagged below for the rally gate, but
-      hitting the retreat move instead of the assembly move; (2) (user hypothesis) light frames
+      yielding). Note this is the same *class* of jamming as the now-resolved rally-gate
+      anti-bunch item (history.md), but a distinct instance of it: Formation Hold's spread fix
+      applies to the RALLY approach, not to ENGAGE (weapon-pursuit-driven positioning, not
+      `@goto`), so it doesn't address this retreat-path case directly; (2) (user hypothesis)
+      light frames
       typically carry shorter-range turrets, so they engage closer to begin with, *and* carry
       less HP/shield — a single heavy hit can exceed the frame's entire health bar before the
       retreat latch sets, an alpha-strike kill the panic threshold was never designed to catch

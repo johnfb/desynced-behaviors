@@ -290,35 +290,27 @@ registers and return home (member-side fallback, §3's HOLD row).
   squad-follower sketch; `Range` is exposed as a parameter, usually 3 (virus cure range; keeps
   targets inside the range-5 AOE heal — §5/§6). Only the idle-wander tuning remains eyeballed.
 - Staging-point geometry (threat-side offset math) — work out in BSF, integer-only.
-- **Gunner spread on rally (anti-bunch).** The current member response to a rally-on-unit command
-  is a bare `@goto` of the rally entity (§3), so every ground gunner targets the single tile the
-  Captain stands on. Under ground occupancy (≤1 ground unit/tile) and no pushing — a stopped unit
-  only *yields* to a mover, one at a time (exact mechanic unknown; see the tile/occupancy memory) —
-  a large squad jams: arrivals pile up on the approach side and the gather radius fills slowly as
-  stopped units shuffle aside for later arrivals, so the assembly gate takes a while to see enough
-  members in range (live-observed). Fix direction: give each member a **distinct** target tile
-  fanned around the rally point (a ring/formation offset, radius scaled by roster count) so they
-  path to their own spot in parallel instead of contending for one tile. Constraint that shapes it:
-  the command channel is a single one-value broadcast, so the Captain **cannot** assign per-member
-  slots through it — slot choice must be member-side. The design fork is **whether squad-member
-  enumeration order is stable and identical across members**: if yes, a self-index → even
-  `θ = 2π·rank/count` spacing is deterministic and collision-free; if not, go emergent — a
-  `keepvars`-latched random ring angle with a re-roll when a friendly already holds the target
-  tile, or boids-style separation biasing `@goto` away from the densest nearby-friendly direction.
-  One free efficiency: the rally broadcast is already an entity and entity refs carry a `num`, so
-  pack the live roster count (already computed for the gate) into it and members size the ring with
-  no scan of their own. Likely improves ENGAGE too (members push from a broad front, not a column).
-  This supersedes the eyeballed "Rally offset ~5" constant (§6) with a count-derived radius.
-  **Blocked on** resolving the enumeration-stability question (in-game or in the mock), and — to
-  test any fix automatically — the mock modeling ground occupancy + the stopped-unit-yields
-  mechanic (see `mock_world_spec.md` open items; the exact yield rule is itself still unknown).
-  Applies to **ground** squads; an all-flyer squad can genuinely converge on one tile (flyers stack).
-  **Scope now extends past assembly** (user hypothesis, 2026-07-22, tied to the Scout/Dashbot
-  loss pattern in §5): the same jam can block a member's *retreat* move, not just its approach
-  to the rally/gun-line cluster — a panicking member's `@goto` away from danger has to path out
-  through the same crowded tiles it just fought from. A fanned, spread-out gun line (this
-  item's fix) reduces how tightly members are packed in the first place, which should reduce
-  retreat-blocking incidentally, but hasn't been verified against that specific failure mode.
+- ~~**Gunner spread on rally (anti-bunch).**~~ Resolved 2026-07-22 — see `library/formation-hold.bsf`
+  and its call from `squad-gunner.bsf`'s two entity-anchored RALLY paths (empty command = hold
+  around the Captain; non-enemy `Unit` command = rally on that unit). Instead of the ring/
+  self-index-vs-emergent fork this item originally posed, the shipped fix sidesteps the whole
+  enumeration-order-stability question: each member independently rolls a random offset from the
+  anchor the first time its own `Offset` parameter is empty, then keeps it (pass-by-reference —
+  the sub writes into the caller's own register) and just re-homes on `Anchor + Offset` every
+  call, moving only when drifted past `Tolerance`. No coordination, ranking, or Captain-side
+  slot assignment needed. Radius=5/Tolerance=2 are first-pass constants (§6 territory), chosen so
+  every roll stays within the Captain's own gather-radius-8 check. **Not** a collision-free
+  assignment like the ring design would have been — `random_coordinate` samples independently
+  per axis with no minimum-distance floor, so two members can still roll adjacent or (rarely)
+  coincident slots; accepted as a probabilistic improvement over "everyone converges on the same
+  tile," not a guarantee. Scope is the RALLY paths only — the Coord-anchored fixed-point rally
+  (RETREAT → Home) still uses a bare point (Formation Hold needs a live entity Anchor), and
+  ENGAGE positioning is weapon-pursuit-driven (§1.1), not `@goto`, so Formation Hold doesn't
+  apply there directly. Applies to **ground** squads; an all-flyer squad can converge on one tile
+  regardless (flyers stack). Whether this incidentally eases the retreat-path congestion
+  hypothesis from §5 (a less-dense rally cluster should leave more room for a panicking member to
+  path out) is plausible but unverified — that failure mode occurs during ENGAGE, which this
+  change doesn't touch.
 - Whether RALLY should ever hold fire outright (`v_powereddown` pass-through) instead of
   allowing auto-acquire self-defense — leaning no; self-defense without pursuit is safe.
 - Overkill management (whole squad dumping into an almost-dead target) — v1's known

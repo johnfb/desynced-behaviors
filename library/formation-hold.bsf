@@ -2,15 +2,12 @@ behavior Formation Hold(Anchor, Offset*, Radius, Tolerance):
 
 unlock()
 get_location(Unit=Anchor, Coord=$AnchorPos)
-sequence()  >NEXT (First) >add (Second) >POP (Third) >POP (Fourth) >wait (Last)
-is_empty(Value=Offset)  >NEXT (Empty) >POP (Has Value)
+is_empty(Value=Offset)  >NEXT (Empty) >add (Has Value)
 random_coordinate(Coordinate=Anchor, Range=Radius, Result=Offset)
 sub(From=Offset, Num=$AnchorPos, Result=Offset)
-set_number(Value=Offset, Number=Tolerance, Result=Offset)  >POP (next)
+set_number(Value=Offset, Number=Tolerance, Result=Offset)
 add:
 add(To=$AnchorPos, Num=Offset, Result=$Spot)
 get_distance(Target=$Spot, Distance=$DST)
 check_number(Value=$DST, Compare=Tolerance)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
 domove(Target=$Spot, c=2)  >POP (Path Blocked) >POP (next)
-wait:
-wait(Time=1)  >POP (next)
