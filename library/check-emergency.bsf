@@ -1,0 +1,22 @@
+behavior Check Emergency(Result*, Emergency Out, Safe Out, Radar):
+  desc: "Copy Emergency out to result if we can see any damaged units nearby, or we can see any enemy units nearby, or the current radar result is an enemy. Otherwise, copy Safe Out to result."
+
+check_health()  >for_entities_in_range (Full) >NEXT (next)
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)
+for_entities_in_range:
+for_entities_in_range(Range=-2147483648, Filter=v_own_faction, Filter2=v_damaged, Unit=$A)  >compare_item (Done) >NEXT (next)
+last()
+compare_item:
+compare_item(Value 1=$A)  >set_reg_3 (If Different) >NEXT (If Equal)
+get_closest_entity(Filter=v_enemy_faction, Output=$A)
+compare_item(Value 1=$A)  >set_reg_2 (If Different) >NEXT (If Equal)
+set_number(Value=Radar, Number=4, Result=$B)
+get_comp_reg(From=$B, Value=$A)
+match(Unit=$A, Filter=v_enemy_faction)  >set_reg (Failed) >NEXT (next)
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)
+set_reg:
+set_reg(Value=Safe Out, Target=Result)  >POP (next)
+set_reg_2:
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)
+set_reg_3:
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)

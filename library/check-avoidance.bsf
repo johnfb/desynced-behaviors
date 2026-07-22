@@ -1,0 +1,7 @@
+behavior Check Avoidance(Signal, Spot, Result*, Avoid Result):
+
+for_signal_match(Signal=Signal, Unit=$Unit, Signal2=$Signal)  >POP (Done) >NEXT (next)
+get_distance(Target=$Unit, Distance=$DST, Source=Spot)
+check_number(Value=$Signal, Compare=$DST)  >NEXT (If Larger) >POP (If Smaller) >NEXT (If Equal)
+set_reg(Value=Avoid Result, Target=Result)
+last()

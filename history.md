@@ -516,6 +516,56 @@ to act on it — this was a straight storage-format conversion.
       though the sidecar one is readable); a `.gitattributes` `textconv` driver alone (display-only,
       doesn't produce an on-disk reviewable file, which is what was asked for).
 
+### Local behavior-library storage: by-reference `library/` store (user, 2026-07-22)
+
+Immediately superseded the previous entry's flat-inline BSF conversion: the user's actual intent
+was the fuller idea already scoped under Local behavior-library storage in `todo.md` — a
+`blz.desynced_toolkit.bsf` change providing real import/export CLI tooling, not just a one-time
+storage-format swap. Delivered in the toolkit repo first (`bsf/library.py`, a new `sub NAME from
+"path.bsf"` grammar in `parse_text.py`/`render_text.py`, `desynced-bsf import`/`export`
+subcommands — see that repo's own history for the design), then applied here by reconstructing
+`library/` from the original `.dcs` exports (recovered from git history, since the flat-BSF
+conversion had already deleted them) via the new `import` command instead of a straight decompile.
+
+- [x] **Reconstruct `library/` as a by-reference store.** Every original `.dcs` re-imported in
+      ascending file-mtime order (oldest export first), so a later, fresher re-export of a shared
+      sub naturally wins any conflict — the same resolution a human would reach by eye. Found a
+      real, previously-invisible bug in the *checked-in data itself* this way: `observer.dcs`
+      (exported 2026-07-14 03:30) embeds an `Async Radar Set`/`Async Radar Get` copy that is
+      genuinely stale relative to `mining_leader.dcs` (2026-07-18) and the standalone
+      `async-radar-get.dcs`/`async-radar-set.dcs` exports (2026-07-14 04:13, ~43 minutes after
+      Observer's) — both agree on `c_portable_radar[num=5]` and an improved `desc`, while only
+      Observer's checked-in copy still has `num=2` and the older, shorter `desc`. Reimporting in
+      chronological order picked the correct (num=5, current) content automatically, and
+      `import`'s stale-caller warning flagged `observer.bsf`'s reference so this was visible
+      rather than silently overwritten in either direction. **Open question this raises for
+      `todo.md`'s Observer redesign section:** its `Async Radar Set` cached-radar-period item
+      frames `num=5` as a *future* workaround "after the next game update, if [the underlying bug
+      is] not [fixed]" — but the num=5 content already existed as of 2026-07-14 04:13 and was
+      still current as of 2026-07-18, which reads as the workaround already having been applied
+      live, ahead of that todo item's own framing. Not resolved here (needs the user to confirm
+      what's actually live/intended) — flagged rather than silently rewritten.
+- [x] **Found and fixed a real bug in `blz.desynced_toolkit.bsf.library.import_dcs` while doing
+      this reconstruction**: its stale-caller scan skipped the current import's own top-level
+      output path, on the assumption a top-level import target is never also referenced as
+      someone else's sub. False for exactly the `Async Radar Set`/`Get` shape — each is
+      independently useful standalone (hence its own top-level import) *and* a shared sub of
+      Observer/Mining Leader. Fixed in the toolkit repo (removed the skip; a file excluding itself
+      via the existing `exclude` set was already sufficient), with a regression test
+      (`test_reimporting_a_standalone_behavior_flags_callers_that_reference_it`) built directly
+      from this real scenario.
+- [x] **Filenames**: every top-level import kept its pre-existing filename stem via `--name`
+      (`mining_leader`, `hauler`, etc.) rather than the tool's own default (slugging the
+      behavior's *declared* name, which would have produced churn-prone, version-string-bearing
+      names like `mining-leader-v4-0.bsf` every time the in-game "V4.0" label changes). Newly
+      split-out sub files (`async-transit.bsf`, `check-emergency.bsf`, `check-avoidance.bsf`) kept
+      the tool's default naming since there was no prior convention to preserve.
+- [x] **`tests/test_library_behaviors.py` updated** for the reference grammar: both
+      `parse_behavior` calls now pass `base_dir=LIBRARY_DIR` so `observer.bsf`/`mining_leader.bsf`'s
+      `from` references resolve; the lint test still runs (unchanged in spirit) over every
+      `*.bsf` file, referenced-elsewhere or not, since each remains an independently valid
+      `behavior NAME(...):` document.
+
 ## Repository split & `blz` namespacing
 
 - [x] **Split this repo into a shareable toolkit and a me-specific repo, and rename the toolkit

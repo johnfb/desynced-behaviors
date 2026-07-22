@@ -80,36 +80,24 @@ just adding unused capability) but the findings below remain valid preparation:
 
 ## Local behavior-library storage (`desynced_toolkit`)
 
-**`library/` now stores BSF text, not raw `.dcs`** (done 2026-07-22 — see `history.md`'s
-"Library storage converted to BSF text"). The remaining open idea below is a further step:
-mirroring the game's own *by-reference* subroutine model, not just this repo's storage format.
+**Done 2026-07-22** — `library/` is now a `blz.desynced_toolkit.bsf.library` by-reference store
+(`desynced-bsf import`/`export`), not a flat pile of self-contained BSF files: a sub-behavior
+shared by more than one caller lives in its own file, referenced by name instead of duplicated,
+mirroring the game's own by-reference saved-library semantics. See `history.md`'s "Local
+behavior-library storage: by-reference `library/` store" for the design, the real staleness bug
+it caught live (`Async Radar Set`'s cached radar period silently reverted in `observer.bsf`'s old
+checked-in copy), and a real bug the reconstruction found in the toolkit's own stale-caller
+detection (now fixed).
 
-- [ ] **(Idea, not started, 2026-07-12) Build a local mirror of the in-game behavior library
-      that resolves `call`'s `sub` field by name/id reference instead of always embedding the
-      subroutine inline.** Motivating fact: `call`'s `sub` field referencing a *saved-library*
-      behavior is an opaque id the game assigns when you save it there, which isn't recoverable
-      from a plain "Copy Program" clipboard export (confirmed while trying to hand-author a
-      `call` into Observer's Task 1 — the exported table has no such id, only
-      `name`/`desc`/`parameters`/`pnames`/instructions) — and the in-game editor's own
-      copy/paste always embeds subroutines rather than referencing them by id, so **the id form
-      is effectively only used in the game's own internal save format**, not something this
-      project's tooling can currently produce a working reference to at all. In-game, library
-      subroutines are genuinely by-reference — editing one updates *and restarts* every behavior
-      calling it, with no per-caller action; embedding happens only at clipboard-export time. So
-      every checked-in *caller* export silently goes stale the moment a shared sub is edited
-      in-game, even though the caller itself changed nothing. Seen live: one in-game edit to
-      `Async Radar Get` propagated into three separate `library/` exports (and Observer's export
-      picked up the earlier `memory_insert`→`memory_set` fix its checked-in copy had been
-      missing). Proposed direction: two `desynced_toolkit.bsf` changes — (1) a decompiler option
-      to write an embedded (`dependencies`-array) sub-behavior out as its own separate BSF file
-      with a reference left in the parent's text instead of inlining it, (2) a matching compiler
-      change to resolve such file references back into embedded `dependencies` entries (or,
-      longer-term, real library-id references once/if this project's local store can track real
-      assigned ids) when producing the final `.dcs`. Not designed in detail yet.
-      - **Layout caveat, still open:** recompiling BSF→`.dcs` currently drops node `nx`/`ny`
-        positions (the "BSF envelope/sidecar layer" item below), so pushing a `library/*.bsf`
-        file back into the game via `compile` resets that behavior's hand-arranged editor layout
-        even when the logic is unchanged. Accepted tradeoff for now (user decision, 2026-07-22).
+- **Layout caveat, still open:** recompiling BSF→`.dcs` currently drops node `nx`/`ny` positions
+  (the "BSF envelope/sidecar layer" item below), so pushing a `library/*.bsf` file back into the
+  game via `export` resets that behavior's hand-arranged editor layout even when the logic is
+  unchanged. Accepted tradeoff (user decision, 2026-07-22: the user's own workflow is almost
+  exclusively the editor's auto-layout, so this doesn't bite in practice).
+- **Real saved-library ids, still out of scope.** The store's join key is the sub's declared
+  `name`, not the game's own opaque saved-library id (still unrecoverable from a plain clipboard
+  export — see `history.md` for why). Fine as long as names stay unique and stable; revisit only
+  if that assumption ever breaks in practice.
 
 ## Magnifier / drone-swarm design
 

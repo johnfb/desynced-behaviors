@@ -2,9 +2,13 @@
 directory layout (library/*.bsf) and so live here rather than in blz-desynced-toolkit, unlike
 the toolkit's own fixture-based tests (tests/data/*.dcs) which moved there with the package.
 
-library/ stores behaviors as BSF text, not raw .dcs, so re-exports produce reviewable git diffs
-instead of an opaque single-line blob (see todo.md's "Local behavior-library storage"). Blueprints
-(wire type 'B', e.g. magnifier_lattice) aren't BSF-decompilable and stay as .dcs."""
+library/ is a bsf/library.py by-reference store (`desynced-bsf import`/`export`), not a flat pile
+of self-contained files: a shared sub-behavior (Async Radar Set/Get, called from both Observer and
+Mining Leader) lives in its own file, referenced by name from each caller instead of duplicated --
+see todo.md's "Local behavior-library storage" for why. Every `*.bsf` file here, referenced or not,
+is still an independently valid `behavior NAME(...):` document; parsing one that contains a `from`
+reference needs `base_dir=LIBRARY_DIR` to resolve it. Blueprints (wire type 'B', e.g.
+magnifier_lattice) aren't BSF-decompilable and stay as .dcs."""
 
 import math
 from pathlib import Path
@@ -49,7 +53,7 @@ def argcache(engine):
 def test_lint_clean_on_all_library_behaviors(engine, argcache):
     checked = 0
     for f in sorted(LIBRARY_DIR.glob("*.bsf")):
-        b = parse_behavior(f.read_text(), argcache)
+        b = parse_behavior(f.read_text(), argcache, base_dir=LIBRARY_DIR)
         assert lint_behavior(b, argcache) == [], f.name
         checked += 1
     assert checked >= 1
@@ -63,7 +67,7 @@ def test_hexat_unit_origin_runs_via_mock_world(engine):
     and Origin bound to a live unit, HexAt computes the same coordinate as passing that unit's own
     coord directly (the closed-form reference, origin = the unit's tile)."""
     argcache = ArgCache(engine)
-    b = parse_behavior((LIBRARY_DIR / "hexat.bsf").read_text(), argcache)
+    b = parse_behavior((LIBRARY_DIR / "hexat.bsf").read_text(), argcache, base_dir=LIBRARY_DIR)
     prog = compile_behavior(engine, b)
 
     w = MockWorld(engine)

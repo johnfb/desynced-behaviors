@@ -1,0 +1,31 @@
+behavior Async Transit(Target*, Progress count*, Finish Value, Continue Value, Timeout Value, Result*):
+
+set_number(Value=Target, Result=$A)
+set_reg(Value=$A, Target=@goto)
+  cmt="""goto = target""";
+get_distance(Target=Target, Distance=$A)
+  cmt="""A = distance to target""";
+check_number(Value=$A, Compare=1)  >check_number (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Are we at target?""";
+set_reg(Target=@goto)
+set_reg(Value=Finish Value, Target=Result)  >POP (next)
+  cmt="""return finish""";
+check_number:
+check_number(Value=Target, Compare=$A)  >set_reg_2 (If Larger) >set_reg_2 (If Smaller) >NEXT (If Equal)
+  cmt="""Progress made?""";
+add:
+add(To=Progress count, Num=1, Result=Progress count)
+  cmt="""Increment count""";
+set_number(Value=Target, Number=$A, Result=Target)
+  cmt="""Set numerical value of target to distance to target""";
+check_number(Value=Progress count, Compare=100)  >NEXT (If Larger) >set_reg (If Smaller) >NEXT (If Equal)
+  cmt="""timeout reached? (approx 20 seconds)""";
+set_reg(Target=@goto)
+set_reg(Value=Timeout Value, Target=Result)  >POP (next)
+  cmt="""return timeout""";
+set_reg:
+set_reg(Value=Continue Value, Target=Result)  >POP (next)
+  cmt="""return continue""";
+set_reg_2:
+set_reg(Target=Progress count)  >add (next)
+  cmt="""Progress has been made, reset count""";
