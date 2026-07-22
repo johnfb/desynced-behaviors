@@ -264,10 +264,23 @@ detection (now fixed).
       blueprint/component wrapping beyond a bare behavior plus its `dependencies`. The pipeline
       round-trips the instruction graph itself; position/comment-adjacent fields outside that
       (`cmt` already works via the hidden-field mechanism; `nx`/`ny` don't yet) aren't modeled.
+      **Scope narrowed 2026-07-22**: this item is now specifically about BSF *authoring/round-trip*
+      of a blueprint's layout (`nx`/`ny`, full component wrapping) — *loading* a blueprint into the
+      mock world for testing is a separate, now-done concern, see the mock-world item below.
 - [ ] **Build a mock world for behavior testing (`mock_world_spec.md`)** — Phases 0-3 (data-
       registry load, engine-native `world.lua` primitives, interpreter op dispatch, movement/
       multi-entity stepping) are done — see `history.md`. Remaining: Phase 4 (combat/damage),
-      explicitly deferred so far.
+      explicitly deferred so far. **`MockWorld.load_blueprint` landed 2026-07-22**: spawns a whole
+      blueprint (wire type `'B'`, single building or a `multi` lattice) into the mock world —
+      every building's frame/offset/components/initial registers, and any component whose
+      `base_id == "c_behavior"` (`c_behavior`/`c_integrated_behavior`/`c_autobase`) gets its
+      program installed from the blueprint's own `dependencies` array (confirmed against
+      `data/library.lua`'s real unpack logic, the same convention `call`'s `sub` uses — not
+      guessed). Validated against the real deployed Magnifier lattice blueprint
+      (`tests/test_mock_world_blueprint.py` in the toolkit repo). Not yet exercised on
+      `library/magnifier_lattice.dcs`'s actual broadcast logic (MagnifierSignal-specific behavior
+      assertions) or on a non-blueprint-Signaling use case — just load + install + tick-without-
+      erroring so far.
 - [ ] **Add automated test coverage for the corpus/analysis scripts** (`scripts/
       collect_clipboard_corpus.py`, `collect_steam_forum.py`, `analyze_corpus.py`,
       `render_examples.py`). Currently exercised only by direct manual runs and one real live
