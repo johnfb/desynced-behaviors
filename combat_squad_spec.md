@@ -107,7 +107,7 @@ itself**.
 
 | Captain's `@signal` | Meaning | Member response |
 |---|---|---|
-| **enemy** entity | **ENGAGE** | write it into own weapon component register 1 (`set_comp_reg`) → native focus fire + group pursuit (§1.1) |
+| **enemy** entity | **ENGAGE** | write it into own weapon component register 1 (`set_comp_reg`) for native focus fire (§1.1), **and** explicitly `domove` to the enemy at `weapon_range − 1` — this second, explicit move is deliberate: it overrides the weapon's own native pursuit-to-attack_radius so every member (with a similar-range weapon) closes to the same distance from the same focus-fire target, keeping the squad bunched during ENGAGE rather than letting each unit's own pursuit logic scatter it (bunching during ENGAGE is intentional, part of why the squad rallies first — see §1.2) |
 | **non-enemy** entity (normally the Captain itself) | **RALLY, mobile** | move to that unit (`@goto` takes an entity natively); weapon register cleared → auto-acquire self-defense only, no pursuit |
 | coordinate | **RALLY at a fixed point** (used by RETREAT → Home) | move to the point (`@goto`); weapon register cleared |
 | empty | **HOLD** | clear weapon register; hold position (after a timeout with no readable Captain: return home — Captain-lost fallback) |
@@ -303,14 +303,22 @@ registers and return home (member-side fallback, §3's HOLD row).
   assignment like the ring design would have been — `random_coordinate` samples independently
   per axis with no minimum-distance floor, so two members can still roll adjacent or (rarely)
   coincident slots; accepted as a probabilistic improvement over "everyone converges on the same
-  tile," not a guarantee. Scope is the RALLY paths only — the Coord-anchored fixed-point rally
-  (RETREAT → Home) still uses a bare point (Formation Hold needs a live entity Anchor), and
-  ENGAGE positioning is weapon-pursuit-driven (§1.1), not `@goto`, so Formation Hold doesn't
-  apply there directly. Applies to **ground** squads; an all-flyer squad can converge on one tile
-  regardless (flyers stack). Whether this incidentally eases the retreat-path congestion
-  hypothesis from §5 (a less-dense rally cluster should leave more room for a panicking member to
-  path out) is plausible but unverified — that failure mode occurs during ENGAGE, which this
-  change doesn't touch.
+  tile," not a guarantee. Scope is the RALLY paths only. **ENGAGE is deliberately excluded, not
+  just out of reach** (user, 2026-07-22): the squad is *supposed* to bunch up and stay together
+  while engaged — that's part of the point of rallying first (§1.2) — and ENGAGE's explicit
+  `domove` to `weapon_range − 1` (§3 table) already keeps members at a uniform, tight distance
+  from the shared focus-fire target on purpose. Formation Hold's whole premise (spread members
+  out) is the opposite of what ENGAGE wants; it must not be applied there. The Coord-anchored
+  fixed-point rally (RETREAT → Home) is a different story — same single-tile-convergence
+  problem as the old rally-on-unit case, and worth the same fix (user, 2026-07-22: "probably a
+  good idea"). Not yet done: Formation Hold's `Anchor` requires a live entity
+  (`get_location(Unit=Anchor,...)`), and `Home` is typed as a coordinate here, not an entity, so
+  either Formation Hold needs a coordinate-anchor variant or `Home` needs to become (or resolve
+  to) an entity — open, tracked in `todo.md`. Applies to **ground** squads; an all-flyer squad
+  can converge on one tile regardless (flyers stack). Whether the RALLY spread incidentally eases
+  the retreat-path congestion hypothesis from §5 (a less-dense rally cluster should leave more
+  room for a panicking member to path out) is plausible but unverified — that failure mode occurs
+  during ENGAGE, which the RALLY-side fix doesn't touch.
 - Whether RALLY should ever hold fire outright (`v_powereddown` pass-through) instead of
   allowing auto-acquire self-defense — leaning no; self-defense without pursuit is safe.
 - Overkill management (whole squad dumping into an almost-dead target) — v1's known

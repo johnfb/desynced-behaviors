@@ -210,9 +210,12 @@ detection (now fixed).
       panicking member's retreat path under ground occupancy (no pushing, one-at-a-time
       yielding). Note this is the same *class* of jamming as the now-resolved rally-gate
       anti-bunch item (history.md), but a distinct instance of it: Formation Hold's spread fix
-      applies to the RALLY approach, not to ENGAGE (weapon-pursuit-driven positioning, not
-      `@goto`), so it doesn't address this retreat-path case directly; (2) (user hypothesis)
-      light frames
+      applies to the RALLY approach only. It must **not** be extended to ENGAGE — the squad is
+      supposed to bunch up and stay together while engaged (part of why it rallies first), and
+      ENGAGE's explicit `domove` to `weapon_range − 1` already keeps members at a uniform tight
+      distance from the focus-fire target on purpose (user, 2026-07-22; see
+      `combat_squad_spec.md` §3 table). So this retreat-path congestion case, if real, needs its
+      own fix, not a Formation-Hold-style spread; (2) (user hypothesis) light frames
       typically carry shorter-range turrets, so they engage closer to begin with, *and* carry
       less HP/shield — a single heavy hit can exceed the frame's entire health bar before the
       retreat latch sets, an alpha-strike kill the panic threshold was never designed to catch
@@ -224,6 +227,23 @@ detection (now fixed).
       model, ground-occupancy behavior, or actual damage-per-hit data. Next step: confirm which
       mechanism(s) apply before committing to a fix — folds into the parameterization item
       below either way, and ties directly to the anti-bunch item's scope.
+
+- [ ] **Formation Hold for RETREAT → Home** (user, 2026-07-22: "probably a good idea"): the
+      Coord-anchored fixed-point rally (`Home`, used by RETREAT) has the same single-tile
+      convergence problem the now-resolved rally-on-unit case had, and is a natural next
+      candidate for the same fix. Blocked on a type mismatch: `Formation Hold`'s `Anchor` needs
+      a live entity (`get_location(Unit=Anchor,...)`), but `Home` is a coordinate parameter here,
+      not an entity. Needs either a coordinate-anchor variant of Formation Hold or a way to give
+      `Home` an entity to anchor to (e.g. a Command Center at the home base). Explicitly does
+      **not** extend to ENGAGE — see the anti-bunch item above for why bunching is intentional
+      there.
+
+- [ ] **ENGAGE decongestion** (user, 2026-07-22): user has an idea in progress for reducing
+      ENGAGE-time crowding around the shared focus-fire target without losing the deliberate
+      bunching (unlike Formation Hold's spread, which must not apply here — see above).
+      Unspecified so far; user flagged uncertainty about both effectiveness and per-tick
+      processing cost. Write up once the idea is further along.
+
 - [ ] **(Future extension, explicitly out of scope so far)**: a base-side `c_autobase`
       building that auto-produces/replenishes squad units and pushes
       orders/equipment-registers directly to squad members while they're home on the base
