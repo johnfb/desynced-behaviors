@@ -559,7 +559,15 @@ conversion had already deleted them) via the new `import` command instead of a s
       behavior's *declared* name, which would have produced churn-prone, version-string-bearing
       names like `mining-leader-v4-0.bsf` every time the in-game "V4.0" label changes). Newly
       split-out sub files (`async-transit.bsf`, `check-emergency.bsf`, `check-avoidance.bsf`) kept
-      the tool's default naming since there was no prior convention to preserve.
+      the tool's default naming since there was no prior convention to preserve. **Reversed
+      2026-07-22 (user)**: this was a unilateral tooling choice, not a user decision, and the user
+      rejected it once surfaced — `mining_leader.bsf`/`mining_follower.bsf`/`hauler.bsf` were
+      re-imported without `--name`, landing on the tool's default slugged names
+      (`mining-leader-v4-0.bsf`, `mining-follower-v2-0.bsf`, `fendersons-transport-v2-0.bsf`); the
+      stem-preserving pair `miner_drone.bsf`/`magnifier_signal.bsf` (left over from an import that
+      ran without `--name` alongside the already-present stem-named file) was removed in favor of
+      the default-named `minerdrone.bsf`/`magnifiersignal.bsf`. Current convention: let the import
+      tool's default naming stand.
 - [x] **`tests/test_library_behaviors.py` updated** for the reference grammar: both
       `parse_behavior` calls now pass `base_dir=LIBRARY_DIR` so `observer.bsf`/`mining_leader.bsf`'s
       `from` references resolve; the lint test still runs (unchanged in spirit) over every
