@@ -230,6 +230,41 @@ registers and return home (member-side fallback, §3's HOLD row).
   hysteresis "retreat below X, resume only at full." A member still in contact while retreating
   broadcasts both bits (`num = 3`) — the reason the Captain can't exact-match the beacon (§3).
 
+  **Live-observed loss pattern (several hours of mixed-composition play, 2026-07-22):** the
+  full set (Captain, Gunner, Power-provider, Observer, Healer) held up well; occasional member
+  losses, concentrated on Scout and Dashbot frames running the Gunner behavior specifically —
+  the same behavior also ran unmodified on Haulers, Mark V, human tank frames, and Command
+  Center bots with various turrets without the same pattern. Reported cause: these frames get
+  too close before disengaging. Candidate (unconfirmed) mechanisms:
+  - **Reaction-time margin via speed — retracted.** The original hypothesis assumed Scouts/
+    Dashbots are fast relative to Mark V, so they'd outrun the fixed ~5-tile panic-disengage
+    range. **Wrong direction**: Scouts and Dashbots are slower than the Mark V, not faster
+    (user correction, 2026-07-22). Kept here only as a record of a ruled-out mechanism.
+  - **Congestion blocking the retreat path (user hypothesis, 2026-07-22)**: the squad bunches
+    up to get within a short-range turret's attack radius, and when a member's panic-disengage
+    fires, its `@goto` retreat move has to path out through that same cluster — under ground
+    occupancy (≤1 unit/tile, no pushing, a stopped unit only yields to a mover one at a time —
+    the same jamming mechanic already flagged for the rally gate, `todo.md`'s "Gunner spread on
+    rally" item) the retreat can be blocked or delayed even though the trigger fired correctly
+    and on time. This reframes the loss as a **movement/pathing failure downstream of a working
+    trigger**, not a threshold-tuning problem — scaling the panic-disengage range or the health
+    threshold wouldn't fix a retreat move that can't get out. Shorter-range turrets make the
+    gun-line cluster tighter to begin with, which is the likely reason this shows up on Scout/
+    Dashbot gunners specifically rather than beam-cannon gunners standing off at range 15.
+  - **Loadout compounding (user hypothesis)**: light frames typically carry smaller turrets
+    with shorter range, so the engagement itself already sits closer to the enemy than a
+    beam-cannon gunner's — less standoff buffer before panic-disengage even triggers. Combined
+    with a light frame's smaller HP/shield pool, a single heavy hit (or one incoming volley)
+    can exceed the frame's *entire* health bar before the retreat latch (§5, bit 2) has a
+    chance to set — an alpha-strike kill, not a gradual whittle-down the panic threshold was
+    designed to catch. Also compounds with the congestion mechanism above: a blocked retreat
+    path turns "should have retreated in time" into "took the alpha strike while stuck." If
+    this or the congestion mechanism dominates, scaling panic-disengage range alone won't help;
+    the fix would need to key off the frame's HP/shield pool relative to expected incoming
+    damage, and/or solve the underlying pathing jam, not just react earlier.
+
+  Recorded as two hypotheses, not a confirmed mechanism. See §7 for the follow-up.
+
 ## 6. Tuning constants (initial values, all expected to move)
 
 | Constant | Initial | Why |
@@ -278,6 +313,12 @@ registers and return home (member-side fallback, §3's HOLD row).
   test any fix automatically — the mock modeling ground occupancy + the stopped-unit-yields
   mechanic (see `mock_world_spec.md` open items; the exact yield rule is itself still unknown).
   Applies to **ground** squads; an all-flyer squad can genuinely converge on one tile (flyers stack).
+  **Scope now extends past assembly** (user hypothesis, 2026-07-22, tied to the Scout/Dashbot
+  loss pattern in §5): the same jam can block a member's *retreat* move, not just its approach
+  to the rally/gun-line cluster — a panicking member's `@goto` away from danger has to path out
+  through the same crowded tiles it just fought from. A fanned, spread-out gun line (this
+  item's fix) reduces how tightly members are packed in the first place, which should reduce
+  retreat-blocking incidentally, but hasn't been verified against that specific failure mode.
 - Whether RALLY should ever hold fire outright (`v_powereddown` pass-through) instead of
   allowing auto-acquire self-defense — leaning no; self-defense without pursuit is safe.
 - Overkill management (whole squad dumping into an almost-dead target) — v1's known
@@ -298,6 +339,21 @@ registers and return home (member-side fallback, §3's HOLD row).
   Promote alongside it the battery floor, the panic-disengage distance, and the rally offset
   (all in §6). The range-derived engage / gun-line / vision-lock constants are the same problem
   seen from the weapon side — see the early-tech variant item in `todo.md`.
+  **Sharpened by the live loss pattern (§5):** Scout/Dashbot losses, not seen on Hauler/Mark V/
+  tank/Command-Center gunners running the same behavior, are not explained by frame speed —
+  Scouts and Dashbots are *slower* than the Mark V, so the original "outruns its own reaction
+  time" hypothesis is retracted. Two mechanisms remain live, both pointing away from a pure
+  threshold-tuning fix: the frame's own weapon range (light frames typically carry
+  shorter-range turrets, so they already engage closer to begin with — less standoff before
+  panic-disengage even triggers) and squad congestion (the cluster needed to get a short-range
+  turret in range can physically block a panicking member's retreat path under ground
+  occupancy — same jamming mechanic as the rally-gate item above, but hitting the retreat move
+  instead of the assembly move). Either can compound with the frame's thin HP/shield pool into
+  an alpha-strike kill the panic threshold — tuned for gradual damage — never gets a chance to
+  catch. If congestion is the dominant mechanism, no threshold change fixes it; the fix is
+  clearing/preventing the retreat-path jam (the anti-bunch fix above, extended to cover
+  mid-fight retreat, not just rally assembly). Fix direction pending confirmation of which
+  mechanism(s) actually apply — see §5's live-observed note.
 - **Next-release interactions** (see `upcoming-changes.md`): `is_empty`-based death checks
   invert (use the entity-blank check via the settled dangling-ref semantics, and migrate to
   Target Type Switch's 'Destroyed Object' pin when it lands); `compare_unit` is removed
@@ -311,9 +367,12 @@ registers and return home (member-side fallback, §3's HOLD row).
   deployed too** (`library/squad-power.bsf`) — matches §5's design exactly: reserves its own
   `@signal` for fuel-rod resupply demand (never enlists in the roster), parks at distance 17
   during ENGAGE (just behind the ~15-range gun line), retreats via the `2×Captain − Enemy`
-  point-reflection under 10 tiles, and defaults to loitering near the Captain otherwise. None
-  of the four have a confirmed real-bug-camp test recorded in this doc yet — only that they're
-  authored, compiled, and checked into `library/`.
+  point-reflection under 10 tiles, and defaults to loitering near the Captain otherwise.
+  **All four have now run a real bug-camp test** — several hours of mixed-composition live
+  play (2026-07-22), Gunner behavior deployed across Scouts, Dashbots, Haulers, Mark V, human
+  tank frames, and Command Center bots with different turrets. Overall behavior held up;
+  occasional member losses, concentrated on Scout/Dashbot gunners — see the live-observed
+  finding in §5 and the sharpened parameterization item above.
 
 ## Lineage
 

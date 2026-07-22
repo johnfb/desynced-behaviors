@@ -212,16 +212,29 @@ detection (now fixed).
       lower floor, heavily-armored ones want to fight through chip damage), plus battery floor,
       panic-disengage distance, and rally offset. See `combat_squad_spec.md` §6/§7.
 
-- [ ] **Test the full squad (Captain, Gunner, Healer, Power provider) against a real bug
-      camp.** All four roles are now authored, compiled, and checked into `library/`
-      (`squad-captain.bsf`, `squad-gunner.bsf`, `healer.bsf`, `squad-power.bsf` — confirmed
-      2026-07-22, updating this item's earlier "Gunner/Captain first, then Healer and Power
-      Provider" framing, which undersold how much was already deployed). What's still open:
-      an actual live-fight test/tuning pass. Constants table and open items in the spec (§6,
-      §7) — staging-point geometry and the gate threshold are the two things most likely to
-      need in-game tuning. Squad Captain/Gunner's two v1 simplifications remain deliberate,
-      not gaps: rally point = the Captain's own position (no staging geometry — the Captain
-      already holds standoff), and no mid-fight spread/trickle detector yet.
+- [ ] **Scout/Dashbot gunner losses to over-closing (user, 2026-07-22):** several hours of
+      live mixed-composition play (Captain, Gunner, Power-provider, Observer, Healer) held up
+      well overall; occasional member losses concentrated on Scout and Dashbot frames running
+      the Gunner behavior, not seen on Hauler/Mark V/human-tank/Command-Center gunners with
+      different turrets running the same behavior unmodified. Original "outruns its own
+      reaction time" speed hypothesis **retracted** (user correction, 2026-07-22): Scouts and
+      Dashbots are *slower* than the Mark V, not faster. Two mechanisms remain live, recorded
+      in `combat_squad_spec.md` §5/§7, not yet isolated: (1) (user hypothesis) squad congestion
+      — the cluster needed to get a short-range turret in range can physically block a
+      panicking member's retreat path under ground occupancy (no pushing, one-at-a-time
+      yielding), the same jamming mechanic already flagged below for the rally gate, but
+      hitting the retreat move instead of the assembly move; (2) (user hypothesis) light frames
+      typically carry shorter-range turrets, so they engage closer to begin with, *and* carry
+      less HP/shield — a single heavy hit can exceed the frame's entire health bar before the
+      retreat latch sets, an alpha-strike kill the panic threshold was never designed to catch
+      (compounds with (1): a blocked retreat path is exactly what turns "would have retreated
+      in time" into "took the alpha strike stuck in place"). If either dominates, no
+      threshold-tuning fix (panic-disengage range, health floor) helps on its own — (1) needs
+      the retreat path actually kept clear, (2) needs the threshold to key off HP/shield pool
+      relative to expected incoming damage. Not yet root-caused against the tile/tick movement
+      model, ground-occupancy behavior, or actual damage-per-hit data. Next step: confirm which
+      mechanism(s) apply before committing to a fix — folds into the parameterization item
+      below either way, and ties directly to the anti-bunch item's scope.
 - [ ] **(Future extension, explicitly out of scope so far)**: a base-side `c_autobase`
       building that auto-produces/replenishes squad units and pushes
       orders/equipment-registers directly to squad members while they're home on the base

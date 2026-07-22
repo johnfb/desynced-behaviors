@@ -202,6 +202,14 @@ present state, this file for how something got decided.
       2026-07-11: `for_entities_in_range` scan of a single resource node returned `Result=1`
       before depletion, `Result=0` on an identical rescan right after the node was mined to
       exactly 0 — destroyed/depleted entities really do drop out of faction-wide scans.
+- [x] **Test the full squad (Captain, Gunner, Healer, Power provider) against a real bug
+      camp.** Done 2026-07-22: several hours of mixed-composition live play, Gunner behavior
+      deployed across Scouts, Dashbots, Haulers, Mark V, human tank frames, and Command Center
+      bots with different turrets. Overall behavior held up well; occasional member losses,
+      concentrated on Scout/Dashbot gunners closing too near an enemy before disengaging — not
+      seen on the other frames running the same behavior. Follow-up (hypothesis: panic-
+      disengage range needs to scale with frame speed) tracked as its own open item above,
+      and folded into `combat_squad_spec.md` §5/§7.
 
 ## `desynced_toolkit` / BSF infrastructure
 
