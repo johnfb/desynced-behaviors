@@ -14,7 +14,11 @@ dependencies = [
 requires-dist = [{ name = "lupa", specifier = ">=2.8" }]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.1" }]
+dev = [
+    { name = "mypy", specifier = ">=2.3.0" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.15.22" },
+]
 
 [[package]]
 name = "colorama"
