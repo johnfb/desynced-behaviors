@@ -3,10 +3,10 @@
 Coordinate math for a behavior that expands a power-pole network outward from an origin in a
 hexagonal spiral, one ring at a time, checking each candidate point against the logistics network
 before building. Worked out in conversation. `HexAt` below is implemented and validated in-game
-as a reusable sub-behavior (`hexat_test.dcs`, `tests/data/` — a `HexAt(R, T, Origin, d_half) ->
+as a reusable sub-behavior (`hexat_test.dcs`, `../blz-desynced-toolkit/tests/data/` — a `HexAt(R, T, Origin, d_half) ->
 Result` sub-behavior plus a test harness that calls it for every `R=0..5, T=0..6R-1` and logs the
-result); the living, actively-used copy is `library/hexat.dcs`, a superset of that fixture (see
-"Deployed copy" under the Forward section); `HexIndexOf` also has a `.dcs` now (`HexIndexOf_test_1.dcs`, `tests/data/`), validated by
+result); the living, actively-used copy is `library/hexat.bsf`, a superset of that fixture (see
+"Deployed copy" under the Forward section); `HexIndexOf` also has a `.dcs` now (`HexIndexOf_test_1.dcs`, `../blz-desynced-toolkit/tests/data/`), validated by
 running both routines through the real game Lua (`tests/test_hex_expansion.py`), though not yet
 loaded/run in the actual game client itself. Two routines:
 
@@ -150,7 +150,7 @@ Verified by hand for `R=1, T=0..5` against the original per-side derivation (rep
 `dir[4], dir[5], dir[0], dir[1], dir[2], dir[3]` in order, i.e. the six neighbors of the origin);
 then re-verified against all 92 `(R, T)` pairs the in-game test harness actually logged.
 
-### Deployed copy (`library/hexat.dcs`)
+### Deployed copy (`library/hexat.bsf`)
 
 The living, in-game copy re-exported to `library/` is the same routine as the `hexat_test.dcs`
 fixture with two additive enhancements — the shared arithmetic core (every `k`-branch, the
@@ -583,12 +583,12 @@ concern.
   retry count) — not yet worked out.
 - Whether a nudged-away-from-ideal placement should feed back into planning the *next* point from
   the ideal grid position or the actual nudged one — not yet decided.
-- `HexIndexOf_test_1.dcs` (`tests/data/`) predates the pseudocode revision above — it implements
+- `HexIndexOf_test_1.dcs` (`../blz-desynced-toolkit/tests/data/`) predates the pseudocode revision above — it implements
   the original flat region-gate cascade (with `d`, the 4-instruction coordinate split, and the
   dead `ry` branch all still present), not the `for_number`/`jump`/`label` restructuring. The
   in-game/test validation below applies to that earlier design; the revised pseudocode is
   design-only until it's rebuilt and re-exported through the same loop.
-- `HexIndexOf` now has a `.dcs` (`HexIndexOf_test_1.dcs`, `tests/data/`, round-tripping through
+- `HexIndexOf` now has a `.dcs` (`HexIndexOf_test_1.dcs`, `../blz-desynced-toolkit/tests/data/`, round-tripping through
   `HexAt`) and is validated by `desynced-toolkit`'s `tests/test_hex_expansion.py`, which runs both
   routines through the real `data/instructions.lua` via `Interpreter` (217 `(R, T)` cases up to
   `R=8`) — a much stronger check than the original hand-rolled Python re-implementation this was

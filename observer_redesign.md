@@ -1,15 +1,15 @@
 # Observer Redesign: Two-Task Architecture
 
-Design doc for reworking `library/observer.dcs`, written before touching any `.dcs`/BSF —
+Design doc for reworking `library/observer.bsf`, written before touching any `.dcs`/BSF —
 same "spec first" convention `blight_magnifier_mining.md` and `combat_squad_spec.md` used.
 
-**Status (2026-07-13): implemented, reviewed, and checked in as `library/observer.dcs`.**
+**Status (2026-07-13): implemented, reviewed, and checked in as `library/observer.bsf`.**
 Both tasks are done. Getting here required resolving a real blocker first: `Async Radar`'s
 filter/result attribution ambiguity, fixed by redesigning its interface
 (`State*`/`NextState` replaced by `Tag*`/`Pending Tag*`/`Next Tag`, deliberately with **no
 result-queueing of any kind** — an earlier "queue-and-delay-one-tick" fix was rejected by the
 user as a workaround, not a solution) — see "`Async Radar` subroutine" below for the final
-interface and "Validated against a real caller" for how `library/mining_leader.dcs` was
+interface and "Validated against a real caller" for how `library/mining-leader-v4-0.bsf` was
 rebuilt around it, catching two real bugs along the way. Task 1 (sensing loop) was then
 authored, compiled, and — after the user rebuilt its state transitions directly in-game into
 a priority-lock cascade rather than the round-robin this doc originally sketched — reviewed
@@ -33,11 +33,11 @@ and call stack, not just whatever's watching the radar; also only live on the ou
 behavior assigned to a component, never inside a `call`ed subroutine — unusable without
 wrecking Task 2's own concurrent state every time the radar updated); and splitting the
 subroutine in two, so arming and reading become independent calls the caller can sequence
-however it needs — chosen, and implemented as `library/async-radar-set.dcs` /
-`library/async-radar-get.dcs`. See "`Async Radar Set`/`Async Radar Get`" below for the new
+however it needs — chosen, and implemented as `library/async-radar-set.bsf` /
+`library/async-radar-get.bsf`. See "`Async Radar Set`/`Async Radar Get`" below for the new
 interface and why `Pending Tag` (the previous design's attribution fix) turned out to be
-unneeded once arming and reading were decoupled. `library/mining_leader.dcs` and
-`library/observer.dcs` were both rebuilt around the split and re-reviewed; two real bugs were
+unneeded once arming and reading were decoupled. `library/mining-leader-v4-0.bsf` and
+`library/observer.bsf` were both rebuilt around the split and re-reviewed; two real bugs were
 found and fixed during that pass (`Async Radar Get`'s `Next Tick` bookkeeping — see below —
 and `Observer`'s shared "wrap back to enemy" step clearing `@signal`/`@visual` on every found
 stage, not just the genuinely-empty one). Separately, digging into *why* register writes
@@ -165,7 +165,15 @@ above).
 query. Detects/caches the radar exactly as before, saves `Filter 1/2/3` into a memory array
 keyed by `Index` (so `Get`'s fallback path can read them back without needing its own copy of
 the filter registers), writes them into the physical registers if a radar is equipped, and
-computes `Next Tick := simulation_tick() + Radar's own num` (charge_time) fresh every call.
+computes `Next Tick`. **Revised 2026-07-22**: no longer `simulation_tick() + Radar's own num`
+— `library/async-radar-set.bsf` now hardcodes `Next Tick := simulation_tick() + 5` regardless
+of which radar tier is cached, working around the register-write `TICKS_PER_SECOND` re-arm
+quirk (see the engine-quirk paragraph above) directly in the scheduling math rather than by
+lying about the cached hardware value. The cached `Radar` register itself keeps each tier's
+real, advertised charge time (`c_portable_radar[num=2]`, `c_small_radar[num=10]`, etc.) —
+unchanged from the original design and not fudged — only the `Set`-side `Next Tick` arithmetic
+is patched. An inline `cmt` on the node marks it explicitly as a workaround: "use Radar
+parameter when register write charge time bug fixed."
 
 **`Async Radar Get(Radar, Index, Next Tick*, Result*, Tag*, Next Tag)`** — reads the current
 result. Tries the visibility-range fallback (`get_closest_entity` against the memory-array
@@ -193,6 +201,26 @@ starves the scan: the ready check never passes and only the visibility fallback 
 deliver (found live in Mining Leader's `Setup search`, where a stationary leader with nothing
 visible deadlocked outright — fixed with a one-node "already armed" guard before the arm).
 Both subs' `desc` fields now state their side of this contract.
+
+**Settled 2026-07-22, superseding the `num=5` cache-value question below.** An earlier revision
+of this doc (and of `library/async-radar-set.bsf` itself, per the by-reference reconstruction —
+see `history.md`'s "Local behavior-library storage" section) worked around the register-write
+`TICKS_PER_SECOND` re-arm quirk by writing `c_portable_radar[num=5]` straight into the cached
+`Radar` register, in place of the component's real advertised `num=2` charge time. The
+checked-in behavior now takes the narrower fix described just above instead: the cached `Radar`
+value is back to the real `c_portable_radar[num=2]` (and every other tier's own real charge
+time, untouched), and only `Set`'s own `Next Tick` scheduling is patched to a flat `+5`.
+
+**Why `Set` and `Get` correctly use different formulas here (not an asymmetry to reconcile):**
+the `TICKS_PER_SECOND` quirk is specifically triggered by a *register write* restarting the
+component's wait — and `Set` is the only one of the two that ever writes to the radar's
+registers; `Get` only ever reads. So the quirk only affects the one cycle `Set` itself just
+triggered (hence `Set`'s hardcoded `+5` for that first `Next Tick`); every cycle after that is
+the radar completing its own native, unwritten repeat, correctly timed at the component's real
+charge time — which is exactly what `Get`'s `add(To=Next Tick, Num=Radar, Result=Next Tick)`
+already computes. The two formulas being different is the fix being *more* accurate than a
+uniform flat `5` would be, not a bug: only the write-triggered first cycle is slow, not every
+cycle thereafter.
 
 **`Pending Tag` is gone, and that's not a regression.** It existed solely because the unified
 interface coupled every read to that same call's own arm, creating a one-call attribution lag
@@ -259,7 +287,7 @@ Scout Radar was always meant to be unsupported and documented this directly in
 
 ### Validated against a real caller: Mining Leader V4.0
 
-Mining Leader (`library/mining_leader.dcs`) was rebuilt around this interface directly by the
+Mining Leader (`library/mining-leader-v4-0.bsf`) was rebuilt around this interface directly by the
 user during design review, and the rebuild is informative beyond just confirming the
 interface works — it settles on a materially different, better shape than either the
 original design or Task 1's own plan below:

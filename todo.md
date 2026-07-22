@@ -27,7 +27,7 @@ just adding unused capability) but the findings below remain valid preparation:
       real id/comparison-mode filtering (moved out of `for_signal_match`'s own Lua that
       release); BSF (`decompile.py`/`compile.py`/`parse_text.py`/`render_mermaid.py`) needs
       bespoke dynamic-Case-pin support for `switch` (confirmed via a real corpus bug: without
-      it, `library/mining_leader.dcs`'s `switch` case branches are invisible to both lint and
+      it, `library/mining-leader-v4-0.bsf`'s `switch` case branches are invisible to both lint and
       Mermaid); `instructions_index.md` needs regenerating (a reusable generator now exists,
       `scripts/generate_instructions_index.py` — use it instead of hand-rolling one again).
       Then work through the rest of `upcoming-changes.md`'s "Impact review" — Observer's
@@ -47,7 +47,7 @@ just adding unused capability) but the findings below remain valid preparation:
       *new* pin names — but old wire data was written under `value_type`'s *old* position
       layout, and the real in-game `convert` for this op **reorders** positions, not just
       appends new ones. Net effect: `decompile.py` mislabels old `value_type` nodes' branches
-      (confirmed against `library/observer.dcs`'s real wiring under 1.0.18055 — the label
+      (confirmed against `library/observer.bsf`'s real wiring under 1.0.18055 — the label
       shown doesn't match the position's actual old-schema meaning, though the underlying
       in-game behavior itself is unaffected, since the game's own compiled ASM is built from
       the *converted* form). Scope for the fix: (1) survey the ~10 other legacy ops whose
@@ -66,17 +66,24 @@ just adding unused capability) but the findings below remain valid preparation:
 
 ## Observer redesign (`observer_redesign.md`)
 
-- [ ] **Revisit `Async Radar Set`'s cached radar periods after the next game update.**
+- [ ] **Revisit `Async Radar Set`'s `Next Tick` workaround after the next game update.**
       In-game test 2026-07-14 (Observer + portable radar + out-of-visibility dropped item):
       actual delivery cycle is 5 ticks (`TICKS_PER_SECOND`, the register-write quirk — see
-      `reference_portable_radar_tickspersecond_quirk` memory), not the advertised 2, because
-      `Set` writes the filter registers on every arm. So `c_portable_radar[num=2]` makes
-      Get's ready check pass ~3 ticks early — a premature comp-reg read can deliver a
-      spurious "completed empty" (the real result still lands via a later re-read).
-      `c_small_radar[num=10]` errs safe (late). User has an outstanding bug report on the
-      radar timing and expects a fix next game version — after the update, re-run the
-      dropped-item test and either keep the advertised periods (if fixed) or bump portable
-      to `num=5` (if not).
+      `reference_portable_radar_tickspersecond_quirk` memory), not each radar's own advertised
+      charge time, because `Set` writes the filter registers on every arm. **Fix landed
+      2026-07-22**, scoped narrower than this item originally framed it: rather than
+      overwriting the cached `Radar` register's own `num` (which was tried and reverted —
+      briefly shipped as `c_portable_radar[num=5]`, a fabricated charge-time value), the real
+      per-tier charge times are back (`c_portable_radar[num=2]`, etc.) and only `Set`'s own
+      `Next Tick` scheduling is hardcoded to `+5`, with an inline `cmt` flagging it as a
+      workaround to revert once the underlying bug is fixed. After the next update: revert
+      that `+5` back to `simulation_tick() + Radar's own num`. `Async Radar Get` deliberately
+      keeps compounding off `Radar`'s real num (not the `+5`) for every cycle after the first —
+      correct, not a leftover bug: the quirk is specifically a register-*write* restarting the
+      component's wait, `Get` never writes the registers, so only the one cycle `Set` itself
+      just triggered is quirk-affected; every later cycle is the radar's own unwritten native
+      repeat, genuinely timed at its real charge time. See `observer_redesign.md`'s "Async
+      Radar Set/Async Radar Get" section for the detail.
 
 ## Local behavior-library storage (`desynced_toolkit`)
 
@@ -101,11 +108,19 @@ detection (now fixed).
 
 ## Magnifier / drone-swarm design
 
-- [ ] **Make the oversubscription cap a build-density-dependent parameter, not a hardcoded
-      constant** (user idea, 2026-07-11). Since the right cap varies a lot by layout (2 for one
-      shared building up to 9 for the dense lattice), `MinerDrone` should read it from whatever
-      `MagnifierSignal` broadcasts (e.g. packed into the demand signal's own `num`) rather than
-      assume a fixed value. Not yet implemented.
+- [ ] **Have `MinerDrone` read its oversubscription cap from whatever `MagnifierSignal`
+      broadcasts, not a manually-configured constant** (user idea, 2026-07-11; scope narrowed
+      2026-07-22 after checking `library/`). `library/minerdrone.bsf` already took the
+      hardcoded `2` out of the instruction graph — it's the deployed behavior's third
+      parameter, `MinerDrone(Resource, MineTarget*, OverSubCap)` — but nothing broadcasts a
+      density-derived value for it yet: `library/magnifiersignal.bsf` still signals a bare
+      `{id=Resource, num=-1}` presence flag, no payload. So `OverSubCap` today is set once per
+      deployed drone by hand, not read live off whatever building it's currently working
+      (still 2 for one shared building, up to 9 for the dense lattice, per
+      `blight_magnifier_mining.md`'s "Regen vs. mining threshold" section — the drone still
+      needs to be told which). Remaining work: pack the cap into `MagnifierSignal`'s demand
+      signal `num` and have `MinerDrone` read it from the building it's currently servicing
+      instead of its own parameter.
 - [ ] **(Idea, mechanism now confirmed in-game) Mining Leader/Foreman for slot-less Human
       Miner Mechs.** User idea 2026-07-11: Human Miner Mechs have no Internal socket for a
       behavior controller, so they can't run a `MinerDrone`-style Program of their own.
@@ -197,14 +212,16 @@ detection (now fixed).
       lower floor, heavily-armored ones want to fight through chip damage), plus battery floor,
       panic-disengage distance, and rally offset. See `combat_squad_spec.md` §6/§7.
 
-- [ ] **Implement Captain and Gunner in BSF** (the closed loop), test against a real bug
-      camp; then Healer and Power Provider. Constants table and open items in the spec (§6,
+- [ ] **Test the full squad (Captain, Gunner, Healer, Power provider) against a real bug
+      camp.** All four roles are now authored, compiled, and checked into `library/`
+      (`squad-captain.bsf`, `squad-gunner.bsf`, `healer.bsf`, `squad-power.bsf` — confirmed
+      2026-07-22, updating this item's earlier "Gunner/Captain first, then Healer and Power
+      Provider" framing, which undersold how much was already deployed). What's still open:
+      an actual live-fight test/tuning pass. Constants table and open items in the spec (§6,
       §7) — staging-point geometry and the gate threshold are the two things most likely to
-      need in-game tuning. *First drafts authored 2026-07-14 (Squad Captain ~50 nodes, Squad
-      Gunner ~15; compile+lint clean, strings handed over), with two v1 simplifications
-      chosen deliberately: rally point = the Captain's own position (no staging geometry —
-      the Captain already holds standoff), and no mid-fight spread/trickle detector yet.
-      Pending the first in-game test.*
+      need in-game tuning. Squad Captain/Gunner's two v1 simplifications remain deliberate,
+      not gaps: rally point = the Captain's own position (no staging geometry — the Captain
+      already holds standoff), and no mid-fight spread/trickle detector yet.
 - [ ] **(Future extension, explicitly out of scope so far)**: a base-side `c_autobase`
       building that auto-produces/replenishes squad units and pushes
       orders/equipment-registers directly to squad members while they're home on the base

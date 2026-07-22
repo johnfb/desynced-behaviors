@@ -151,7 +151,7 @@ sockets more than compensate for its worse area-to-footprint ratio.
 
 ### Range is a square at radius 2, confirmed in-game (metric: floored Euclidean)
 
-> **Resolved 2026-07-19 (in-game RangeProbe run — `tests/data/range_probe.bsf`,
+> **Resolved 2026-07-19 (in-game RangeProbe run — `../blz-desynced-toolkit/tests/data/range_probe.bsf`,
 > results in `mock_world_spec.md`'s distance-metrics item):** the native range
 > gate is **floored Euclidean** (in range `R` ⟺ `floor(dist) ≤ R`), not
 > Chebyshev — an earlier version of this heading named the wrong metric. At
@@ -467,7 +467,7 @@ section.
 
 ### A live behavioral bug found downstream: haulers interacting with units broadcasting a resource node or dropped item
 
-`library/hauler.dcs`'s `for_signal_match(Signal=Resource, ...)` (used to
+`library/fendersons-transport-v2-0.bsf`'s `for_signal_match(Signal=Resource, ...)` (used to
 find drones/buildings broadcasting resource pickup/dropoff demand) can also
 match a unit whose *own* broadcast happens to embed a resource-node or
 dropped-item entity for an unrelated reason — traced to `for_signal_match`'s
@@ -477,7 +477,7 @@ concrete real sources of this, both confirmed in-game: (1) `MinerDrone`
 itself deliberately broadcasts `set_reg(Value=$Best, Target=@signal)` where
 `$Best` is the resource *node* it's mining (for oversubscription counting —
 working as intended for that purpose, but a false positive for the hauler);
-(2) the `Observer` behavior (`tests/data/observer.dcs`, also loaded on
+(2) the `Observer` behavior (`../blz-desynced-toolkit/tests/data/observer.dcs`, also loaded on
 stationary power-pole buildings, not just mobile scouts) broadcasts
 `set_reg(Value=$A, Target=@signal)` where `$A` is the raw result of
 `scan(Filter 1=v_droppeditem, ...)` — an entity-embedded *dropped item pile*
@@ -526,7 +526,7 @@ since the filter names are misleading:**
    keep working even if some future behavior embeds a different kind of
    entity into its own signal for its own unrelated reasons. Applied at
    both the pickup-search (`n43`) and dropoff-search (`n79`) locations in
-   `library/hauler.dcs`, replacing the two-`match` intermediate fix;
+   `library/fendersons-transport-v2-0.bsf`, replacing the two-`match` intermediate fix;
    verified via semantic-diff to be the only change at each site.
 
 ## Part 2: Miner-drone behavior design
@@ -750,8 +750,11 @@ and round-tripped through the real toolkit**: `bsf compile` → real `.dcs` →
 `bsf decompile` byte-identical, confirmed against raw wire data (not just
 the decompiler's own rendering), and the mermaid render collapses to a
 single connected component from Program Start — a real structural sanity
-check, not just "it didn't crash." Saved as `miner_drone.dcs` (workspace
-root) — not yet tested in-game.
+check, not just "it didn't crash." That first draft was a workspace-root
+scratch file, since superseded: the deployed, in-game-tested copy is
+`library/minerdrone.bsf` (see "Known gaps / not yet done" below), which has
+since diverged from the listing further down this section — notably a third
+`OverSubCap` parameter (§"Known gaps" below) in place of the hardcoded `2`.
 
 This revision also adds the second parameter (`Resource` — which item type
 to mine, doubling as the signal id to watch for building demand, same
@@ -839,8 +842,8 @@ reject Mining Leader/Follower on its own, since a roaming bot has no
 > `MagnifierSignal` further down) predate the explicit-pin rule — BSF now requires every exec
 > pin of a 2+ pin op to be written (`>node`/`>POP`/`>NEXT`, see `behavior_source_format.md`
 > § "Explicit-pin rule"), so these listings no longer parse verbatim. They're kept as the
-> design record; the live, evolved versions are `library/miner_drone.dcs` /
-> `library/magnifier_signal.dcs` — decompile those for current, parseable text.
+> design record; the live, evolved versions are `library/minerdrone.bsf` /
+> `library/magnifiersignal.bsf` — decompile those for current, parseable text.
 
 ```
 behavior MinerDrone(Resource, MineTarget*):
@@ -960,8 +963,19 @@ successfully before that session.
 
 Building-side companion to `MinerDrone`, closing the "author the
 `MagnifierSignal` building behavior" gap. Compiled, round-tripped, and
-collapses to a single mermaid component the same way `MinerDrone` does.
-Saved as `magnifier_signal.dcs` (workspace root) — not yet tested in-game.
+collapses to a single mermaid component the same way `MinerDrone` does. That
+first draft was a workspace-root scratch file, since superseded by the
+deployed, in-game-tested `library/magnifiersignal.bsf` (see "Known gaps /
+not yet done" below), which has one real divergence from the listing below
+worth flagging: the deployed version broadcasts `num=-1`, not the `num=0`
+shown below — matching the `MinerDrone` bug-3 fix described earlier in this
+doc (reserving `num=-1` for the drone-facing "come mine here" signal so it
+never collides with the Hauler-facing `num=0`/`num>0` pickup/dropoff
+convention on this same `Resource` id). The listing below predates that fix
+being applied to this side of the protocol; `desc`/`n16` should read
+`num=-1` to match. No oversubscription-cap payload in either version —
+`MagnifierSignal` still broadcasts a bare presence signal, not a
+density-derived cap (see "Known gaps" below).
 
 ```
 behavior MagnifierSignal(Resource):
@@ -1003,18 +1017,28 @@ Notes on the design:
 ### Known gaps / not yet done
 
 - **Both `MinerDrone` and `MagnifierSignal` have since been loaded, run, and
-  hand-edited in the real client** (`library/miner_drone.dcs`,
-  `library/magnifier_signal.dcs` — re-exported from the in-game library,
+  hand-edited in the real client** (`library/minerdrone.bsf`,
+  `library/magnifiersignal.bsf` — re-exported from the in-game library,
   checked in for reference) — the "not tested in-game" gap this bullet used
   to describe is closed. The building/drone economics have not yet been
   tried as a live, running setup together, though (see the resource-node
   placement pattern above for what's planned).
-- **The oversubscription cap (2) in `MinerDrone` is no longer just a guess**
-  — see "Regen vs. mining threshold" above, confirmed against real in-game
-  measurements. The mining floor (100) and `MagnifierSignal`'s 100/200
-  thresholds are still hardcoded, untuned choices.
+- **The oversubscription cap is no longer a hardcoded `2` in `MinerDrone` at
+  all — it's the deployed behavior's third parameter, `OverSubCap`**
+  (confirmed directly in `library/minerdrone.bsf`'s signature,
+  `MinerDrone(Resource, MineTarget*, OverSubCap)`, and its `check_number`
+  gate reads `OverSubCap` rather than a literal). This closes the "make the
+  oversubscription cap a parameter, not a hardcoded constant" item
+  `todo.md` still lists as not-yet-implemented — that half is done. What's
+  **not** done is the other half of that item's original ask: `MagnifierSignal`
+  still broadcasts a bare presence signal (`id=Resource, num=-1`, no payload —
+  confirmed in `library/magnifiersignal.bsf`), so `OverSubCap` is a value the
+  drone's own parameters must be configured with at deploy time, not
+  something read live off whatever a given building actually broadcasts. The
+  mining floor (100) and `MagnifierSignal`'s 100/200 thresholds are still
+  hardcoded, untuned choices.
 - **Roaming Mining Leader/Follower squads mining down Magnifier-managed nodes
-  to permanent depletion — fixed 2026-07-11.** `library/mining_leader.dcs`
+  to permanent depletion — fixed 2026-07-11.** `library/mining-leader-v4-0.bsf`
   now has a `Check Avoidance` subroutine (`for_signal_match` on a `v_alert`
   id, `get_distance` with an explicit `Source`, `check_number` against the
   broadcaster's own `num`-as-range) checked both when picking a resource

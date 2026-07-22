@@ -16,7 +16,7 @@ is_equipped(Component=c_radar_array)  >NEXT (Component Equipped) >POP (next)
 set_reg(Value=c_radar_array[num=10], Target=Radar)
 last()
 set_reg:
-set_reg(Value=c_portable_radar[num=5], Target=Radar)
+set_reg(Value=c_portable_radar[num=2], Target=Radar)
 last()
 set_reg_2:
 set_reg(Value=c_small_radar[num=10], Target=Radar)
@@ -55,8 +55,8 @@ simulation_tick(Tick=$Tick)
 is_empty(Value=Radar)  >NEXT (Empty) >add (Has Value)
 set_reg(Value=$Tick, Target=Next Tick)  >POP (next)
 add:
-add(To=$Tick, Num=Radar, Result=Next Tick)
-  cmt="""Compute the tick after which the radar will have its result""";
+add(To=$Tick, Num=5, Result=Next Tick)
+  cmt="""Compute the tick after which the radar will have its result, use Radar parameter when register write charge time bug fixed""";
 for_number(From=1, To=3, Value=$Num)  >POP (Done) >NEXT (next)
 set_number(Value=Index, Number=$Num, Result=$A)
 memory_get(Index=$A, Value=$B)

@@ -1,7 +1,10 @@
 # Combat Squad — Design Spec (v2: Captain architecture)
 
 **Supersedes the v1 Beacon/Scout/Gunner/Support design** (2026-07-14; v1 and its
-`beacon.dcs`/`beacon2.dcs` implementations are git history — see "Lineage" at the end).
+`beacon.dcs`/`beacon2.dcs` implementations are git history — see "Lineage" at the end). Note
+on filenames throughout this doc: `library/` was converted from raw `.dcs` to a by-reference
+`.bsf` text store on 2026-07-22 (see the toolkit's own `CLAUDE.md`/this repo's `history.md`),
+so every `library/*.dcs` reference below now resolves to the same-stem `.bsf` file.
 Redesigned from real in-game squad experiments: v1 squads **scattered and trickled into
 fights one at a time**, taking heavy damage and long fights against targets they should have
 deleted, and coordination only worked when the coordinator personally had visual range on the
@@ -179,7 +182,7 @@ registers and return home (member-side fallback, §3's HOLD row).
   Captain-lost timeout. Auto-acquire covers self-defense during rally/transit without
   creating pursuit (pursuit only comes from an entity in the weapon register — §1.1 — which
   is exactly why RALLY leaves it empty).
-- **Healer** (implemented, `library/healer.dcs` — diverged from the original squad-follower
+- **Healer** (implemented, `library/healer.bsf` — diverged from the original squad-follower
   sketch): a **standalone, faction-wide** repair drone, *not* a squad member. It does not
   enlist on any Captain's channel, follow the command channel, or read ENGAGE targets; it runs
   independently and services every squad (and every damaged friendly) at once. Loop: if an
@@ -248,7 +251,7 @@ registers and return home (member-side fallback, §3's HOLD row).
 ## 7. Open items
 
 - ~~`c_repairer_aoe` radius/power draw — pin when authoring the Healer.~~ Healer implemented
-  (`library/healer.dcs`) as a standalone Observer-driven repair drone (§5), superseding the
+  (`library/healer.bsf`) as a standalone Observer-driven repair drone (§5), superseding the
   squad-follower sketch; `Range` is exposed as a parameter, usually 3 (virus cure range; keeps
   targets inside the range-5 AOE heal — §5/§6). Only the idle-wander tuning remains eyeballed.
 - Staging-point geometry (threat-side offset math) — work out in BSF, integer-only.
@@ -302,16 +305,23 @@ registers and return home (member-side fallback, §3's HOLD row).
   scan after the update. The scan now runs in plain Match mode (`c=1`, num ignored) with a
   per-member `check_bit`, so it no longer depends on Loop Signal's num-comparison semantics at
   all — the rework should not affect it, but confirm the Match mode itself is unchanged.
-- Implementation order: Captain and Gunner first (they are the closed loop), in BSF, tested
-  against a bug camp — both deployed (`library/squad-captain.dcs`, `squad-gunner.dcs`). Healer
-  deployed too (`library/healer.dcs`, standalone/Observer-driven — §5). Power provider remains.
+- Implementation order: Captain and Gunner first (they are the closed loop), in BSF —
+  both deployed (`library/squad-captain.bsf`, `library/squad-gunner.bsf`). Healer
+  deployed too (`library/healer.bsf`, standalone/Observer-driven — §5). **Power provider now
+  deployed too** (`library/squad-power.bsf`) — matches §5's design exactly: reserves its own
+  `@signal` for fuel-rod resupply demand (never enlists in the roster), parks at distance 17
+  during ENGAGE (just behind the ~15-range gun line), retreats via the `2×Captain − Enemy`
+  point-reflection under 10 tiles, and defaults to loitering near the Captain otherwise. None
+  of the four have a confirmed real-bug-camp test recorded in this doc yet — only that they're
+  authored, compiled, and checked into `library/`.
 
 ## Lineage
 
 v1 (Beacon/Scout/Gunner/Support, stationary base-side coordinator, radio-channel orders,
 shortlist/reservoir target reporting) is preserved in git history along with its partial
-implementation (`tests/data/beacon.dcs`, `beacon2.dcs` — still valid as codec/BSF test
-fixtures; obsolete as designs). Two v1 mechanisms survive into v2: the self-healing
+implementation (`../blz-desynced-toolkit/tests/data/beacon.dcs`, `beacon2.dcs` — still valid
+as codec/BSF test fixtures, now living in the toolkit repo after the 2026-07-22 split;
+obsolete as designs). Two v1 mechanisms survive into v2: the self-healing
 Signal-pointing membership scan (§3, was v1 §2.4) and the integrated-behavior-controller
 socket fact (§2, was v1 §2.5 — corrected in passing: it is **robot-race frames only**, not
 "all frames"; human/alien units always need an explicit `c_behavior`). v1's reporting/dedup machinery dissolved entirely — with the
