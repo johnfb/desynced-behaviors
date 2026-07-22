@@ -19,7 +19,7 @@ This repo is tooling, documentation, and design work built *on top of* an extrac
 
 The entry point manifest is `def.json` (in the external directory), which defines all packages and their load order.
 
-**Current/planned work lives in `todo.md`** (checked in, preferred over session-scoped task tools) — read it rather than reconstructing project state from this file or git history.
+**Current/planned work lives in `todo.md`** (checked in, preferred over session-scoped task tools) — read it rather than reconstructing project state from this file or git history. `todo.md` holds only open items; resolved ones move to `history.md` (same topical section headers, not date/release-ordered) — check there for the design rationale and in-game findings behind past decisions.
 
 ## Package Architecture
 
