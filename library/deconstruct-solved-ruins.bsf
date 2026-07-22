@@ -1,0 +1,8 @@
+behavior Deconstruct Solved Ruins(Deconstruct*, Carrier):
+
+compare_item(Value 1=Deconstruct)  >POP (If Different) >NEXT (If Equal)
+set_reg(Value=Carrier, Target=@goto)
+for_signal_match(Signal=v_solved, Signal2=$Sig)  >POP (Done) >NEXT (next)
+domove(Target=$Sig)  >POP (Path Blocked) >NEXT (next)
+set_reg(Value=$Sig, Target=Deconstruct)
+last()

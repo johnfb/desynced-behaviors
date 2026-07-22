@@ -1,0 +1,42 @@
+behavior Production Limiter V2.0(What to build, Producer):
+
+is_empty(Value=What to build)  >NEXT (Empty) >is_empty (Has Value)
+exit:
+exit()
+is_empty:
+is_empty(Value=Producer)  >exit (Empty) >NEXT (Has Value)
+faction_item_amount(Item=What to build, Result=@visual)  >NEXT (None) >NEXT (next)
+check_number(Value=@visual, Compare=What to build)  >NEXT (If Larger) >get_equipped_num (If Smaller) >NEXT (If Equal)
+wait(Time=10)  >POP (next)
+get_equipped_num:
+get_equipped_num(Component ID=Producer, Value=$NumEq)
+set_reg(Target=$Producing)
+set_reg(Target=$NEmpty)
+for_number(From=1, To=$NumEq, Value=$N)  >add_2 (Done) >NEXT (next)
+get_comp_reg(From=Producer, Value=$A, Component/Index=$N)
+is_empty(Value=$A)  >NEXT (Empty) >add (Has Value)
+memory_insert(Index=c_assembler, Value=$N)  >POP (next)
+add:
+add(To=$Producing, Num=$A, Result=$Producing)  >POP (next)
+add_2:
+add(To=$Producing, Num=@visual, Result=$Amount)
+check_number(Value=$Amount, Compare=What to build)  >NEXT (If Larger) >memory_length (If Smaller) >NEXT (If Equal)
+wait(Time=10)  >POP (next)
+memory_length:
+memory_length(Index=c_assembler, Value=$NEmpty)
+check_number(Value=$NEmpty)  >sub (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+wait(Time=10)  >POP (next)
+sub:
+sub(From=What to build, Num=$Amount, Result=$Amount)
+div(From=$Amount, Num=$NEmpty, Result=$Each)
+modulo(Num=$Amount, By=$NEmpty, Result=$EachMod)
+memory_length_2:
+memory_length(Index=c_assembler, Value=$NEmpty)
+memory_remove(Index=c_assembler, Old Value=$N)
+check_number(Value=$NEmpty, Compare=1)  >set_comp_reg (If Larger) >wait (If Smaller) >NEXT (If Equal)
+add(To=$Each, Num=$EachMod, Result=$A)
+set_comp_reg(Value=$A, To=Producer, Component/Index=$N)  >POP (next)
+set_comp_reg:
+set_comp_reg(Value=$Each, To=Producer, Component/Index=$N)  >memory_length_2 (next)
+wait:
+wait(Time=10)  >POP (next)

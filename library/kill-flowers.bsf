@@ -1,0 +1,6 @@
+behavior Kill Flowers(Target*):
+
+compare_item(Value 1=Target)  >POP (If Different) >NEXT (If Equal)
+for_signal_match(Signal=v_is_flower, Signal2=$Flower)  >POP (Done) >NEXT (next)
+set_reg(Value=$Flower, Target=Target)
+last()

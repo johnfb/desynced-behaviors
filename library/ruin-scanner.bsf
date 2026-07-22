@@ -1,0 +1,75 @@
+behavior Ruin Scanner(Origin, HalfWidth, R*, T*):
+
+unlock()
+is_empty(Value=R)  >NEXT (Empty) >is_empty (Has Value)
+set_reg(Value=1, Target=R)
+is_empty:
+is_empty(Value=T)  >NEXT (Empty) >get_self (Has Value)
+set_reg(Value=0, Target=T)
+get_self:
+get_self(Unit Reference=$Self)
+call(R=R, T=T, Result=$NextPos, Origin=Origin, d_half=HalfWidth, sub=1)
+label_arrow_right:
+label(Label=v_arrow_right)
+wait(Time=1)
+sequence()  >NEXT (First) >is_empty_2 (Second) >add (Third) >POP (Fourth) >jump (Last)
+scan(Filter 1=v_enemy_faction, Result=$R)  >scan (No Result) >NEXT (next)
+stop()
+set_reg(Value=$R, Target=@signal)
+set_reg(Value=v_enemy_faction, Target=@visual)
+last()
+scan:
+scan(Filter 1=v_unsolved, Result=$R)  >scan_2 (No Result) >NEXT (next)
+stop()
+set_reg(Value=$R, Target=@signal)
+set_reg(Value=v_unsolved, Target=@visual)
+last()
+scan_2:
+scan(Filter 1=v_solved, Result=$R)  >scan_3 (No Result) >NEXT (next)
+for_signal_match(Signal=v_alert, Unit=$A)  >compare_item (Done) >NEXT (next)
+get_distance(Target=$R, Distance=$D, Source=$A)
+check_number(Value=$D, Compare=5)  >POP (If Larger) >NEXT (If Smaller) >POP (If Equal)
+set_reg(Target=$R)
+last()
+compare_item:
+compare_item(Value 1=$R)  >stop (If Different) >NEXT (If Equal)
+scan_3:
+scan(Filter 1=v_is_flower, Result=$R)  >set_reg (No Result) >NEXT (next)
+stop()
+set_reg(Value=$R, Target=@signal)
+set_reg(Value=v_is_flower, Target=@visual)
+last()
+set_reg:
+set_reg(Target=@signal)
+set_reg(Value=$NextScan, Target=@visual)  >POP (next)
+stop:
+stop()
+set_reg(Value=$R, Target=@signal)
+set_reg(Value=v_solved, Target=@visual)
+last()
+is_empty_2:
+is_empty(Value=@visual)  >NEXT (Empty) >is_moving (Has Value)
+get_location(Unit=$Self, Coord=$Pos)
+compare_register(Value 1=$NextPos, Value 2=$Pos)  >NEXT (If Different) >POP (If Equal)
+domove(Target=$NextPos, c=2)  >NEXT (Path Blocked) >NEXT (next)
+is_moving()  >NEXT (Not Moving) >POP (Path Blocked) >POP (No Result) >NEXT (Moving)
+last()
+is_moving:
+is_moving()  >set_reg_2 (Not Moving) >set_reg_2 (Path Blocked) >NEXT (No Result) >NEXT (Moving)
+last:
+last()
+set_reg_2:
+set_reg(Target=$NextScan)  >last (next)
+add:
+add(To=T, Num=1, Result=T)
+mul(To=R, Num=6, Result=$R)
+check_number(Value=T, Compare=$R)  >NEXT (If Larger) >call (If Smaller) >NEXT (If Equal)
+set_reg(Target=T)
+add(To=R, Num=1, Result=R)
+call:
+call(R=R, T=T, Result=$NextPos, Origin=Origin, d_half=HalfWidth, sub=1)
+set_reg(Value=v_transport_route, Target=$NextScan)  >POP (next)
+jump:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+
+sub HexAt from "hexat.bsf"

@@ -1,0 +1,32 @@
+behavior Signal Manufacturer(Signal Parameter, Manufacture Part, Num*, Unit*):
+
+order_to_shared_storage()
+get_comp_reg(From=Manufacture Part, Value=$A)
+is_empty(Value=$A)  >NEXT (Empty) >lock (Has Value)
+unlock()
+set_reg(Target=Num)
+for_producers_items(Producer=Manufacture Part, Item=$Item, c=2)  >POP (Done) >NEXT (next)
+wait(Time=1)
+get_comp_reg(From=Manufacture Part, Value=$A)
+is_empty(Value=$A)  >NEXT (Empty) >last_2 (Has Value)
+faction_item_amount(Item=$Item, Result=$Total)  >NEXT (None) >NEXT (next)
+for_signal_match(Signal=$Item, Unit=Unit, Signal2=Num, c=1)  >POP (Done) >NEXT (next)
+get_comp_reg(From=Manufacture Part, Value=$A)
+is_empty(Value=$A)  >NEXT (Empty) >last (Has Value)
+match(Unit=Unit, Filter=Signal Parameter)  >POP (Failed) >NEXT (next)
+check_number(Value=Num, Compare=$Total)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+sub(From=Num, Num=$Total, Result=Num)
+set_comp_reg(Value=Num, To=Manufacture Part)
+last()
+last:
+last()
+last_2:
+last()
+lock:
+lock()
+set_number(Value=Manufacture Part, Number=2, Result=$A)
+get_comp_reg(From=$A, Value=$Item)
+can_produce(Item=$Item)  >NEXT (Can Produce) >POP (Cannot Produce)
+faction_item_amount(Item=$Item, Result=$Total)  >NEXT (None) >NEXT (next)
+check_number(Value=$Item, Compare=$Total)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+set_comp_reg(Value=$Item, To=Manufacture Part, Component/Index=2)  >POP (next)

@@ -1,6 +1,5 @@
 behavior Observer(Config*):
   desc: "Look for enemies, damaged units, infected units or dropped items; if on a bot optionally random walk or follow"
-  keepvars: true
 
 unlock()
 call(Radar=$Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_enemy_faction, sub=1)

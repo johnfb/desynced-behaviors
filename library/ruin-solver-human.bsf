@@ -1,0 +1,20 @@
+behavior Ruin Solver Human(Home, Carrier, Missing*):
+
+get_first_locked_0(Item=$Item)
+is_empty(Value=$Item)  >NEXT (Empty) >set_reg_2 (Has Value)
+for_signal_match(Signal=v_unsolved, Signal2=$Sig)  >set_reg (Done) >NEXT (next)
+match(Unit=$Sig, Filter=v_human_faction)  >POP (Failed) >NEXT (next)
+set_reg(Target=@goto)
+solve(Target=$Sig, Missing=Missing)  >NEXT (Failed) >POP (next)
+last()
+set_reg:
+set_reg(Value=Carrier, Target=@goto)  >POP (next)
+set_reg_2:
+set_reg(Target=@goto)
+set_comp_reg(To=c_small_scanner)
+domove(Target=Home)  >POP (Path Blocked) >NEXT (next)
+for_inventory_item(Inventory=$Item)  >set_reg_3 (Done) >NEXT (next)
+get_item_info(Item=$Item, Result=$Num)
+request_wait(Item=$Num)  >POP (next)
+set_reg_3:
+set_reg(Value=Carrier, Target=@goto)  >POP (next)

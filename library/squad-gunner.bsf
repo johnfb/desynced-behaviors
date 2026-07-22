@@ -25,9 +25,10 @@ is_empty(Value=$Foe)  >NEXT (Empty) >bitwise_op_2 (Has Value)
 bitwise_op(A=@signal, B=14, Result=@signal)
   cmt="""Clear bit 1, enemy in visual range""";
 get_battery:
-get_battery(Result=$Batt)
-check_number(Value=$Batt, Compare=80)  >NEXT (If Larger) >bitwise_op (If Smaller) >NEXT (If Equal)
-  cmt="""Self-preservation: retreat under 80% battery""";
+get_battery(Result=$Batt, Max=$MaxBatt)
+check_number(Value=$MaxBatt, Compare=0)  >check_number_3 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Do we have any battery?""";
+get_health:
 get_health(Percent=$HP, Current=$CHP, Max=$MHP)
 check_number(Value=$HP, Compare=100)  >NEXT (If Larger) >check_bit (If Smaller) >NEXT (If Equal)
   cmt="""...or on any hull damage""";
@@ -63,6 +64,9 @@ bitwise_op(A=@signal, B=2, Result=@signal, c=2)  >set_comp_reg (next)
 check_number_2:
 check_number(Value=$CHP, Compare=1000)  >is_empty (If Larger) >bitwise_op (If Smaller) >is_empty (If Equal)
   cmt="""Current HP under 1000?""";
+check_number_3:
+check_number(Value=$Batt, Compare=80)  >get_health (If Larger) >bitwise_op (If Smaller) >get_health (If Equal)
+  cmt="""Self-preservation: retreat under 80% battery""";
 bitwise_op_2:
 bitwise_op(A=@signal, B=1, Result=@signal, c=2)  >get_battery (next)
   cmt="""Set bit 1, enemy in visual range""";

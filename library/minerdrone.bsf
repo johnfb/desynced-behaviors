@@ -1,0 +1,61 @@
+behavior MinerDrone(Resource, MineTarget*, OverSubCap):
+  desc: "Find a building broadcasting demand for Resource via the drone-only signal (id=Resource, num=-1 -- deliberately distinct from the Hauler-facing num=0/num>0 pickup/dropoff convention Mining Leader/Follower and Fendersons Transport already use on this same Resource id, so a roaming mining squad offering pickup is never mistaken for a stationary mining site), travel there, then reservoir-sample a nearby resource node of that type above the 100-unit floor (skipping oversubscribed nodes via Signal broadcast), mine it down to the floor by driving the register-linked MineTarget parameter directly (link MineTarget to register 1 of every c_miner/c_adv_miner on this drone via the Link Editor -- no mine() call), then repeat. Both candidate searches reject anything outside this drone's own power grid -- drones have no capacitor and become extremely slow off-grid, so leaving grid coverage is never acceptable, not just suboptimal. Falls back to re-picking a building whenever no valid local candidate is found."
+
+unlock()
+label_arrow_right:
+label(Label=v_arrow_right)
+  cmt="""Seek: find a building signaling demand for Resource""";
+set_reg(Value=0, Target=$BldRoll)
+set_reg(Target=$Bldg)
+get_self(Unit Reference=$Self)
+set_number(Value=Resource, Number=-1, Result=$SeekSig)
+  cmt="""Drone-only signal value -- num=-1 never collides with the Hauler-facing num=0 (pickup)/num>0 (dropoff) convention""";
+for_signal_match(Signal=$SeekSig, Unit=$Cand, c=2)  >is_empty (Done) >NEXT (next)
+is_same_grid(Unit=$Self, Unit2=$Cand)  >POP (Different) >NEXT (Same Grid)
+random_number(Min=1, Max=1000, Result=$Roll)
+check_number(Value=$Roll, Compare=$BldRoll)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+set_reg(Value=$Roll, Target=$BldRoll)
+set_reg(Value=$Cand, Target=$Bldg)  >POP (next)
+is_empty:
+is_empty(Value=$Bldg)  >NEXT (Empty) >set_number (Has Value)
+wait(Time=20)  >POP (next)
+set_number:
+set_number(Value=$Bldg, Number=1, Result=@goto)
+wait:
+wait(Time=5)
+get_distance(Target=$Bldg, Distance=$Dst)
+check_number(Value=$Dst, Compare=1)  >wait (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+label_radar:
+label(Label=c_radar)
+  cmt="""Mine: reservoir-sample a nearby node of the right type""";
+compare_item(Value 1=$Bldg)  >NEXT (If Different) >POP (If Equal)
+  cmt="""Check if our building reference is stale""";
+set_reg(Value=0, Target=$BestRoll)
+set_reg(Target=$Best)
+for_entities_in_range(Range=8, Filter=v_resource, Filter2=Resource, Unit=$Node)  >is_empty_2 (Done) >NEXT (next)
+get_location(Unit=$Node, Coord=$Amt)
+is_same_grid(Unit=$Self, Unit2=$Amt)  >POP (Different) >NEXT (Same Grid)
+get_resource_num(Resource=$Node, Result=$Amt)
+check_number(Value=$Amt, Compare=100)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+set_reg(Value=0, Target=$Count)
+for_signal_match(Signal=$Node, Unit=$SigUnit)  >check_number (Done) >NEXT (next)
+add(To=$Count, Num=1, Result=$Count)  >POP (next)
+check_number:
+check_number(Value=$Count, Compare=OverSubCap)  >POP (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+random_number(Min=1, Max=1000, Result=$Roll)
+check_number(Value=$Roll, Compare=$BestRoll)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+set_reg(Value=$Node, Target=$Best)
+set_reg(Value=$Roll, Target=$BestRoll)  >POP (next)
+is_empty_2:
+is_empty(Value=$Best)  >POP (Empty) >NEXT (Has Value)
+set_reg(Value=$Best, Target=@signal)
+set_reg(Value=$Best, Target=MineTarget)
+wait_2:
+wait(Time=5)
+compare_item(Value 1=$Best)  >NEXT (If Different) >POP (If Equal)
+  cmt="""Check if our resource reference is stale""";
+get_resource_num(Resource=$Best, Result=$Amt2)
+check_number(Value=$Amt2, Compare=100)  >wait_2 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+set_reg(Target=MineTarget)
+set_reg(Target=@signal)
+jump(Label=c_radar)  >POP (next) >label_radar (jump→label)
