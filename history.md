@@ -238,6 +238,17 @@ present state, this file for how something got decided.
       `sequence()` with only 2 of 4 stages wired is not itself defective — the leak was strictly
       from bypassing the block's own closing mechanism, not from stage count.
 
+      **RETREAT → Home turned out to already be covered, same day**: initially logged as a
+      separate blocked follow-up (Formation Hold's `Anchor` needs a live entity, `Home` looked
+      like a coordinate parameter). Resolved instead of blocked once the user clarified `Home` is
+      set to an entity in the actual deployed squads — a building with an AOE repair module.
+      `squad-captain.bsf`'s RETREAT state broadcasts `Home` directly as `@signal`
+      (`set_reg(Value=Home, Target=@signal)`), so a member's `value_type` dispatch classifies it
+      as **Unit**, routing it through the same "rally on a non-enemy entity" branch that already
+      calls Formation Hold — no coordinate-anchor variant needed. The Coord row in the command
+      table stays real (the protocol still has to handle a literal-coordinate broadcast), it's
+      just not what any deployed squad actually uses `Home` for.
+
 ## `desynced_toolkit` / BSF infrastructure
 
 ### Node-id readability overhaul (user, 2026-07-20)

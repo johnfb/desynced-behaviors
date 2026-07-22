@@ -228,16 +228,6 @@ detection (now fixed).
       mechanism(s) apply before committing to a fix — folds into the parameterization item
       below either way, and ties directly to the anti-bunch item's scope.
 
-- [ ] **Formation Hold for RETREAT → Home** (user, 2026-07-22: "probably a good idea"): the
-      Coord-anchored fixed-point rally (`Home`, used by RETREAT) has the same single-tile
-      convergence problem the now-resolved rally-on-unit case had, and is a natural next
-      candidate for the same fix. Blocked on a type mismatch: `Formation Hold`'s `Anchor` needs
-      a live entity (`get_location(Unit=Anchor,...)`), but `Home` is a coordinate parameter here,
-      not an entity. Needs either a coordinate-anchor variant of Formation Hold or a way to give
-      `Home` an entity to anchor to (e.g. a Command Center at the home base). Explicitly does
-      **not** extend to ENGAGE — see the anti-bunch item above for why bunching is intentional
-      there.
-
 - [ ] **ENGAGE decongestion** (user, 2026-07-22): user has an idea in progress for reducing
       ENGAGE-time crowding around the shared focus-fire target without losing the deliberate
       bunching (unlike Formation Hold's spread, which must not apply here — see above).

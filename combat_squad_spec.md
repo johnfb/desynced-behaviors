@@ -308,13 +308,16 @@ registers and return home (member-side fallback, §3's HOLD row).
   while engaged — that's part of the point of rallying first (§1.2) — and ENGAGE's explicit
   `domove` to `weapon_range − 1` (§3 table) already keeps members at a uniform, tight distance
   from the shared focus-fire target on purpose. Formation Hold's whole premise (spread members
-  out) is the opposite of what ENGAGE wants; it must not be applied there. The Coord-anchored
-  fixed-point rally (RETREAT → Home) is a different story — same single-tile-convergence
-  problem as the old rally-on-unit case, and worth the same fix (user, 2026-07-22: "probably a
-  good idea"). Not yet done: Formation Hold's `Anchor` requires a live entity
-  (`get_location(Unit=Anchor,...)`), and `Home` is typed as a coordinate here, not an entity, so
-  either Formation Hold needs a coordinate-anchor variant or `Home` needs to become (or resolve
-  to) an entity — open, tracked in `todo.md`. Applies to **ground** squads; an all-flyer squad
+  out) is the opposite of what ENGAGE wants; it must not be applied there. RETREAT already gets
+  the same fix for free, not as a separate blocked item: the Captain's RETREAT state broadcasts
+  `Home` directly as `@signal` (`squad-captain.bsf`), and in the actual deployed squads `Home` is
+  set to an entity — a building with an AOE repair module (user, 2026-07-22) — so a member's own
+  `value_type` dispatch classifies it as **Unit**, not Coord, routing it through the already-
+  Formation-Hold-enabled "rally on a non-enemy entity" branch (§3 table), not the bare-`@goto`
+  Coord row. The Coord row in §3's table is still real (Home *could* be set to a raw coordinate,
+  and the protocol has to handle that case), but it isn't what the deployed squads actually use,
+  so building a coordinate-anchor variant of Formation Hold isn't a live need. Applies to
+  **ground** squads; an all-flyer squad
   can converge on one tile regardless (flyers stack). Whether the RALLY spread incidentally eases
   the retreat-path congestion hypothesis from §5 (a less-dense rally cluster should leave more
   room for a panicking member to path out) is plausible but unverified — that failure mode occurs
