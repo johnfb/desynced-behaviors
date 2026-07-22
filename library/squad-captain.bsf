@@ -1,0 +1,147 @@
+behavior Squad Captain(Home, State*, Target*, Roster*, Assembled*):
+  desc: "v2 squad brain (combat_squad_spec.md). Unarmed, fit visibility modules to 40. Keeps 30+ from all enemies, gathers the squad on its own position (rally gate: 80% of live roster within 8), then broadcasts one focus-fire target at a time on @signal. Members point their @signal at this unit and read commands with Read Signal. Coord=rally on me, Unit=kill this, empty=hold."
+
+unlock()
+get_self(Unit Reference=$Self)
+label_arrow_right:
+label(Label=v_arrow_right)
+  cmt="""Per-tick hub: safety standoff first, then state dispatch""";
+wait(Time=1)
+get_closest_entity(Filter=v_enemy_faction, Output=$Nearest)
+is_empty(Value=$Nearest)  >NEXT (Empty) >get_distance (Has Value)
+jump:
+jump(Label=State)
+set_reg(Value=v_idle, Target=State)
+  cmt="""First run: no state yet""";
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+get_distance:
+get_distance(Target=$Nearest, Distance=$D)
+check_number(Value=$D, Compare=30)  >jump (If Larger) >NEXT (If Smaller) >jump (If Equal)
+  cmt="""Standoff: never closer than 30 to anything hostile""";
+set_number(Value=$Nearest, Number=30, Result=$A)
+moveaway_range(Target=$A, c=2)  >jump (next)
+label_idle:
+label(Label=v_idle)
+  cmt="""PATROL: command channel = HOLD; watch for threats""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_2 (Last)
+set_reg(Target=@signal)
+is_empty(Value=$Nearest)  >NEXT (Empty) >set_reg (Has Value)
+set_reg(Target=$Hurt)
+  cmt="""Pre-clear: only written when a hurt member is actually found""";
+for_signal_match(Signal=$Self, Unit=$M, Signal2=$MS)  >is_empty (Done) >NEXT (next)
+  cmt="""Walk the live roster""";
+check_bit(Value=$MS, Bit Index=2)  >POP (Bit Clear) >NEXT (Bit Set)
+  cmt="""Bit 2 = this member needs to heal/recharge""";
+set_reg(Value=$M, Target=$Hurt)
+last()
+is_empty:
+is_empty(Value=$Hurt)  >NEXT (Empty) >POP (Has Value)
+  cmt="""Someone still hurt: hold this tick, re-check next tick. Squad is whole: find next target""";
+set_reg(Value=999999, Target=$BestD)
+set_reg(Target=$BestRep)
+for_signal_match(Signal=v_enemy_faction, Unit=$Reporter, Signal2=$Report)  >is_empty_2 (Done) >NEXT (next)
+  cmt="""Nothing in my own vision: scan ALL enemy broadcasts (Observers and other Captains both make them)""";
+match(Unit=$Report, Filter=v_enemy_faction)  >POP (Failed) >NEXT (next)
+  cmt="""Same guard as the gunners: only act on a genuine enemy entity""";
+get_distance(Target=$Reporter, Distance=$RepD)
+  cmt="""Prioritize the CLOSEST reporter -- take-first ping-ponged the squad between Observers on opposite map sides; a nearby Observer rebroadcasting 'one more, just out of range' now wins until its area is clean""";
+check_number(Value=$RepD, Compare=$BestD)  >POP (If Larger) >NEXT (If Smaller) >POP (If Equal)
+set_reg(Value=$RepD, Target=$BestD)
+set_reg(Value=$Report, Target=$BestRep)  >POP (next)
+is_empty_2:
+is_empty(Value=$BestRep)  >POP (Empty) >NEXT (Has Value)
+set_number(Value=$BestRep, Number=36, Result=@goto)  >POP (next)
+  cmt="""Approach until it enters my own vision (members loiter on me, so they come along); hub standoff guards the close end""";
+set_reg:
+set_reg(Value=v_arrow_down, Target=State)  >POP (next)
+  cmt="""Threat spotted -- gather the squad on me""";
+jump_2:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_arrow_down:
+label(Label=v_arrow_down)
+  cmt="""RALLY: broadcast my position; advance only when assembled""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_3 (Last)
+is_empty(Value=$Nearest)  >NEXT (Empty) >set_reg_2 (Has Value)
+set_reg(Value=v_idle, Target=State)  >POP (next)
+  cmt="""Threat gone before we engaged""";
+set_reg_2:
+set_reg(Value=$Self, Target=@signal)
+  cmt="""Rally point = me (v1: I already hold standoff, no staging geometry)""";
+set_reg(Value=0, Target=Roster)
+set_reg(Value=0, Target=Assembled)
+for_signal_match(Signal=$Self, Unit=$M, Signal2=$MS)  >check_number (Done) >NEXT (next)
+  cmt="""Live roster = whoever points their signal at me""";
+add(To=Roster, Num=1, Result=Roster)
+get_distance(Target=$M, Distance=$D)
+check_number(Value=$D, Compare=8)  >POP (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Assembled = within gather radius of me""";
+add(To=Assembled, Num=1, Result=Assembled)  >POP (next)
+check_number:
+check_number(Value=Roster, Compare=0)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+  cmt="""Nobody enlisted: keep waiting""";
+mul(To=Assembled, Num=5, Result=$A)
+mul(To=Roster, Num=4, Result=$B)
+check_number(Value=$A, Compare=$B)  >NEXT (If Larger) >POP (If Smaller) >NEXT (If Equal)
+  cmt="""Gate: assembled/roster >= 80% (integer form: 5*A >= 4*R)""";
+set_reg(Target=Target)
+  cmt="""Force fresh target selection on entry""";
+set_reg(Value=v_alert, Target=State)  >POP (next)
+jump_3:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_alert:
+label(Label=v_alert)
+  cmt="""ENGAGE: one focus target at a time; keep it visible; stay in the 30-38 band""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_4 (Last)
+is_empty(Value=$Nearest)  >NEXT (Empty) >is_empty_4 (Has Value)
+set_reg(Target=$Contact)
+  cmt="""Pre-clear the found flag. NOT $M2: the loop below writes $M2 on every iteration before the bit test, so $M2 at Done just holds the last member scanned and can never mean 'nobody in contact'""";
+for_signal_match(Signal=$Self, Unit=$M, Signal2=$MS, c=1)  >is_empty_3 (Done) >NEXT (next)
+  cmt="""Every member, no num filter -- the beacon's num is a bitfield now, so an Exact match on it can't work""";
+check_bit(Value=$MS, Bit Index=1)  >POP (Bit Clear) >NEXT (Bit Set)
+  cmt="""Bit 1 = this member has an enemy in visual range""";
+set_reg(Value=$M, Target=$Contact)
+  cmt="""Only written on a genuine hit""";
+set_reg(Value=$M, Target=@signal)
+  cmt="""Fight drifted out of my sight: rally everyone ON the engaged member and close in to restore my vision lock -- leaving now abandons a live fight (live-observed)""";
+set_number(Value=$M, Number=10, Result=@goto)
+last()
+is_empty_3:
+is_empty(Value=$Contact)  >NEXT (Empty) >POP (Has Value)
+set_reg(Target=@signal)
+  cmt="""True victory: nobody sees anything -- HOLD and reassess""";
+set_reg(Target=Target)
+set_reg(Value=v_idle, Target=State)  >POP (next)
+is_empty_4:
+is_empty(Value=Target)  >NEXT (Empty) >set_reg_3 (Has Value)
+  cmt="""Empty = never picked or target died (entity part blanks -- NOTE: next game release inverts is_empty on destroyed refs; migrate to Target Type Switch's Destroyed Object pin then)""";
+get_closest_entity(Filter=v_enemy_faction, Output=Target)
+  cmt="""v1 policy: closest to me ~ cluster edge on the squad's side""";
+set_reg_3:
+set_reg(Value=Target, Target=@signal)
+  cmt="""Focus fire order""";
+get_distance(Target=Target, Distance=$D)
+check_number(Value=$D, Compare=38)  >set_number (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Vision lock: target must stay well inside vis 40""";
+set_reg_4:
+set_reg(Value=0, Target=Roster)
+for_signal_match(Signal=$Self, Unit=$M, Signal2=$MS)  >check_number_2 (Done) >NEXT (next)
+add(To=Roster, Num=1, Result=Roster)  >POP (next)
+check_number_2:
+check_number(Value=Roster, Compare=0)  >POP (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Squad wiped: nobody left to command""";
+set_reg(Value=v_broken, Target=State)  >POP (next)
+set_number:
+set_number(Value=Target, Number=34, Result=@goto)  >set_reg_4 (next)
+  cmt="""Approach back into the band; hub standoff guards the low end""";
+jump_4:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_broken:
+label(Label=v_broken)
+  cmt="""RETREAT: send survivors home, disengage myself""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_5 (Last)
+set_reg(Value=Home, Target=@signal)
+set_reg(Value=Home, Target=@goto)
+is_empty(Value=$Nearest)  >NEXT (Empty) >POP (Has Value)
+set_reg(Value=v_idle, Target=State)  >POP (next)
+jump_5:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)

@@ -1,0 +1,248 @@
+behavior Mining Leader V4.0(Resource, Health Point, State*, Target*, Radar*):
+
+unlock()
+value_type(Data=Health Point)  >NEXT (Item) >is_empty (Unit) >NEXT (Component) >NEXT (Tech) >NEXT (Value) >is_empty (Coord) >NEXT (No Match)
+  cmt="""Is our health point set to a reasonable value?""";
+exit:
+exit()
+is_empty:
+is_empty(Value=Resource)  >exit (Empty) >NEXT (Has Value)
+  cmt="""Have we been told what resource we are supposed to be mining?""";
+set_reg(Value=v_enemy_faction, Target=$NextTag)
+set_reg(Value=v_enemy_faction, Target=$Tag)
+call(Radar=Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_enemy_faction, sub=1)
+is_empty(Value=State)  >NEXT (Empty) >jump (Has Value)
+label_arrow_up:
+label(Label=v_arrow_up)
+  cmt="""Reset State""";
+match(Unit=Target, Filter=Resource)  >set_reg (Failed) >NEXT (next)
+set_reg(Value=v_arrow_upright, Target=State)
+  cmt="""Have a target, resume""";
+label_arrow_right:
+label(Label=v_arrow_right)
+  cmt="""Begin""";
+wait(Time=1)
+call(Radar=Radar, Index=c_portable_radar, Next Tick=$NextTick, Result=$ScanResult, Tag=$Tag, Next Tag=$NextTag, sub=2)
+call(Result=State, Emergency Out=v_broken, Safe Out=State, Radar=Radar, sub=3)
+jump(Label=State)  >POP (next)
+set_reg:
+set_reg(Value=c_small_radar, Target=State)  >label_arrow_right (next)
+  cmt="""Find a target""";
+jump:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_small_radar:
+label(Label=c_small_radar)
+  cmt="""Setup search""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_2 (Last)
+switch(Input=$Tag, Case 1=v_enemy_faction, Case 2=v_resource)  >NEXT (1) >set_reg_2 (2) >POP (3) >POP (4) >POP (5) >NEXT (Default)
+is_moving()  >NEXT (Not Moving) >NEXT (Path Blocked) >NEXT (No Result) >POP (Moving)
+  cmt="""Don't start a resource scan until we are no longer moving.""";
+compare_item(Value 1=$NextTag, Value 2=v_resource)  >NEXT (If Different) >POP (If Equal)
+  cmt="""Already armed, wait""";
+set_reg(Value=v_resource, Target=$NextTag)
+call(Radar=Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=Resource, sub=1)  >POP (next)
+set_reg_2:
+set_reg(Value=v_enemy_faction, Target=$NextTag)
+call(Radar=Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_enemy_faction, sub=1)
+compare_item(Value 1=$ScanResult)  >call (If Different) >NEXT (If Equal)
+set_reg_3:
+set_reg(Value=v_transport_route, Target=State)  >POP (next)
+call:
+call(Signal=v_alert, Spot=$ScanResult, Result=$ScanResult, sub=4)
+is_empty(Value=$ScanResult)  >set_reg_3 (Empty) >NEXT (Has Value)
+set_reg(Value=$ScanResult, Target=Target)
+  cmt="""Found one!""";
+set_reg(Value=v_arrow_upright, Target=State)  >POP (next)
+jump_2:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_broken:
+label(Label=v_broken)
+  cmt="""Emergency""";
+call(Result=$A, Emergency Out=v_broken[num=1], Safe Out=v_broken[num=10], Radar=Radar, sub=3)
+jump(Label=$A)
+label_broken_1:
+label(Label=v_broken[num=1])
+  cmt="""continue emergency""";
+set_reg(Value=v_broken, Target=@visual)
+set_reg(Value=Health Point, Target=@goto)
+set_reg(Value=v_arrow_down[num=2], Target=@signal)
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_broken_10:
+label(Label=v_broken[num=10])
+  cmt="""Emergency over, reset""";
+set_reg(Target=@visual)
+set_reg(Target=@goto)
+set_reg(Target=@signal)
+jump(Label=v_arrow_up)  >POP (next) >label_arrow_up (jump→label)
+label_arrow_upright:
+label(Label=v_arrow_upright)
+  cmt="""Travel to target""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_3 (Last)
+match(Unit=Target, Filter=Resource)  >set_reg_5 (Failed) >NEXT (next)
+match(Unit=Target, Filter=v_droppeditem)  >get_distance (Failed) >NEXT (next)
+set_reg(Value=Target, Target=@goto)
+set_reg(Value=v_arrow_down[num=2], Target=@signal)  >POP (next)
+get_distance:
+get_distance(Target=Target, Distance=$A)
+check_number(Value=$A, Compare=3)  >set_reg_4 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""In range of mining target?""";
+set_reg(Value=c_adv_miner, Target=State)  >POP (next)
+set_reg_4:
+set_reg(Value=v_arrow_down[num=2], Target=@signal)
+set_number(Value=Target, Number=3, Result=@goto)  >POP (next)
+set_reg_5:
+set_reg(Target=Target)
+set_reg(Value=c_small_radar, Target=State)  >POP (next)
+jump_3:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_adv_miner:
+label(Label=c_adv_miner)
+  cmt="""Monitor mine""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_4 (Last)
+match(Unit=Target, Filter=Resource)  >set_reg_6 (Failed) >NEXT (next)
+set_reg(Value=Resource, Target=@signal)
+  cmt="""Tell followers to start mining""";
+get_resource_num(Resource=Target, Result=$A)
+set_number(Value=Target, Number=$A, Result=@visual)  >POP (next)
+set_reg_6:
+set_reg(Target=Target)
+set_reg(Value=c_small_radar, Target=State)  >POP (next)
+jump_4:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+label_transport_route:
+label(Label=v_transport_route)
+  cmt="""Enemy scan completed and emergency check did not trigger""";
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_5 (Last)
+compare_item(Value 1=$Tag, Value 2=v_enemy_faction)  >POP (If Different) >NEXT (If Equal)
+get_self(Unit Reference=$A)
+get_unit_info(Unit=$A, Result=$B, c=2)
+random_coordinate(Coordinate=$A, Range=$B, Result=$A)
+call(Signal=v_alert, Spot=$A, Result=$A, sub=4)
+is_empty(Value=$A)  >POP (Empty) >NEXT (Has Value)
+set_reg(Value=$A, Target=@goto)
+set_reg(Value=c_small_radar, Target=State)  >POP (next)
+jump_5:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+
+sub Async Radar Set(Radar*, Index, Next Tick*, Filter 1, Filter 2, Filter 3):
+  desc: "Arm a radar with up to 3 filters. Stores filters in a memory array at Index; caches detected radar + charge period in Radar. Every call resets Next Tick and the radar's registers — re-arming while waiting starves the scan. Arm once per scan; guard re-arms with \"already armed\" check. No supported radar: Radar cleared, Get falls back to visibility range only. No scout radar support."
+
+has_like_component(Component=c_portable_radar)  >set_reg_8 (Failed) >NEXT (next)
+  cmt="""Do we have a radar?""";
+sequence()  >NEXT (First) >is_equipped (Second) >is_equipped_2 (Third) >POP (Fourth) >set_number (Last)
+is_equipped(Component=Radar)  >NEXT (Component Equipped) >POP (next)
+check_number(Value=Radar)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+last()
+  cmt="""Our cached radar looks valid""";
+is_equipped:
+is_equipped(Component=c_radar)  >set_reg_3 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_small_radar)  >set_reg_2 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_portable_radar)  >set_reg (Component Equipped) >NEXT (next)
+is_equipped(Component=c_radar_array)  >NEXT (Component Equipped) >POP (next)
+set_reg(Value=c_radar_array[num=10], Target=Radar)
+last()
+set_reg:
+set_reg(Value=c_portable_radar[num=5], Target=Radar)
+last()
+set_reg_2:
+set_reg(Value=c_small_radar[num=10], Target=Radar)
+last()
+set_reg_3:
+set_reg(Value=c_radar[num=10], Target=Radar)
+last()
+is_equipped_2:
+is_equipped(Component=c_radar_suite)  >set_reg_7 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_alien_sensor)  >set_reg_6 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_alien_sensor_wide)  >set_reg_5 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_sensor_spike_comp)  >set_reg_4 (Component Equipped) >NEXT (next)
+set_reg(Target=Radar)  >POP (next)
+  cmt="""No supported radar found, clear cache and use fallback""";
+set_reg_4:
+set_reg(Value=c_sensor_spike_comp[num=5], Target=Radar)
+last()
+set_reg_5:
+set_reg(Value=c_alien_sensor_wide[num=3], Target=Radar)
+last()
+set_reg_6:
+set_reg(Value=c_alien_sensor[num=5], Target=Radar)
+last()
+set_reg_7:
+set_reg(Value=c_radar_suite[num=10], Target=Radar)
+last()
+set_number:
+set_number(Value=Index, Number=1, Result=$A)
+  cmt="""Save the filter""";
+memory_set(Index=$A, Value=Filter 1)
+set_number(Value=Index, Number=2, Result=$A)
+memory_set(Index=$A, Value=Filter 2)
+set_number(Value=Index, Number=3, Result=$A)
+memory_set(Index=$A, Value=Filter 3)
+simulation_tick(Tick=$Tick)
+is_empty(Value=Radar)  >NEXT (Empty) >add (Has Value)
+set_reg(Value=$Tick, Target=Next Tick)  >POP (next)
+add:
+add(To=$Tick, Num=Radar, Result=Next Tick)
+  cmt="""Compute the tick after which the radar will have its result""";
+for_number(From=1, To=3, Value=$Num)  >POP (Done) >NEXT (next)
+set_number(Value=Index, Number=$Num, Result=$A)
+memory_get(Index=$A, Value=$B)
+set_number(Value=Radar, Number=$Num, Result=$A)
+set_comp_reg(Value=$B, To=$A)  >POP (next)
+set_reg_8:
+set_reg(Target=Radar)  >set_number (next)
+
+sub Async Radar Get(Radar, Index, Next Tick*, Result*, Tag*, Next Tag):
+  desc: "Poll a radar asynchronously. Result and Tag are written together, only on delivery: fallback hit, no-radar fallback answer (may be empty), or radar completion (may be empty = scan found nothing). A charging-radar call writes nothing. New delivery overwrites unconsumed (latest wins) — consume on the delivery tick. Idiom: clear Tag, call, dispatch on Tag (= per-call delivery flag). No scout radar support."
+
+set_number(Value=Index, Number=1, Result=$A)
+memory_get(Index=$A, Value=$F1)
+set_number(Value=Index, Number=2, Result=$A)
+memory_get(Index=$A, Value=$F2)
+set_number(Value=Index, Number=3, Result=$A)
+memory_get(Index=$A, Value=$F3)
+get_closest_entity(Filter=$F1, Filter2=$F2, Filter3=$F3, Output=$R)
+is_empty(Value=$R)  >NEXT (Empty) >set_reg (Has Value)
+is_empty(Value=Radar)  >NEXT (Empty) >simulation_tick (Has Value)
+set_reg:
+set_reg(Value=$R, Target=Result)
+set_reg(Value=Next Tag, Target=Tag)  >POP (next)
+simulation_tick:
+simulation_tick(Tick=$Tick)
+check_number(Value=$Tick, Compare=Next Tick)  >NEXT (If Larger) >POP (If Smaller) >NEXT (If Equal)
+  cmt="""Have enough ticks passed since we setup the radar for it to have gotten a result?""";
+set_number(Value=Radar, Number=4, Result=$A)
+get_comp_reg(From=$A, Value=$R)
+  cmt="""Read any pending result""";
+add(To=Next Tick, Num=Radar, Result=Next Tick)  >set_reg (next)
+  cmt="""Compute the tick after which the radar will have another result""";
+
+sub Check Emergency(Result*, Emergency Out, Safe Out, Radar):
+  desc: "Copy Emergency out to result if we can see any damaged units nearby, or we can see any enemy units nearby, or the current radar result is an enemy. Otherwise, copy Safe Out to result."
+
+check_health()  >for_entities_in_range (Full) >NEXT (next)
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)
+for_entities_in_range:
+for_entities_in_range(Range=-2147483648, Filter=v_own_faction, Filter2=v_damaged, Unit=$A)  >compare_item (Done) >NEXT (next)
+last()
+compare_item:
+compare_item(Value 1=$A)  >set_reg_3 (If Different) >NEXT (If Equal)
+get_closest_entity(Filter=v_enemy_faction, Output=$A)
+compare_item(Value 1=$A)  >set_reg_2 (If Different) >NEXT (If Equal)
+set_number(Value=Radar, Number=4, Result=$B)
+get_comp_reg(From=$B, Value=$A)
+match(Unit=$A, Filter=v_enemy_faction)  >set_reg (Failed) >NEXT (next)
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)
+set_reg:
+set_reg(Value=Safe Out, Target=Result)  >POP (next)
+set_reg_2:
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)
+set_reg_3:
+set_reg(Value=Emergency Out, Target=Result)  >POP (next)
+
+sub Check Avoidance(Signal, Spot, Result*, Avoid Result):
+
+for_signal_match(Signal=Signal, Unit=$Unit, Signal2=$Signal)  >POP (Done) >NEXT (next)
+get_distance(Target=$Unit, Distance=$DST, Source=Spot)
+check_number(Value=$Signal, Compare=$DST)  >NEXT (If Larger) >POP (If Smaller) >NEXT (If Equal)
+set_reg(Value=Avoid Result, Target=Result)
+last()

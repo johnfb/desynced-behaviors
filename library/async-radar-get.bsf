@@ -1,0 +1,24 @@
+behavior Async Radar Get(Radar, Index, Next Tick*, Result*, Tag*, Next Tag):
+  desc: "Poll a radar asynchronously. Result and Tag are written together, only on delivery: fallback hit, no-radar fallback answer (may be empty), or radar completion (may be empty = scan found nothing). A charging-radar call writes nothing. New delivery overwrites unconsumed (latest wins) — consume on the delivery tick. Idiom: clear Tag, call, dispatch on Tag (= per-call delivery flag). No scout radar support."
+
+set_number(Value=Index, Number=1, Result=$A)
+memory_get(Index=$A, Value=$F1)
+set_number(Value=Index, Number=2, Result=$A)
+memory_get(Index=$A, Value=$F2)
+set_number(Value=Index, Number=3, Result=$A)
+memory_get(Index=$A, Value=$F3)
+get_closest_entity(Filter=$F1, Filter2=$F2, Filter3=$F3, Output=$R)
+is_empty(Value=$R)  >NEXT (Empty) >set_reg (Has Value)
+is_empty(Value=Radar)  >NEXT (Empty) >simulation_tick (Has Value)
+set_reg:
+set_reg(Value=$R, Target=Result)
+set_reg(Value=Next Tag, Target=Tag)  >POP (next)
+simulation_tick:
+simulation_tick(Tick=$Tick)
+check_number(Value=$Tick, Compare=Next Tick)  >NEXT (If Larger) >POP (If Smaller) >NEXT (If Equal)
+  cmt="""Have enough ticks passed since we setup the radar for it to have gotten a result?""";
+set_number(Value=Radar, Number=4, Result=$A)
+get_comp_reg(From=$A, Value=$R)
+  cmt="""Read any pending result""";
+add(To=Next Tick, Num=Radar, Result=Next Tick)  >set_reg (next)
+  cmt="""Compute the tick after which the radar will have another result""";

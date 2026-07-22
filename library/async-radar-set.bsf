@@ -1,0 +1,66 @@
+behavior Async Radar Set(Radar*, Index, Next Tick*, Filter 1, Filter 2, Filter 3):
+  desc: "Arm a radar with up to 3 filters. Stores filters in a memory array at Index; caches detected radar + charge period in Radar. Every call resets Next Tick and the radar's registers — re-arming while waiting starves the scan. Arm once per scan; guard re-arms with \"already armed\" check. No supported radar: Radar cleared, Get falls back to visibility range only. No scout radar support."
+
+has_like_component(Component=c_portable_radar)  >set_reg_8 (Failed) >NEXT (next)
+  cmt="""Do we have a radar?""";
+sequence()  >NEXT (First) >is_equipped (Second) >is_equipped_2 (Third) >POP (Fourth) >set_number (Last)
+is_equipped(Component=Radar)  >NEXT (Component Equipped) >POP (next)
+check_number(Value=Radar)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+last()
+  cmt="""Our cached radar looks valid""";
+is_equipped:
+is_equipped(Component=c_radar)  >set_reg_3 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_small_radar)  >set_reg_2 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_portable_radar)  >set_reg (Component Equipped) >NEXT (next)
+is_equipped(Component=c_radar_array)  >NEXT (Component Equipped) >POP (next)
+set_reg(Value=c_radar_array[num=10], Target=Radar)
+last()
+set_reg:
+set_reg(Value=c_portable_radar[num=5], Target=Radar)
+last()
+set_reg_2:
+set_reg(Value=c_small_radar[num=10], Target=Radar)
+last()
+set_reg_3:
+set_reg(Value=c_radar[num=10], Target=Radar)
+last()
+is_equipped_2:
+is_equipped(Component=c_radar_suite)  >set_reg_7 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_alien_sensor)  >set_reg_6 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_alien_sensor_wide)  >set_reg_5 (Component Equipped) >NEXT (next)
+is_equipped(Component=c_sensor_spike_comp)  >set_reg_4 (Component Equipped) >NEXT (next)
+set_reg(Target=Radar)  >POP (next)
+  cmt="""No supported radar found, clear cache and use fallback""";
+set_reg_4:
+set_reg(Value=c_sensor_spike_comp[num=5], Target=Radar)
+last()
+set_reg_5:
+set_reg(Value=c_alien_sensor_wide[num=3], Target=Radar)
+last()
+set_reg_6:
+set_reg(Value=c_alien_sensor[num=5], Target=Radar)
+last()
+set_reg_7:
+set_reg(Value=c_radar_suite[num=10], Target=Radar)
+last()
+set_number:
+set_number(Value=Index, Number=1, Result=$A)
+  cmt="""Save the filter""";
+memory_set(Index=$A, Value=Filter 1)
+set_number(Value=Index, Number=2, Result=$A)
+memory_set(Index=$A, Value=Filter 2)
+set_number(Value=Index, Number=3, Result=$A)
+memory_set(Index=$A, Value=Filter 3)
+simulation_tick(Tick=$Tick)
+is_empty(Value=Radar)  >NEXT (Empty) >add (Has Value)
+set_reg(Value=$Tick, Target=Next Tick)  >POP (next)
+add:
+add(To=$Tick, Num=Radar, Result=Next Tick)
+  cmt="""Compute the tick after which the radar will have its result""";
+for_number(From=1, To=3, Value=$Num)  >POP (Done) >NEXT (next)
+set_number(Value=Index, Number=$Num, Result=$A)
+memory_get(Index=$A, Value=$B)
+set_number(Value=Radar, Number=$Num, Result=$A)
+set_comp_reg(Value=$B, To=$A)  >POP (next)
+set_reg_8:
+set_reg(Target=Radar)  >set_number (next)

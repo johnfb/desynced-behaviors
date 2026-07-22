@@ -491,6 +491,31 @@ world instructions (also unblocks `library/hexat.dcs`'s unit-Origin path:
       instructions) that makes a unit continuously shuttle between `@goto` (pickup) and
       `@store` (delivery) instead of moving once. See `blight_magnifier_mining.md`.
 
+### Library storage converted to BSF text (user, 2026-07-22)
+
+Second, independent motivator for BSF beyond by-reference subs (see the still-open bullet
+under Local behavior-library storage in `todo.md`): a checked-in `.dcs` is a single base62
+line, so `git diff` on a re-export is meaningless. The node-id readability overhaul above
+already made decompile output stable/reviewable, so no further BSF-pipeline work was needed
+to act on it — this was a straight storage-format conversion.
+
+- [x] **Convert `library/*.dcs` to `library/*.bsf`.** Done 2026-07-22: every type-`C` behavior
+      batch-decompiled via the existing `desynced-bsf decompile` CLI, verified round-trip-clean
+      via `semantic-diff` against the original `.dcs` (only diffs were `\r\n`→`\n` normalization
+      inside multi-line `cmt` text, pre-existing pipeline behavior unrelated to this change), then
+      the `.dcs` files removed. `magnifier_lattice` stays `.dcs` (blueprint, wire type `'B'`, not
+      BSF-decompilable). `tests/test_library_behaviors.py` updated to `parse_behavior` the `.bsf`
+      files directly instead of `decompile_dcs`-ing raw `.dcs`. New workflow: in-game edit → copy
+      → `desynced-bsf decompile` → overwrite `.bsf` (readable diff); to push a `.bsf` back into
+      the game, `desynced-bsf compile` → paste. **Explicit, deliberate tradeoff (user decision):**
+      compiling resets the editor's hand-arranged node layout (`nx`/`ny` isn't modeled in BSF —
+      the "BSF envelope/sidecar layer" item), so this is BSF-only storage, not a
+      layout-preserving dual `.dcs`+`.bsf` sidecar. Considered and rejected: keeping `.dcs` as
+      the lossless source of truth with a generated `.bsf` sidecar (avoids layout loss entirely,
+      but two files to keep in sync, and the `.dcs` diff stays opaque in `git log`/GitHub even
+      though the sidecar one is readable); a `.gitattributes` `textconv` driver alone (display-only,
+      doesn't produce an on-disk reviewable file, which is what was asked for).
+
 ## Repository split & `blz` namespacing
 
 - [x] **Split this repo into a shareable toolkit and a me-specific repo, and rename the toolkit

@@ -1,0 +1,73 @@
+behavior Mining Follower V2.0(Forman, Target*, Max Range*):
+
+unlock()
+value_type(Data=Forman)  >NEXT (Item) >check_number (Unit) >NEXT (Component) >NEXT (Tech) >NEXT (Value) >NEXT (Coord) >NEXT (No Match)
+  cmt="""Is Farman set to an actual unit?""";
+exit()
+check_number:
+check_number(Value=Max Range)  >set_reg (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Is Max Range set to something?""";
+set_number(Number=8, Result=Max Range)
+set_reg:
+set_reg(Value=v_arrow_down, Target=@visual)
+  cmt="""Initial state formup""";
+set_reg(Value=Forman, Target=@store)
+  cmt="""Automatically store inventory in forman""";
+set_reg(Target=@signal)
+set_reg(Target=Target)
+set_reg(Target=@goto)
+sequence:
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >sequence (Last)
+  cmt="""Main loop""";
+wait(Time=1)
+read_signal(Unit=Forman, Result=$Signal)
+get_distance(Target=Forman, Distance=$DST)
+compare_item(Value 1=$Signal, Value 2=v_arrow_down)  >check_number_2 (If Different) >NEXT (If Equal)
+  cmt="""Is the forman telling us to "formup"?""";
+set_reg(Value=v_arrow_down, Target=@visual)
+set_reg(Target=Target)
+  cmt="""Clear any remembered targets""";
+check_number(Value=$DST, Compare=$Signal)  >NEXT (If Larger) >random_coordinate (If Smaller) >POP (If Equal)
+  cmt="""Are we the distance the forman asked us to be?""";
+set_number(Value=Forman, Number=$Signal, Result=$Spot)
+  cmt="""Get closer""";
+domove:
+domove(Target=$Spot, c=2)  >POP (Path Blocked) >POP (next)
+random_coordinate:
+random_coordinate(Coordinate=Forman, Range=$Signal, Result=$Spot)  >domove (next)
+  cmt="""Too close, spread out""";
+check_number_2:
+check_number(Value=$DST, Compare=Max Range)  >is_empty (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Either the forman is not signaling to us or is signaling to mine, are we out of range of the forman?""";
+is_empty(Value=$Signal)  >NEXT (Empty) >set_reg_3 (Has Value)
+  cmt="""Is the forman signaling to mine?""";
+set_reg_2:
+set_reg(Value=v_moving, Target=@visual)
+  cmt="""keep formation state""";
+set_reg(Target=Target)
+  cmt="""Clear any remembered targets""";
+get_location(Unit=Forman, Coord=$AnchorPos)
+sequence()  >NEXT (First) >add (Second) >POP (Third) >POP (Fourth) >POP (Last)
+is_empty(Value=$Offset)  >NEXT (Empty) >POP (Has Value)
+random_coordinate(Coordinate=Forman, Range=Max Range, Result=$Spot)
+sub(From=$Spot, Num=$AnchorPos, Result=$Offset)
+set_number(Value=$Offset, Number=0, Result=$Offset)  >POP (next)
+add:
+add(To=$AnchorPos, Num=$Offset, Result=$Spot)
+get_distance(Target=$Spot, Distance=$DST)
+check_number(Value=$DST, Compare=0)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
+domove(Target=$Spot, c=2)  >POP (Path Blocked) >POP (next)
+set_reg_3:
+set_reg(Value=v_resource, Target=@visual)
+get_closest_entity(Filter=$Signal, Output=Target)
+  cmt="""Get the closest resource""";
+compare_item(Value 1=Target)  >set_reg_5 (If Different) >NEXT (If Equal)
+  cmt="""There is resources in range?""";
+set_reg_4:
+set_reg(Target=$Offset)  >set_reg_2 (next)
+set_reg_5:
+set_reg(Value=$Signal, Target=@signal)  >POP (next)
+  cmt="""Mine mine mine, all mine.""";
+is_empty:
+is_empty(Value=$Signal)  >set_reg_2 (Empty) >set_reg_4 (Has Value)
+  cmt="""Is the forman signaling to mine?""";

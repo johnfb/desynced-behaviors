@@ -1,0 +1,55 @@
+behavior Squad Power(Captain, Fuel, Home):
+  desc: "Squad power provider (Large Tank Frame + Large Power Field + Micro Reactor). Follows the Captain's command channel WITHOUT enlisting in the roster -- its @signal is reserved for fuel-rod resupply demands (the standard hauler convention: id=Fuel, num=how many wanted), so the rally gate counts only fighters. Positions the power field just BEHIND THE GUN LINE during a fight (pursuit parks gunners at attack radius ~15; a beam cannon charging outside a field drains more than the frame capacitor delivers and the gunner cannot move)."
+
+unlock()
+get_item_info(Item=Fuel, Result=$FuelStack)
+div(From=$FuelStack, Num=2, Result=$h_fuel)
+label_arrow_right:
+label(Label=v_arrow_right)
+wait(Time=1)
+count_item(Item=Fuel, Result=$Have)
+  cmt="""Fuel-rod resupply via the standard hauler demand convention""";
+check_number(Value=$Have, Compare=$h_fuel)  >NEXT (If Larger) >set_number_2 (If Smaller) >NEXT (If Equal)
+set_reg(Target=@signal)
+label_broken:
+label(Label=v_broken)
+  cmt="""Positioning: follow the command channel like a member, but stand behind the guns""";
+sequence()  >NEXT (First) >is_empty (Second) >set_number (Third) >POP (Fourth) >jump (Last)
+get_closest_entity(Filter=v_enemy_faction, Output=$NME)
+is_empty(Value=$NME)  >POP (Empty) >NEXT (Has Value)
+get_distance(Target=$NME, Distance=$A)
+check_number(Value=$A, Compare=10)  >POP (If Larger) >NEXT (If Smaller) >POP (If Equal)
+  cmt="""Priority, enemy closer than 10, move away""";
+get_location(Unit=Captain, Coord=$Pos)
+get_location(Unit=$NME, Coord=$FPos)
+mul(To=$Pos, Num=2, Result=$Dest)
+sub(From=$Dest, Num=$FPos, Result=$Dest)
+  cmt="""Fall back to 2*Captain - Enemy: the enemy point-reflected through the Captain. A destination, not a direction -- moveaway is enemy-relative and a fast chaser (Malacostra) steered gunners into enemy lines / 300 tiles off the map. This retreats THROUGH our own gun line, dragging the chaser into massed fire, and is bounded near the squad by construction""";
+domove(Target=$Dest, c=2)  >NEXT (Path Blocked) >NEXT (next)
+last()
+is_empty:
+is_empty(Value=Captain)  >NEXT (Empty) >read_signal (Has Value)
+domove(Target=Home, c=2)  >NEXT (Path Blocked) >NEXT (next)
+last()
+read_signal:
+read_signal(Unit=Captain, Result=$Cmd)
+is_empty(Value=$Cmd)  >POP (Empty) >NEXT (Has Value)
+value_type(Data=$Cmd)  >POP (Item) >NEXT (Unit) >POP (Component) >POP (Tech) >POP (Value) >domove (Coord) >POP (No Match)
+match(Unit=$Cmd, Filter=v_enemy_faction)  >POP (Failed) >NEXT (next)
+set_number(Value=$Cmd, Number=17, Result=$Dest)
+  cmt="""ENGAGE: park just behind the gun line (gunners fight at ~15) so charging cannons stay on grid""";
+domove(Target=$Dest, c=2)  >POP (Path Blocked) >NEXT (next)
+last()
+domove:
+domove(Target=$Cmd, c=2)  >POP (Path Blocked) >NEXT (next)
+last()
+set_number:
+set_number(Value=Captain, Number=5, Result=$Dest)
+  cmt="""Unoccupied: sit in the squad cluster so everyone charges off my field""";
+domove(Target=$Dest, c=2)  >POP (Path Blocked) >POP (next)
+jump:
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+set_number_2:
+set_number(Value=Fuel, Number=$FuelStack, Result=@signal)
+  cmt="""Want delivery (num>0) -- served by Fendersons Transport unchanged""";
+jump(Label=v_broken)  >POP (next) >label_broken (jump→label)

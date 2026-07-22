@@ -1,6 +1,10 @@
 """Tests over the personal deployed behaviors in library/ -- these depend on this repo's own
-directory layout (library/*.dcs) and so live here rather than in blz-desynced-toolkit, unlike
-the toolkit's own fixture-based tests (tests/data/*.dcs) which moved there with the package."""
+directory layout (library/*.bsf) and so live here rather than in blz-desynced-toolkit, unlike
+the toolkit's own fixture-based tests (tests/data/*.dcs) which moved there with the package.
+
+library/ stores behaviors as BSF text, not raw .dcs, so re-exports produce reviewable git diffs
+instead of an opaque single-line blob (see todo.md's "Local behavior-library storage"). Blueprints
+(wire type 'B', e.g. magnifier_lattice) aren't BSF-decompilable and stay as .dcs."""
 
 import math
 from pathlib import Path
@@ -10,8 +14,8 @@ import pytest
 from blz.desynced_toolkit import Interpreter, MockWorld
 from blz.desynced_toolkit.bsf.argcache import ArgCache
 from blz.desynced_toolkit.bsf.compile import compile_behavior
-from blz.desynced_toolkit.bsf.decompile import decompile_dcs
 from blz.desynced_toolkit.bsf.lint import lint_behavior
+from blz.desynced_toolkit.bsf.parse_text import parse_behavior
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LIBRARY_DIR = REPO_ROOT / "library"
@@ -44,11 +48,8 @@ def argcache(engine):
 
 def test_lint_clean_on_all_library_behaviors(engine, argcache):
     checked = 0
-    for f in sorted(LIBRARY_DIR.glob("*.dcs")):
-        try:
-            b = decompile_dcs(engine, f.read_text().strip())
-        except ValueError:
-            continue  # blueprint
+    for f in sorted(LIBRARY_DIR.glob("*.bsf")):
+        b = parse_behavior(f.read_text(), argcache)
         assert lint_behavior(b, argcache) == [], f.name
         checked += 1
     assert checked >= 1
@@ -61,7 +62,8 @@ def test_hexat_unit_origin_runs_via_mock_world(engine):
     world could supply a real entity to read a location from (Phase 1). With a MockWorld-backed comp
     and Origin bound to a live unit, HexAt computes the same coordinate as passing that unit's own
     coord directly (the closed-form reference, origin = the unit's tile)."""
-    b = decompile_dcs(engine, (LIBRARY_DIR / "hexat.dcs").read_text().strip())
+    argcache = ArgCache(engine)
+    b = parse_behavior((LIBRARY_DIR / "hexat.bsf").read_text(), argcache)
     prog = compile_behavior(engine, b)
 
     w = MockWorld(engine)

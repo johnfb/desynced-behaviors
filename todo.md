@@ -80,71 +80,36 @@ just adding unused capability) but the findings below remain valid preparation:
 
 ## Local behavior-library storage (`desynced_toolkit`)
 
-- [ ] **(Idea, not started, 2026-07-12) Build a local mirror of the in-game behavior library,
-      instead of only ever working with one-off `.dcs`/BSF files.** Motivating fact: `call`'s
-      `sub` field referencing a *saved-library* behavior is an opaque id the game assigns when
-      you save it there, which isn't recoverable from a plain "Copy Program" clipboard export
-      (confirmed while trying to hand-author a `call` into Observer's Task 1 — the exported
-      `library/async_radar.dcs` table has no such id, only `name`/`desc`/`parameters`/
-      `pnames`/instructions) — and the user confirmed the in-game editor's own copy/paste
-      always embeds subroutines rather than referencing them by id when you copy a behavior
-      that has any, meaning **the id form is effectively only used in the game's own internal
-      save format**, not something this project's tooling can currently produce a working
-      reference to at all. Proposed direction: a local "library" store that mirrors the
-      in-game one (behaviors saved as BSF files, each with references to others by name/id
-      rather than always embedding), plus an import/export script pair, plus two
-      `desynced_toolkit.bsf` changes: (1) a decompiler option to write an embedded
-      (`dependencies`-array) sub-behavior out as its own separate BSF file with a reference
-      left in the parent's text instead of inlining it, (2) a matching compiler change to
-      resolve such file references back into embedded `dependencies` entries (or, longer-term,
-      real library-id references once/if this project's local store can track real assigned
-      ids) when producing the final `.dcs`. Not designed in detail yet — flagged by the user
-      as one of two things to think about next, alongside the `Async Radar` interface
-      redesign above. **Motivation confirmed harder 2026-07-14:** in-game, library
-      subroutines are genuinely by-reference — editing one updates *and restarts* every
-      behavior calling it, with no per-caller action; embedding happens only at
-      clipboard-export time. So every checked-in *caller* export silently goes stale the
-      moment a shared sub is edited in-game, even though the caller itself changed nothing.
-      Seen live: one in-game edit to `Async Radar Get` propagated into three separate
-      `library/` exports (and Observer's export picked up the earlier
-      `memory_insert`→`memory_set` fix its checked-in copy had been missing).
-      - **Reviewable git diffs are a second, independent motivator (user, 2026-07-18).** A stored
-        `.dcs` is a single base62 line, so `git diff` on a re-export is meaningless — you can't see
-        what changed. Storing the behavior as **BSF text** makes edits reviewable in `git diff`/PRs
-        and makes import/export a plain decompile/compile. Two design requirements this exposes:
-        - **A canonical decompile that produces stable node assignments, so a diff shows only what
-          actually changed.** The blocker is that the in-game editor recomputes branch encoding
-          *and relative node order* for untouched nodes on every save (the exact reason
-          `semantic_diff` exists — see `feedback_resave_reencodes_unrelated_wiring`). A naive
-          decompile ids nodes by wire position (`n1`,`n2`,…), so that cosmetic reordering renumbers
-          everything and the BSF diff stays noisy. The stored form must normalize the editor's
-          reordering away (canonical traversal order from Program Start) and assign stable
-          ids/names derived from something durable (the node's `label` id/num, or a structural/
-          content hash), not raw position — the same normalization `semantic_diff` does, lifted
-          into the emitted text.
-        - **Make node ids optional — emit one only when a pin actually targets that node (user,
-          2026-07-18).** A node reached solely by positional fallthrough needs no id at all; only
-          genuine connection points (jump/branch/`>node` targets) get one. This both minimizes diff
-          churn (inserting/removing a fallthrough-only node renumbers nothing) and, deliberately,
-          **stops agents from referring to instructions by the unstable node id** — most
-          instructions wouldn't have one, forcing references into the stable vocabulary
-          (display name, `cmt`, enclosing `label` section — matches
-          `feedback_node_references_user_vocabulary`). The ids that remain are exactly the
-          meaningful targets, and canonically named per the point above. Needs a decompiler change
-          (suppress ids on non-referenced nodes) and a parser that accepts id-less node lines.
-          **The concrete work items for this piece are done — see `history.md`'s "Node-id
-          readability overhaul".**
-        - **Quick win that needs none of the above: a git `textconv` diff driver.** A `.gitattributes`
-          rule running `bsf decompile` on `*.dcs` makes `git diff`/`git log -p`/PR views render the
-          BSF diff while still storing the lossless canonical `.dcs` (keeps editor `nx`/`ny` layout,
-          sidesteps the round-trip/layout gap in the "BSF envelope/sidecar layer" item). Reversible,
-          display-only; inherits the reorder-noise until the decompile is canonicalized, but even
-          noisy BSF beats a one-line blob. Offered 2026-07-18; can land independently of the full
-          mirror.
-      - **Layout caveat for a pure-BSF store:** recompiling BSF→`.dcs` currently drops node `nx`/`ny`
-        positions (BSF doesn't model them yet — the "BSF envelope/sidecar layer" item), so a
-        BSF-only source of truth loses the hand-arranged editor layout unless that sidecar lands
-        first, or the layout is kept alongside.
+**`library/` now stores BSF text, not raw `.dcs`** (done 2026-07-22 — see `history.md`'s
+"Library storage converted to BSF text"). The remaining open idea below is a further step:
+mirroring the game's own *by-reference* subroutine model, not just this repo's storage format.
+
+- [ ] **(Idea, not started, 2026-07-12) Build a local mirror of the in-game behavior library
+      that resolves `call`'s `sub` field by name/id reference instead of always embedding the
+      subroutine inline.** Motivating fact: `call`'s `sub` field referencing a *saved-library*
+      behavior is an opaque id the game assigns when you save it there, which isn't recoverable
+      from a plain "Copy Program" clipboard export (confirmed while trying to hand-author a
+      `call` into Observer's Task 1 — the exported table has no such id, only
+      `name`/`desc`/`parameters`/`pnames`/instructions) — and the in-game editor's own
+      copy/paste always embeds subroutines rather than referencing them by id, so **the id form
+      is effectively only used in the game's own internal save format**, not something this
+      project's tooling can currently produce a working reference to at all. In-game, library
+      subroutines are genuinely by-reference — editing one updates *and restarts* every behavior
+      calling it, with no per-caller action; embedding happens only at clipboard-export time. So
+      every checked-in *caller* export silently goes stale the moment a shared sub is edited
+      in-game, even though the caller itself changed nothing. Seen live: one in-game edit to
+      `Async Radar Get` propagated into three separate `library/` exports (and Observer's export
+      picked up the earlier `memory_insert`→`memory_set` fix its checked-in copy had been
+      missing). Proposed direction: two `desynced_toolkit.bsf` changes — (1) a decompiler option
+      to write an embedded (`dependencies`-array) sub-behavior out as its own separate BSF file
+      with a reference left in the parent's text instead of inlining it, (2) a matching compiler
+      change to resolve such file references back into embedded `dependencies` entries (or,
+      longer-term, real library-id references once/if this project's local store can track real
+      assigned ids) when producing the final `.dcs`. Not designed in detail yet.
+      - **Layout caveat, still open:** recompiling BSF→`.dcs` currently drops node `nx`/`ny`
+        positions (the "BSF envelope/sidecar layer" item below), so pushing a `library/*.bsf`
+        file back into the game via `compile` resets that behavior's hand-arranged editor layout
+        even when the logic is unchanged. Accepted tradeoff for now (user decision, 2026-07-22).
 
 ## Magnifier / drone-swarm design
 

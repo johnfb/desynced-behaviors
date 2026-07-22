@@ -1,0 +1,79 @@
+behavior HexAt(R, T, Result*, Origin, d_half):
+
+check_number(Value=R)  >div (If Larger) >div (If Smaller) >NEXT (If Equal)
+  cmt="""if R == 0""";
+set_reg(Value=Origin, Target=Result)  >POP (next)
+  cmt="""return origin""";
+div:
+div(From=T, Num=R, Result=$k)
+  cmt="""k = floor(T/R)""";
+modulo(Num=$k, By=6, Result=$k)
+mul(To=$k, Num=R, Result=$A)
+  cmt="""k*R""";
+sub(From=T, Num=$A, Result=$t)
+  cmt="""t = T - k*R""";
+modulo(Num=$t, By=R, Result=$t)
+jump(Label=$k)  >POP (next)
+label_0:
+label(Label=0)
+sub(From=$t, Num=R, Result=$q)
+  cmt="""q = t - R""";
+set_reg(Value=R, Target=$r)
+  cmt="""r = R""";
+mul:
+mul(To=d_half, Num=2, Result=$d)
+value_type(Data=Origin)  >POP (Item) >NEXT (Unit) >POP (Component) >POP (Tech) >POP (Value) >set_reg (Coord) >POP (No Match)
+get_location(Unit=Origin, Coord=$A)
+separate_coordinate:
+separate_coordinate(Coordinate=$A, X=$OrigX, Y=$OrigY)
+sequence()  >NEXT (First) >mul_2 (Second) >mul_3 (Third) >POP (Fourth) >combine_coordinate (Last)
+mul(To=$q, Num=$d, Result=$dq)
+  cmt="""X = origin.x + d*q + d_half*r""";
+mul(To=$r, Num=d_half, Result=$dhr)
+add(To=$dq, Num=$dhr, Result=$dsum)
+add(To=$OrigX, Num=$dsum, Result=$X)  >POP (next)
+mul_2:
+mul(To=$r, Num=8660, Result=$rK)
+  cmt="""Y_num = origin.y*SCALE + d*r*K""";
+mul(To=$rK, Num=$d, Result=$drK)
+mul(To=$OrigY, Num=10000, Result=$OrigYScale)
+add(To=$OrigYScale, Num=$drK, Result=$Ynum)  >POP (next)
+mul_3:
+mul(To=$Ynum, Num=2, Result=$Ynum2)
+  cmt="""Y = floor((2*Y_num + SCALE) / (2*SCALE))""";
+add(To=$Ynum2, Num=10000, Result=$YnumAdj)
+div(From=$YnumAdj, Num=20000, Result=$Y)  >POP (next)
+combine_coordinate:
+combine_coordinate(X=$X, Y=$Y, Result=Result)  >POP (next)
+set_reg:
+set_reg(Value=Origin, Target=$A)  >separate_coordinate (next)
+label_1:
+label(Label=1)
+set_reg(Value=$t, Target=$q)
+  cmt="""q = t""";
+sub(From=R, Num=$t, Result=$r)  >mul (next)
+  cmt="""r = R - t""";
+label_2:
+label(Label=2)
+set_reg(Value=R, Target=$q)
+  cmt="""q = R""";
+sub(From=0, Num=$t, Result=$r)  >mul (next)
+  cmt="""r = -t""";
+label_3:
+label(Label=3)
+sub(From=R, Num=$t, Result=$q)
+  cmt="""q = R - t""";
+sub(From=0, Num=R, Result=$r)  >mul (next)
+  cmt="""r = -R""";
+label_4:
+label(Label=4)
+sub(From=0, Num=$t, Result=$q)
+  cmt="""q = -t""";
+sub(From=$t, Num=R, Result=$r)  >mul (next)
+  cmt="""r = t - R""";
+label_5:
+label(Label=5)
+sub(From=0, Num=R, Result=$q)
+  cmt="""q = -R""";
+set_reg(Value=$t, Target=$r)  >mul (next)
+  cmt="""r = t""";

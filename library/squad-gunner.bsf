@@ -1,0 +1,93 @@
+behavior Squad Gunner(Captain, Weapon, Home):
+  desc: "v2 squad member (combat_squad_spec.md). Set Captain to your squad's Captain unit and Weapon to this unit's weapon component type (e.g. c_turret variant) -- commands are written into that component's register 1. Broadcasts membership by pointing @signal at the Captain. Coord command = move there (weapon cleared: auto-acquire self-defense, no pursuit); Unit command = focus-fire it (native pursue+attack); empty = hold; Captain dead = clear and go Home."
+
+unlock()
+get_item_info(Item=Weapon, Result=$Range, c=2)
+sub(From=$Range, Num=1, Result=$Range)
+set_number(Value=Weapon, Number=1, Result=$W)
+  cmt="""Weapon component register 1 = the command register""";
+set_reg(Value=Captain, Target=@signal)
+  cmt="""Membership beacon: my signal points at my Captain""";
+label_arrow_right:
+label(Label=v_arrow_right)
+wait(Time=1)
+sequence()  >NEXT (First) >read_signal (Second) >POP (Third) >POP (Fourth) >domove (Last)
+is_empty(Value=Captain)  >NEXT (Empty) >get_closest_entity (Has Value)
+  cmt="""Unset, or Captain died (dangling ref reads empty on current build -- next release inverts this, see spec)""";
+set_comp_reg(To=$W)
+  cmt="""Captain lost: clear weapon, walk home""";
+set_reg(Value=Home, Target=$Dest)
+  cmt="""Go home""";
+last()
+get_closest_entity:
+get_closest_entity(Filter=v_enemy_faction, Output=$Foe)
+is_empty(Value=$Foe)  >NEXT (Empty) >bitwise_op_2 (Has Value)
+bitwise_op(A=@signal, B=14, Result=@signal)
+  cmt="""Clear bit 1, enemy in visual range""";
+get_battery:
+get_battery(Result=$Batt)
+check_number(Value=$Batt, Compare=80)  >NEXT (If Larger) >bitwise_op (If Smaller) >NEXT (If Equal)
+  cmt="""Self-preservation: retreat under 80% battery""";
+get_health(Percent=$HP, Current=$CHP, Max=$MHP)
+check_number(Value=$HP, Compare=100)  >NEXT (If Larger) >check_bit (If Smaller) >NEXT (If Equal)
+  cmt="""...or on any hull damage""";
+bitwise_op(A=@signal, B=13, Result=@signal, c=1)
+  cmt="""Clear bit 2, back into action!""";
+is_empty:
+is_empty(Value=$Foe)  >POP (Empty) >NEXT (Has Value)
+get_distance(Target=$Foe, Distance=$FoeD)
+check_number(Value=$FoeD, Compare=5)  >POP (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Panic: enemy on top of me (melee, or a Larva's death blast) -- disengage NOW, pursuit never backs off on its own""";
+set_comp_reg(To=$W)
+  cmt="""Clear weapon first (it overrides movement)""";
+get_location(Unit=Captain, Coord=$Pos)
+get_location(Unit=$Foe, Coord=$FPos)
+mul(To=$Pos, Num=2, Result=$Dest)
+sub(From=$Dest, Num=$FPos, Result=$Dest)
+  cmt="""Fall back to 2*Captain - Enemy: the enemy point-reflected through the Captain. A destination, not a direction -- moveaway is enemy-relative and a fast chaser (Malacostra) steered gunners into enemy lines / 300 tiles off the map. This retreats THROUGH our own gun line, dragging the chaser into massed fire, and is bounded near the squad by construction""";
+last()
+check_bit:
+check_bit(Value=@signal, Bit Index=2)  >check_number (Bit Clear) >NEXT (Bit Set)
+set_comp_reg:
+set_comp_reg(To=$W)
+  cmt="""Weapon target overrides GOTO -- clear first or the retreat never moves""";
+set_number(Value=Captain, Number=5, Result=$Dest)
+  cmt="""Fall back into the Captain's aura (healer + power field live there); resumes automatically at 80%+ battery and full hull""";
+last()
+check_number:
+check_number(Value=$MHP, Compare=1000)  >check_number_2 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Max HP over 1000?""";
+bitwise_op:
+bitwise_op(A=@signal, B=2, Result=@signal, c=2)  >set_comp_reg (next)
+  cmt="""Set bit 2, retreat on damage or low battery""";
+check_number_2:
+check_number(Value=$CHP, Compare=1000)  >is_empty (If Larger) >bitwise_op (If Smaller) >is_empty (If Equal)
+  cmt="""Current HP under 1000?""";
+bitwise_op_2:
+bitwise_op(A=@signal, B=1, Result=@signal, c=2)  >get_battery (next)
+  cmt="""Set bit 1, enemy in visual range""";
+read_signal:
+read_signal(Unit=Captain, Result=$Cmd)
+is_empty(Value=$Cmd)  >NEXT (Empty) >value_type (Has Value)
+set_comp_reg(To=$W)
+  cmt="""Weapon target overrides GOTO (engine fact, user-confirmed) -- must clear before any move""";
+set_number(Value=Captain, Number=5, Result=$Dest)  >POP (next)
+  cmt="""Unoccupied: hang out around the Captain at 5 (inside the gather radius 8, outside its pathing)""";
+value_type:
+value_type(Data=$Cmd)  >NEXT (Item) >match (Unit) >NEXT (Component) >NEXT (Tech) >NEXT (Value) >NEXT (Coord) >NEXT (No Match)
+  cmt="""Unit = focus target; Coord = rally point; other types fall to rally harmlessly""";
+set_reg(Value=$Cmd, Target=$Dest)
+set_comp_reg_2:
+set_comp_reg(To=$W)  >POP (next)
+match:
+match(Unit=$Cmd, Filter=v_enemy_faction)  >set_number (Failed) >NEXT (next)
+  cmt="""Enemy: kill it. Anything else (the Captain broadcasting itself) = mobile rally point""";
+set_comp_reg(Value=$Cmd, To=$W)
+  cmt="""Focus fire: native pursue+attack via the weapon's own register""";
+set_number(Value=$Cmd, Number=$Range, Result=$Dest)  >POP (next)
+set_number:
+set_number(Value=$Cmd, Number=5, Result=$Dest)  >set_comp_reg_2 (next)
+  cmt="""Rally on a unit at distance 5, never 0 -- crowding at the Captain's feet blocks its pathing""";
+domove:
+domove(Target=$Dest, c=2)  >NEXT (Path Blocked) >NEXT (next)
+jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
