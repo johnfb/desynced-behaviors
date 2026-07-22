@@ -20,8 +20,8 @@ from pathlib import Path
 
 import lupa.lua54 as lupa
 
-from desynced_toolkit import assets, dcs_wire
-from desynced_toolkit.lua_runtime import LupaEngine
+from blz.desynced_toolkit import assets, dcs_wire
+from blz.desynced_toolkit.lua_runtime import LupaEngine
 
 CORPUS_ROOT = Path(__file__).resolve().parent.parent / "corpus"
 GAME_DATA = Path(

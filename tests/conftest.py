@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from desynced_toolkit import LupaEngine, open_asset_source
+from blz.desynced_toolkit import LupaEngine, open_asset_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GAME_DATA_DIR = REPO_ROOT.parent / "desynced-game-data"

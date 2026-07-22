@@ -3,6 +3,20 @@ revision = 3
 requires-python = ">=3.14"
 
 [[package]]
+name = "blz-desynced-toolkit"
+version = "0.1.0"
+source = { editable = "../blz-desynced-toolkit" }
+dependencies = [
+    { name = "lupa" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "lupa", specifier = ">=2.8" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -12,11 +26,11 @@ wheels = [
 ]
 
 [[package]]
-name = "desynced-toolkit"
+name = "desynced-behaviors"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
-    { name = "lupa" },
+    { name = "blz-desynced-toolkit" },
 ]
 
 [package.dev-dependencies]
@@ -25,7 +39,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "lupa", specifier = ">=2.8" }]
+requires-dist = [{ name = "blz-desynced-toolkit", editable = "../blz-desynced-toolkit" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]

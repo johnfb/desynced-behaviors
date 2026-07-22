@@ -807,31 +807,28 @@ per-node identity token, not computed dispatch.
 
 ## Repository split & `blz` namespacing
 
-- [ ] **Split this repo into a shareable toolkit and a me-specific repo, and rename the toolkit
-      under the `blz` namespace** (user, 2026-07-16). **Priority raised (user, 2026-07-19):** the
-      range-probe-committed-at-root incident (see `feedback_probe_behaviors_are_test_fixtures`
-      memory) is exactly the file-placement ambiguity the split dissolves — "tooling anyone can
-      use on their behaviors" vs. "work on my own behaviors" each get an unambiguous home. Two
-      concerns are currently entangled and should live in separate repositories:
-      - *Shareable* — the `desynced_toolkit` package (wire codec, BSF pipeline, Lua-backed
-        interpreter/runtime), its tests, and the format/spec docs that document the tooling
-        itself (`behavior_format.md`, `behavior_source_format.md`, `instructions_index.md`).
-      - *Me-specific* — the behavior libraries (`library/`), the corpus tooling + `corpus/`
-        (already gitignored), and the behavior *design/plan* docs that are personal creative
-        work rather than tooling docs (`hex_expansion_math.md`, `observer_redesign.md`,
-        `blight_magnifier_mining.md`, `combat_squad_spec.md`). The user is fine sharing these
-        eventually but they should **not** ship as part of the toolkit.
-      Rename the toolkit package to something like **`blz-desynced-toolkit`**, importable under
-      the `blz` **namespace package** prefix (user convention: everything the user authors goes
-      under `blz`/`blz.*` as a PEP 420 namespace package so it never collides with global PyPI /
-      other package-manager names). So `desynced_toolkit` → `blz.desynced_toolkit` (or similar),
-      `python -m desynced_toolkit.bsf` → the `blz`-namespaced module path, and update every
-      internal import + the CLI docs in `CLAUDE.md`.
-      **Open design decision (undecided — user wants to think through options):** how the
-      me-specific repo depends on the toolkit. Candidate considered: toolkit as a git *submodule*
-      of the me-specific repo — user is not sure they like that. Other options to weigh: a plain
-      versioned/`uv` path dependency, a workspace, or a published package. Decide before doing
-      the mechanical split.
+- [x] **Split this repo into a shareable toolkit and a me-specific repo, and rename the toolkit
+      under the `blz` namespace** (user, 2026-07-16; done 2026-07-22). Now two repos:
+      - *Shareable* — `../blz-desynced-toolkit/` (`blz-desynced-toolkit` package, importable as
+        `blz.desynced_toolkit`): the wire codec, BSF pipeline, Lua-backed interpreter/runtime,
+        its full test suite (`tests/`, `tests/data/`), and the format/spec docs moved into that
+        repo's `docs/` subdirectory (`behavior_format.md`, `behavior_source_format.md`,
+        `instructions_index.md`, `mock_world_spec.md`). Has its own `CLAUDE.md`.
+      - *Me-specific* — this repo, now holding only `library/`, the corpus tooling (`scripts/`,
+        `corpus/`), the personal design docs (`hex_expansion_math.md`, `observer_redesign.md`,
+        `blight_magnifier_mining.md`, `combat_squad_spec.md`), and a slim `tests/` exercising
+        `library/` behaviors against the toolkit dependency (the two tests that read `library/`
+        moved out of the toolkit's test files into `tests/test_library_behaviors.py` here).
+      Namespace-packaged under `blz` per the user's PEP 420 namespace-package convention
+      (`pyproject.toml`'s `[tool.uv.build-backend] module-name = "blz.desynced_toolkit"`, no
+      `__init__.py` in `src/blz/`); `python -m desynced_toolkit.bsf` → `python -m
+      blz.desynced_toolkit.bsf`, all internal imports and CLAUDE.md updated in both repos.
+      **Open design decision, resolved:** dependency mechanism is a plain `tool.uv.sources` local
+      path dependency (`{ path = "../blz-desynced-toolkit", editable = true }`) — not a submodule,
+      matching the sibling-directory convention already used for `desynced-game-data`. Both
+      repos' test suites pass post-split; the CLI (`python -m blz.desynced_toolkit.bsf`) verified
+      working from both repos. Both repos are separate git repos now (`blz-desynced-toolkit`
+      freshly `git init`'d) with GitLab remotes added.
 
 ## Dev tooling
 

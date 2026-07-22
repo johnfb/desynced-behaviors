@@ -1,5 +1,5 @@
 """Decompile a real behavior out of a .dcs clipboard string into real BSF text and a Mermaid
-flowchart, via the `desynced_toolkit.bsf` package (see behavior_source_format.md for the
+flowchart, via the `blz.desynced_toolkit.bsf` package (see behavior_source_format.md for the
 grammar). This script used to own the decoding/graph-extraction logic itself as a one-way
 prototype; that logic has since grown into the real `bsf` package (decompile + compile + text
 parse/render + mermaid render, see the BSF implementation plan) and this script is now a thin
@@ -19,12 +19,12 @@ editor's bounding-box collision avoidance between disconnected chains).
 import sys
 from pathlib import Path
 
-from desynced_toolkit import assets
-from desynced_toolkit.bsf.argcache import ArgCache
-from desynced_toolkit.bsf.decompile import decompile_behavior
-from desynced_toolkit.bsf.render_mermaid import render_mermaid
-from desynced_toolkit.bsf.render_text import render_behavior
-from desynced_toolkit.lua_runtime import LupaEngine
+from blz.desynced_toolkit import assets
+from blz.desynced_toolkit.bsf.argcache import ArgCache
+from blz.desynced_toolkit.bsf.decompile import decompile_behavior
+from blz.desynced_toolkit.bsf.render_mermaid import render_mermaid
+from blz.desynced_toolkit.bsf.render_text import render_behavior
+from blz.desynced_toolkit.lua_runtime import LupaEngine
 
 GAME_DATA = Path(__file__).resolve().parent.parent.parent / "desynced-game-data"
 

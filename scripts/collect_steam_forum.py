@@ -17,7 +17,7 @@ from pathlib import Path
 
 import lupa.lua54 as lupa
 
-from desynced_toolkit import dcs_wire
+from blz.desynced_toolkit import dcs_wire
 
 CORPUS_DIR = Path(__file__).resolve().parent.parent / "corpus" / "steam_behaviors"
 CONTEXT_DIR = CORPUS_DIR / "context"
