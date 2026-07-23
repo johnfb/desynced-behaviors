@@ -1,0 +1,21 @@
+behavior Trilobyte Feeder(Storage):
+  desc: "Feeds the Trilobyte's own inventory from Storage, but only while c_trilobyte_consume (its native, non-scriptable eat/excrete cycle) is idle -- adding an item mid-digestion gets swept up and dropped raw instead of consumed (c_trilobyte_consume:on_update's post-CC_FINISH_WORK slot sweep, which fires on every 5-tick reward-drop round, not just the last). is_working's Component arg is left empty deliberately: c_trilobyte_consume is a hidden component, and targeting it by id goes through GetComponentFromIndex -> entity:FindComponent, the same lookup that can't be aimed at a hidden component from the in-game arg picker either -- confirmed live to silently report 'not working' unconditionally, making the gate a no-op. Leaving Component empty takes is_working's other branch instead (iterates comp.owner.components directly, reading each one's native .is_working field, no FindComponent lookup), which reaches the hidden component correctly -- but a single reading was still observed going stale live (~30% of deliveries): the inventory empties out mid-cycle (FulfillProcess, first reward round) well before the last reward round's SetStateSleep actually ends the job, and one is_working sample can apparently land on a stale/false reading somewhere in that multi-round window (native SetStateStartWork/SetStateContinueWork/SetStateSleep timing, unverifiable from the Lua side). So this requires TWO not-working readings, a full 5-tick reward-round interval apart, before trusting it. Falling off the end each cycle restarts the behavior from the top, so no explicit polling loop is wired."
+
+set_number(Value=Storage, Number=1, Result=@goto)
+  cmt="""Move within pickup range of Storage""";
+is_working()  >confirm (Is Not Working) >NEXT (next)
+  cmt="""Component left empty on purpose -- see desc""";
+wait_busy:
+wait(Time=10)
+  cmt="""Still digesting/excreting -- recheck next cycle""";
+confirm:
+wait(Time=5)
+  cmt="""Debounce -- confirm the idle reading holds one full reward-round later before trusting it""";
+is_working()  >count_item (Is Not Working) >wait_busy (next)
+  cmt="""Second reading disagreed -- still genuinely working, go back to the long wait""";
+count_item:
+count_item(Result=$Num)
+  cmt="""Own inventory -- a leftover item here means c_trilobyte_consume hasn't picked it up yet; don't add more""";
+check_number(Value=$Num, Compare=0)  >POP (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+dopickup(Source=Storage)  >POP (Path Blocked) >POP (next)
+  cmt="""Item/Amount left empty -- grabs one whole stack of whatever Storage currently has""";
