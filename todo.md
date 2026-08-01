@@ -241,16 +241,21 @@ detection (now fixed).
       item). In the field the Captain's signal protocol takes over; the autobase building is
       the barracks/quartermaster half.
 
-- [ ] **`GuardPost` leash — not yet live-tested** (added 2026-08-01): new optional Captain
-      parameter (`library/squad-captain.bsf`, `combat_squad_spec.md` §4) gating the
-      reporter-driven PATROL→RALLY step to a distance or same-logistics-network leash around a
-      configured post. Static checks only so far (`desynced-bsf lint`, a compile/decompile
-      round-trip). Also carries an unconfirmed claim about `is_same_grid`: gating on the
-      reported enemy entity itself (an earlier draft) is suspected to never resolve "same grid"
-      because that instruction's entity-based fast path only fires when both arguments belong to
-      the calling faction (`data/instructions.lua`) — worth confirming in-game if `GuardPost`'s
-      zero/negative-`num` branch ever misbehaves, since the current reporter-based gate was
-      never itself compared against that failure mode live.
+- [ ] **`GuardPost` leash — same-grid mode live-confirmed, distance mode still untested** (added
+      2026-08-01, updated 2026-08-01): optional Captain parameter (`library/squad-captain.bsf`,
+      `combat_squad_spec.md` §4) gating the reporter-driven PATROL→RALLY step to a distance or
+      same-logistics-network leash around a configured post. User live-tested the
+      same-logistics-network mode (`GuardPost` `num` ≤ 0): an in-network reporter's report
+      correctly triggered pursuit, an out-of-network reporter's report correctly did not —
+      confirms the reporter-based (not enemy-based) `is_same_grid` gate works as designed. Also
+      found/fixed a real bug in the process (user edit, confirmed via `semantic-diff` against the
+      prior commit): the "already back in range/network" branches of the idle return-to-post
+      check left a stale `@goto = GuardPost` from a prior out-of-range tick instead of clearing
+      it, so the unit kept re-pursuing the post indefinitely instead of releasing control back to
+      normal idling — `@goto` does not self-clear on arrival, see
+      `reference_goto_register_semantics.md` in project memory. Fixed by explicitly clearing
+      `@goto` on those branches. Still untested: the positive-`num` distance-leash branch
+      (`get_distance(..., Source=GuardPost)` against the reporter).
 
 ## Hex Expansion (`hex_expansion_math.md`)
 

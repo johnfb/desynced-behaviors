@@ -157,13 +157,17 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
   than the reported enemy because `is_same_grid`'s entity-based fast path (`data/instructions.lua`)
   only resolves "same grid" when both arguments belong to the calling faction — an enemy entity,
   never own-faction, silently fails that path, so an earlier draft that gated on the enemy
-  itself never returned "same grid" and the zero/negative-`num` branch never engaged (source-read,
-  not yet live-confirmed). Reports always carry an own-faction reporter (`for_signal_match` walks
-  `comp.faction:GetEntitiesWithRegister`), which sidesteps the failure and also matches intent —
-  a guard defends an area, it doesn't chase every report on the map. When idle with `GuardPost`
-  configured, the Captain also walks back into range/network once nothing else is happening;
-  `GuardPost`'s own `num` doubles as the `@goto` arrival radius, so the walk-back stops on its
-  own once back in range. Implemented in `library/squad-captain.bsf`.
+  itself never returned "same grid" and the zero/negative-`num` branch never engaged. **Live-
+  confirmed 2026-08-01** (same-logistics-network mode): an in-network reporter's report correctly
+  triggered pursuit, an out-of-network reporter's report correctly did not. Reports always carry
+  an own-faction reporter (`for_signal_match` walks `comp.faction:GetEntitiesWithRegister`), which
+  sidesteps the failure and also matches intent — a guard defends an area, it doesn't chase every
+  report on the map. When idle with `GuardPost` configured, the Captain also walks back into
+  range/network once nothing else is happening; `GuardPost`'s own `num` doubles as the `@goto`
+  arrival radius, so the walk-back stops on its own once back in range. The already-in-range
+  branches explicitly clear `@goto` once confirmed (live-tested fix, 2026-08-01 — `@goto` does
+  not self-clear on arrival and was otherwise left pointed at `GuardPost` indefinitely after a
+  successful return). Implemented in `library/squad-captain.bsf`.
 - **RALLY** — threat spotted (`get_closest_entity(v_enemy_faction)` — visibility *is* the
   sensor at vis 40; no radar needed). Broadcast **the Captain itself** as a mobile rally
   point (simplification adopted during the first live test — the Captain already holds
