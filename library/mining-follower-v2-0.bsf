@@ -22,7 +22,7 @@ sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >sequence (La
 wait(Time=1)
 read_signal(Unit=Forman, Result=$Signal)
 get_distance(Target=Forman, Distance=$DST)
-compare_item(Value 1=$Signal, Value 2=v_arrow_down)  >check_number_2 (If Different) >NEXT (If Equal)
+compare_item(Value 1=$Signal, Value 2=v_arrow_down)  >check_number_start (If Different) >NEXT (If Equal)
   cmt="""Is the forman telling us to "formup"?""";
 set_reg(Value=v_arrow_down, Target=@visual)
 set_reg(Target=Target)
@@ -36,12 +36,12 @@ domove(Target=$Spot, c=2)  >POP (Path Blocked) >POP (next)
 random_coordinate:
 random_coordinate(Coordinate=Forman, Range=$Signal, Result=$Spot)  >domove (next)
   cmt="""Too close, spread out""";
-check_number_2:
+check_number_start:
 check_number(Value=$DST, Compare=Max Range)  >is_empty (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
   cmt="""Either the forman is not signaling to us or is signaling to mine, are we out of range of the forman?""";
-is_empty(Value=$Signal)  >NEXT (Empty) >set_reg_3 (Has Value)
+is_empty(Value=$Signal)  >NEXT (Empty) >set_reg_start_2 (Has Value)
   cmt="""Is the forman signaling to mine?""";
-set_reg_2:
+set_reg_start:
 set_reg(Value=v_moving, Target=@visual)
   cmt="""keep formation state""";
 set_reg(Target=Target)
@@ -57,17 +57,17 @@ add(To=$AnchorPos, Num=$Offset, Result=$Spot)
 get_distance(Target=$Spot, Distance=$DST)
 check_number(Value=$DST, Compare=0)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
 domove(Target=$Spot, c=2)  >POP (Path Blocked) >POP (next)
-set_reg_3:
+set_reg_start_2:
 set_reg(Value=v_resource, Target=@visual)
 get_closest_entity(Filter=$Signal, Output=Target)
   cmt="""Get the closest resource""";
-compare_item(Value 1=Target)  >set_reg_5 (If Different) >NEXT (If Equal)
+compare_item(Value 1=Target)  >set_reg_start_4 (If Different) >NEXT (If Equal)
   cmt="""There is resources in range?""";
-set_reg_4:
-set_reg(Target=$Offset)  >set_reg_2 (next)
-set_reg_5:
+set_reg_start_3:
+set_reg(Target=$Offset)  >set_reg_start (next)
+set_reg_start_4:
 set_reg(Value=$Signal, Target=@signal)  >POP (next)
   cmt="""Mine mine mine, all mine.""";
 is_empty:
-is_empty(Value=$Signal)  >set_reg_2 (Empty) >set_reg_4 (Has Value)
+is_empty(Value=$Signal)  >set_reg_start (Empty) >set_reg_start_3 (Has Value)
   cmt="""Is the forman signaling to mine?""";

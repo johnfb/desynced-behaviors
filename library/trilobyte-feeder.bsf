@@ -3,15 +3,15 @@ behavior Trilobyte Feeder(Storage):
 
 set_number(Value=Storage, Number=1, Result=@goto)
   cmt="""Move within pickup range of Storage""";
-is_working()  >confirm (Is Not Working) >NEXT (next)
+is_working()  >wait_start (Is Not Working) >NEXT (next)
   cmt="""Component left empty on purpose -- see desc""";
-wait_busy:
+wait:
 wait(Time=10)
   cmt="""Still digesting/excreting -- recheck next cycle""";
-confirm:
+wait_start:
 wait(Time=5)
   cmt="""Debounce -- confirm the idle reading holds one full reward-round later before trusting it""";
-is_working()  >count_item (Is Not Working) >wait_busy (next)
+is_working()  >count_item (Is Not Working) >wait (next)
   cmt="""Second reading disagreed -- still genuinely working, go back to the long wait""";
 count_item:
 count_item(Result=$Num)

@@ -56,10 +56,10 @@ has_like_component:
 has_like_component(Component=c_alien_stealth)  >set_number (Failed) >NEXT (next)
 set_number(Value=$Enemy, Number=10, Result=$Enemy)
   cmt="""Stealthed: splash-safety buffer only""";
-moveaway_range_2:
+moveaway_range_arrow_right:
 moveaway_range(Target=$Enemy, c=2)  >POP (next)
 set_number:
-set_number(Value=$Enemy, Number=20, Result=$Enemy)  >moveaway_range_2 (next)
+set_number(Value=$Enemy, Number=20, Result=$Enemy)  >moveaway_range_arrow_right (next)
   cmt="""Not stealthed: full engagement-range standoff""";
 jump:
 jump(Label=$Tag)
@@ -68,7 +68,7 @@ jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_enemy_faction:
 label(Label=v_enemy_faction)
   cmt="""Enemy result arrived""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_2 (Last)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_enemy_faction (Last)
 is_empty(Value=$Result)  >NEXT (Empty) >set_reg (Has Value)
 call(Radar=$Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_damaged, Filter 2=v_own_faction, sub=1)
 set_reg(Value=v_damaged, Target=$NextTag)  >POP (next)
@@ -81,48 +81,48 @@ check_number(Value=$A, Compare=15)  >NEXT (If Larger) >POP (If Smaller) >NEXT (I
   cmt="""Ping throttle""";
 ping(Target=$Result)
 set_reg(Value=$Now, Target=$LastPingTick)  >POP (next)
-jump_2:
+jump_enemy_faction:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_damaged:
 label(Label=v_damaged)
   cmt="""Damaged-friendly result arrived""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_3 (Last)
-is_empty(Value=$Result)  >NEXT (Empty) >set_reg_2 (Has Value)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_damaged (Last)
+is_empty(Value=$Result)  >NEXT (Empty) >set_reg_damaged (Has Value)
 call(Radar=$Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_infected, Filter 2=v_own_faction, sub=1)
 set_reg(Value=v_infected, Target=$NextTag)  >POP (next)
-set_reg_2:
+set_reg_damaged:
 set_reg(Value=v_damaged, Target=@visual)
 set_reg(Value=$Result, Target=@signal)
 call:
 call(Radar=$Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_enemy_faction, sub=1)
 set_reg(Value=v_enemy_faction, Target=$NextTag)  >POP (next)
-jump_3:
+jump_damaged:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_infected:
 label(Label=v_infected)
   cmt="""Infected-friendly result arrived""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_4 (Last)
-is_empty(Value=$Result)  >NEXT (Empty) >set_reg_3 (Has Value)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_infected (Last)
+is_empty(Value=$Result)  >NEXT (Empty) >set_reg_infected (Has Value)
 call(Radar=$Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_droppeditem, sub=1)
 set_reg(Value=v_droppeditem, Target=$NextTag)  >POP (next)
-set_reg_3:
+set_reg_infected:
 set_reg(Value=v_infected, Target=@visual)
 set_reg(Value=$Result, Target=@signal)  >call (next)
-jump_4:
+jump_infected:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_droppeditem:
 label(Label=v_droppeditem)
   cmt="""Dropped-item result arrived""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_5 (Last)
-is_empty(Value=$Result)  >NEXT (Empty) >set_reg_4 (Has Value)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_droppeditem (Last)
+is_empty(Value=$Result)  >NEXT (Empty) >set_reg_droppeditem (Has Value)
 add(To=$CycleId, Num=1, Result=$CycleId)
   cmt="""Only advance cycle if no step found anything""";
 set_reg(Target=@signal)
 set_reg(Target=@visual)  >call (next)
-set_reg_4:
+set_reg_droppeditem:
 set_reg(Value=v_droppeditem, Target=@visual)
 set_reg(Value=$Result, Target=@signal)  >call (next)
-jump_5:
+jump_droppeditem:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 
 sub Async Radar Set from "async-radar-set.bsf"

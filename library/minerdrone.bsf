@@ -32,7 +32,7 @@ compare_item(Value 1=$Bldg)  >NEXT (If Different) >POP (If Equal)
   cmt="""Check if our building reference is stale""";
 set_reg(Value=0, Target=$BestRoll)
 set_reg(Target=$Best)
-for_entities_in_range(Range=8, Filter=v_resource, Filter2=Resource, Unit=$Node)  >is_empty_2 (Done) >NEXT (next)
+for_entities_in_range(Range=8, Filter=v_resource, Filter2=Resource, Unit=$Node)  >is_empty_radar (Done) >NEXT (next)
 get_location(Unit=$Node, Coord=$Amt)
 is_same_grid(Unit=$Self, Unit2=$Amt)  >POP (Different) >NEXT (Same Grid)
 get_resource_num(Resource=$Node, Result=$Amt)
@@ -46,16 +46,16 @@ random_number(Min=1, Max=1000, Result=$Roll)
 check_number(Value=$Roll, Compare=$BestRoll)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
 set_reg(Value=$Node, Target=$Best)
 set_reg(Value=$Roll, Target=$BestRoll)  >POP (next)
-is_empty_2:
+is_empty_radar:
 is_empty(Value=$Best)  >POP (Empty) >NEXT (Has Value)
 set_reg(Value=$Best, Target=@signal)
 set_reg(Value=$Best, Target=MineTarget)
-wait_2:
+wait_radar:
 wait(Time=5)
 compare_item(Value 1=$Best)  >NEXT (If Different) >POP (If Equal)
   cmt="""Check if our resource reference is stale""";
 get_resource_num(Resource=$Best, Result=$Amt2)
-check_number(Value=$Amt2, Compare=100)  >wait_2 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+check_number(Value=$Amt2, Compare=100)  >wait_radar (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
 set_reg(Target=MineTarget)
 set_reg(Target=@signal)
 jump(Label=c_radar)  >POP (next) >label_radar (jump→label)

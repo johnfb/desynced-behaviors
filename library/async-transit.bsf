@@ -11,7 +11,7 @@ set_reg(Target=@goto)
 set_reg(Value=Finish Value, Target=Result)  >POP (next)
   cmt="""return finish""";
 check_number:
-check_number(Value=Target, Compare=$A)  >set_reg_2 (If Larger) >set_reg_2 (If Smaller) >NEXT (If Equal)
+check_number(Value=Target, Compare=$A)  >set_reg_start (If Larger) >set_reg_start (If Smaller) >NEXT (If Equal)
   cmt="""Progress made?""";
 add:
 add(To=Progress count, Num=1, Result=Progress count)
@@ -26,6 +26,6 @@ set_reg(Value=Timeout Value, Target=Result)  >POP (next)
 set_reg:
 set_reg(Value=Continue Value, Target=Result)  >POP (next)
   cmt="""return continue""";
-set_reg_2:
+set_reg_start:
 set_reg(Target=Progress count)  >add (next)
   cmt="""Progress has been made, reset count""";

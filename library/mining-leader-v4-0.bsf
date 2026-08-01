@@ -33,27 +33,27 @@ jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_small_radar:
 label(Label=c_small_radar)
   cmt="""Setup search""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_2 (Last)
-switch(Input=$Tag, Case 1=v_enemy_faction, Case 2=v_resource)  >NEXT (1) >set_reg_2 (2) >POP (3) >POP (4) >POP (5) >NEXT (Default)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_small_radar (Last)
+switch(Input=$Tag, Case 1=v_enemy_faction, Case 2=v_resource)  >NEXT (1) >set_reg_small_radar (2) >POP (3) >POP (4) >POP (5) >NEXT (Default)
 is_moving()  >NEXT (Not Moving) >NEXT (Path Blocked) >NEXT (No Result) >POP (Moving)
   cmt="""Don't start a resource scan until we are no longer moving.""";
 compare_item(Value 1=$NextTag, Value 2=v_resource)  >NEXT (If Different) >POP (If Equal)
   cmt="""Already armed, wait""";
 set_reg(Value=v_resource, Target=$NextTag)
 call(Radar=Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=Resource, sub=1)  >POP (next)
-set_reg_2:
+set_reg_small_radar:
 set_reg(Value=v_enemy_faction, Target=$NextTag)
 call(Radar=Radar, Index=c_portable_radar, Next Tick=$NextTick, Filter 1=v_enemy_faction, sub=1)
 compare_item(Value 1=$ScanResult)  >call (If Different) >NEXT (If Equal)
-set_reg_3:
+set_reg_small_radar_2:
 set_reg(Value=v_transport_route, Target=State)  >POP (next)
 call:
 call(Signal=v_alert, Spot=$ScanResult, Result=$ScanResult, sub=4)
-is_empty(Value=$ScanResult)  >set_reg_3 (Empty) >NEXT (Has Value)
+is_empty(Value=$ScanResult)  >set_reg_small_radar_2 (Empty) >NEXT (Has Value)
 set_reg(Value=$ScanResult, Target=Target)
   cmt="""Found one!""";
 set_reg(Value=v_arrow_upright, Target=State)  >POP (next)
-jump_2:
+jump_small_radar:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_broken:
 label(Label=v_broken)
@@ -77,42 +77,42 @@ jump(Label=v_arrow_up)  >POP (next) >label_arrow_up (jump→label)
 label_arrow_upright:
 label(Label=v_arrow_upright)
   cmt="""Travel to target""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_3 (Last)
-match(Unit=Target, Filter=Resource)  >set_reg_5 (Failed) >NEXT (next)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_arrow_upright (Last)
+match(Unit=Target, Filter=Resource)  >set_reg_arrow_upright_2 (Failed) >NEXT (next)
 match(Unit=Target, Filter=v_droppeditem)  >get_distance (Failed) >NEXT (next)
 set_reg(Value=Target, Target=@goto)
 set_reg(Value=v_arrow_down[num=2], Target=@signal)  >POP (next)
 get_distance:
 get_distance(Target=Target, Distance=$A)
-check_number(Value=$A, Compare=3)  >set_reg_4 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+check_number(Value=$A, Compare=3)  >set_reg_arrow_upright (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
   cmt="""In range of mining target?""";
 set_reg(Value=c_adv_miner, Target=State)  >POP (next)
-set_reg_4:
+set_reg_arrow_upright:
 set_reg(Value=v_arrow_down[num=2], Target=@signal)
 set_number(Value=Target, Number=3, Result=@goto)  >POP (next)
-set_reg_5:
+set_reg_arrow_upright_2:
 set_reg(Target=Target)
 set_reg(Value=c_small_radar, Target=State)  >POP (next)
-jump_3:
+jump_arrow_upright:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_adv_miner:
 label(Label=c_adv_miner)
   cmt="""Monitor mine""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_4 (Last)
-match(Unit=Target, Filter=Resource)  >set_reg_6 (Failed) >NEXT (next)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_adv_miner (Last)
+match(Unit=Target, Filter=Resource)  >set_reg_adv_miner (Failed) >NEXT (next)
 set_reg(Value=Resource, Target=@signal)
   cmt="""Tell followers to start mining""";
 get_resource_num(Resource=Target, Result=$A)
 set_number(Value=Target, Number=$A, Result=@visual)  >POP (next)
-set_reg_6:
+set_reg_adv_miner:
 set_reg(Target=Target)
 set_reg(Value=c_small_radar, Target=State)  >POP (next)
-jump_4:
+jump_adv_miner:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 label_transport_route:
 label(Label=v_transport_route)
   cmt="""Enemy scan completed and emergency check did not trigger""";
-sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_5 (Last)
+sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_transport_route (Last)
 compare_item(Value 1=$Tag, Value 2=v_enemy_faction)  >POP (If Different) >NEXT (If Equal)
 get_self(Unit Reference=$A)
 get_unit_info(Unit=$A, Result=$B, c=2)
@@ -121,7 +121,7 @@ call(Signal=v_alert, Spot=$A, Result=$A, sub=4)
 is_empty(Value=$A)  >POP (Empty) >NEXT (Has Value)
 set_reg(Value=$A, Target=@goto)
 set_reg(Value=c_small_radar, Target=State)  >POP (next)
-jump_5:
+jump_transport_route:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
 
 sub Async Radar Set from "async-radar-set.bsf"

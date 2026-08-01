@@ -4,7 +4,7 @@ behavior Healer(Target*, Range):
 unlock()
 wait(Time=1)
 get_closest_entity(Filter=v_enemy_faction, Output=$A)
-is_empty(Value=$A)  >NEXT (Empty) >label_landingpod (Has Value)
+is_empty(Value=$A)  >NEXT (Empty) >set_reg_start (Has Value)
 value_type(Data=Target)  >set_reg (Item) >check_health (Unit) >set_reg (Component) >set_reg (Tech) >set_reg (Value) >set_reg (Coord) >NEXT (No Match)
 get_closest_entity(Filter=v_damaged, Filter2=v_own_faction, Output=Target)
 is_empty(Value=Target)  >NEXT (Empty) >set_number (Has Value)
@@ -17,12 +17,12 @@ is_empty:
 is_empty(Value=Target)  >NEXT (Empty) >set_number (Has Value)
 get_closest_entity(Filter=v_infected, Filter2=v_own_faction, Output=Target)
 is_empty(Value=Target)  >NEXT (Empty) >set_number (Has Value)
-for_signal_match(Signal=v_infected, Signal2=$Signal)  >is_empty_2 (Done) >NEXT (next)
+for_signal_match(Signal=v_infected, Signal2=$Signal)  >is_empty_start (Done) >NEXT (next)
 match(Unit=$Signal, Filter=v_own_faction)  >POP (Failed) >NEXT (next)
 get_distance(Target=$Signal, Distance=$Signal)
 check_number(Value=Target, Compare=$Signal)  >POP (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
 set_reg(Value=$Signal, Target=Target)  >POP (next)
-is_empty_2:
+is_empty_start:
 is_empty(Value=Target)  >NEXT (Empty) >set_number (Has Value)
 add(To=$Count, Num=1, Result=$Count)
 check_number(Value=$Count, Compare=100)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
@@ -40,8 +40,11 @@ set_reg:
 set_reg(Target=Target)  >POP (next)
 check_health:
 check_health(Unit=Target)  >NEXT (Full) >set_number (next)
+match(Unit=Target, Filter=v_infected)  >NEXT (Failed) >set_number (next)
 set_reg(Target=@goto)
 set_reg(Target=Target)  >POP (next)
+set_reg_start:
+set_reg(Value=$A, Target=@signal)
 label_landingpod:
 label(Label=f_landingpod)
 gethome(Result=$Home)

@@ -2,14 +2,14 @@ behavior Pickup(Home, State*, Target*, Health Point):
 
 unlock()
 wait(Time=1)
-sequence()  >NEXT (First) >has_like_component (Second) >POP (Third) >POP (Fourth) >jump (Last)
+sequence()  >NEXT (First) >get_closest_entity (Second) >POP (Third) >POP (Fourth) >jump (Last)
 check_health()  >POP (Full) >NEXT (next)
 set_reg(Value=v_enemy_faction, Target=State)
 last()
-has_like_component:
-has_like_component(Component=c_alien_stealth)  >NEXT (Failed) >POP (next)
+get_closest_entity:
 get_closest_entity(Filter=v_enemy_faction, Output=$A)
 set_reg(Value=$A, Target=@signal)
+has_like_component(Component=c_alien_stealth)  >NEXT (Failed) >POP (next)
 compare_item(Value 1=$A)  >NEXT (If Different) >POP (If Equal)
 set_reg(Value=v_enemy_faction, Target=State)
 last()
@@ -35,9 +35,9 @@ compare_item(Value 1=Target)  >checkfreespace (If Different) >NEXT (If Equal)
 get_inventory_item()  >POP (No Items) >NEXT (next)
 set_reg(Value=v_arrow_down, Target=State)  >POP (next)
 checkfreespace:
-checkfreespace(Item=Target)  >set_reg_2 (Can't Fit) >NEXT (next)
+checkfreespace(Item=Target)  >set_reg_portable_radar (Can't Fit) >NEXT (next)
 set_reg(Value=v_arrow_up, Target=State)  >POP (next)
-set_reg_2:
+set_reg_portable_radar:
 set_reg(Value=v_arrow_down, Target=State)  >POP (next)
 label_arrow_down:
 label(Label=v_arrow_down)
@@ -45,18 +45,18 @@ label(Label=v_arrow_down)
 set_reg(Value=Home, Target=@goto)
 dodrop(Destination=Home)  >POP (Path Blocked) >NEXT (next)
 get_inventory_item()  >NEXT (No Items) >POP (next)
-compare_item(Value 1=Target)  >set_reg_3 (If Different) >NEXT (If Equal)
+compare_item(Value 1=Target)  >set_reg_arrow_down (If Different) >NEXT (If Equal)
 set_reg(Value=c_portable_radar, Target=State)  >POP (next)
-set_reg_3:
+set_reg_arrow_down:
 set_reg(Value=v_arrow_up, Target=State)  >POP (next)
 label_arrow_up:
 label(Label=v_arrow_up)
   cmt="""Pick up""";
-checkfreespace(Item=Target)  >set_reg_4 (Can't Fit) >NEXT (next)
+checkfreespace(Item=Target)  >set_reg_arrow_up (Can't Fit) >NEXT (next)
 set_reg(Value=Target, Target=@goto)
 compare_item(Value 1=Target)  >POP (If Different) >NEXT (If Equal)
 set_reg(Value=c_portable_radar, Target=State)  >POP (next)
-set_reg_4:
+set_reg_arrow_up:
 set_reg(Value=v_arrow_down, Target=State)  >POP (next)
 label_enemy_faction:
 label(Label=v_enemy_faction)
