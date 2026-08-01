@@ -241,6 +241,17 @@ detection (now fixed).
       item). In the field the Captain's signal protocol takes over; the autobase building is
       the barracks/quartermaster half.
 
+- [ ] **`GuardPost` leash — not yet live-tested** (added 2026-08-01): new optional Captain
+      parameter (`library/squad-captain.bsf`, `combat_squad_spec.md` §4) gating the
+      reporter-driven PATROL→RALLY step to a distance or same-logistics-network leash around a
+      configured post. Static checks only so far (`desynced-bsf lint`, a compile/decompile
+      round-trip). Also carries an unconfirmed claim about `is_same_grid`: gating on the
+      reported enemy entity itself (an earlier draft) is suspected to never resolve "same grid"
+      because that instruction's entity-based fast path only fires when both arguments belong to
+      the calling faction (`data/instructions.lua`) — worth confirming in-game if `GuardPost`'s
+      zero/negative-`num` branch ever misbehaves, since the current reporter-based gate was
+      never itself compared against that failure mode live.
+
 ## Hex Expansion (`hex_expansion_math.md`)
 
 - [ ] **Rewrite the revised `HexIndexOf` directly in BSF and restore its executable

@@ -1,5 +1,5 @@
-behavior Squad Captain(Home, State*, Target*, Roster*, Assembled*):
-  desc: "v2 squad brain (combat_squad_spec.md). Unarmed, fit visibility modules to 40. Keeps 30+ from all enemies, gathers the squad on its own position (rally gate: 80% of live roster within 8), then broadcasts one focus-fire target at a time on @signal. Members point their @signal at this unit and read commands with Read Signal. Coord=rally on me, Unit=kill this, empty=hold."
+behavior Squad Captain(Home, GuardPost, State*, Target*, Roster*, Assembled*):
+  desc: "v2 squad brain (combat_squad_spec.md). Unarmed, fit visibility modules to 40. Keeps 30+ from all enemies, gathers the squad on its own position (rally gate: 80% of live roster within 8), then broadcasts one focus-fire target at a time on @signal. Members point their @signal at this unit and read commands with Read Signal. Coord=rally on me, Unit=kill this, empty=hold. GuardPost (coord/entity, number=leash): empty=react to any report, as above. Positive number=only act on a broadcast report whose reporter is within that range of GuardPost, and walk back within range when idle. Zero/negative number=same logistics network instead of a distance leash. Gate is on the reporter, not the enemy it saw; own direct line-of-sight sightings always act, same as before. Only gates the Patrol->Rally transition -- ignored once engaged."
 
 unlock()
 get_self(Unit Reference=$Self)
@@ -41,15 +41,16 @@ set_reg(Value=999999, Target=$BestD)
 set_reg(Target=$BestRep)
 for_signal_match(Signal=v_enemy_faction, Unit=$Reporter, Signal2=$Report)  >is_empty_idle (Done) >NEXT (next)
   cmt="""Nothing in my own vision: scan ALL enemy broadcasts (Observers and other Captains both make them)""";
-match(Unit=$Report, Filter=v_enemy_faction)  >POP (Failed) >NEXT (next)
+match(Unit=$Report, Filter=v_enemy_faction)  >POP (Failed) >guard_report (next)
   cmt="""Same guard as the gunners: only act on a genuine enemy entity""";
+get_distance_report:
 get_distance(Target=$Reporter, Distance=$RepD)
   cmt="""Prioritize the CLOSEST reporter -- take-first ping-ponged the squad between Observers on opposite map sides; a nearby Observer rebroadcasting 'one more, just out of range' now wins until its area is clean""";
 check_number(Value=$RepD, Compare=$BestD)  >POP (If Larger) >NEXT (If Smaller) >POP (If Equal)
 set_reg(Value=$RepD, Target=$BestD)
 set_reg(Value=$Report, Target=$BestRep)  >POP (next)
 is_empty_idle:
-is_empty(Value=$BestRep)  >POP (Empty) >NEXT (Has Value)
+is_empty(Value=$BestRep)  >guard_return (Empty) >NEXT (Has Value)
 set_number(Value=$BestRep, Number=36, Result=@goto)  >POP (next)
   cmt="""Approach until it enters my own vision (members loiter on me, so they come along); hub standoff guards the close end""";
 set_reg:
@@ -57,6 +58,32 @@ set_reg(Value=v_arrow_down, Target=State)  >POP (next)
   cmt="""Threat spotted -- gather the squad on me""";
 jump_idle:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
+guard_report:
+is_empty(Value=GuardPost)  >get_distance_report (Empty) >NEXT (Has Value)
+  cmt="""No guard post configured: consider every broadcast report, as before""";
+check_number(Value=GuardPost, Compare=0)  >guard_report_range (If Larger) >guard_report_grid (If Smaller) >guard_report_grid (If Equal)
+  cmt="""Positive number = distance leash off GuardPost; zero/negative = same-logistics-network leash""";
+guard_report_grid:
+is_same_grid(Unit=$Reporter, Unit2=GuardPost)  >POP (Different) >get_distance_report (Same Grid)
+  cmt="""Reporter off our network: not our fight, skip it -- gate is on the reporter, not the enemy it saw""";
+guard_report_range:
+get_distance(Target=$Reporter, Source=GuardPost, Distance=$RD)
+check_number(Value=$RD, Compare=GuardPost)  >POP (If Larger) >get_distance_report (If Smaller) >get_distance_report (If Equal)
+  cmt="""Reporter outside guard range: not our fight, skip it -- gate is on the reporter, not the enemy it saw""";
+guard_return:
+is_empty(Value=GuardPost)  >POP (Empty) >NEXT (Has Value)
+  cmt="""No guard post configured: hold position, as before""";
+check_number(Value=GuardPost, Compare=0)  >guard_return_range (If Larger) >guard_return_grid (If Smaller) >guard_return_grid (If Equal)
+guard_return_grid:
+is_same_grid(Unit=$Self, Unit2=GuardPost)  >set_reg_return (Different) >POP (Same Grid)
+  cmt="""Off our network: head back onto it""";
+guard_return_range:
+get_distance(Target=GuardPost, Distance=$SD)
+check_number(Value=$SD, Compare=GuardPost)  >set_reg_return (If Larger) >POP (If Smaller) >POP (If Equal)
+  cmt="""Outside guard range: walk back toward GuardPost""";
+set_reg_return:
+set_reg(Value=GuardPost, Target=@goto)  >POP (next)
+  cmt="""GuardPost's own number doubles as the arrival radius, so this naturally stops once back in range""";
 label_arrow_down:
 label(Label=v_arrow_down)
   cmt="""RALLY: broadcast my position; advance only when assembled""";

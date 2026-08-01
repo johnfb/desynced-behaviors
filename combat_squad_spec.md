@@ -146,6 +146,24 @@ Assembly per squad is one manual step per member: set its `Captain` parameter.
   a squad with *no* repair coverage at all will hold in PATROL until damage is cleared some
   other way (hull has no passive regen), which is a safe failure — it never freezes an active
   fight (there is no gate in ENGAGE).
+  **Guard leash (`GuardPost` parameter, optional)**: gates only the reporter-driven approach
+  step above — direct vision (an enemy inside the Captain's own vis 40) still always triggers
+  RALLY, guard post or not. Empty `GuardPost` = unrestricted, as above. A non-empty `GuardPost`
+  (coordinate or entity) carries the leash radius in its own `num`: positive `num` = only
+  approach a report whose **reporter** (the Observer/Captain broadcasting it, not the enemy it
+  saw) is within `num` of `GuardPost`, measured with `get_distance(..., Source=GuardPost)`
+  rather than from self; zero or negative `num` = same-logistics-network leash instead of a
+  distance one, via `is_same_grid` against `GuardPost`. The gate keys on the reporter rather
+  than the reported enemy because `is_same_grid`'s entity-based fast path (`data/instructions.lua`)
+  only resolves "same grid" when both arguments belong to the calling faction — an enemy entity,
+  never own-faction, silently fails that path, so an earlier draft that gated on the enemy
+  itself never returned "same grid" and the zero/negative-`num` branch never engaged (source-read,
+  not yet live-confirmed). Reports always carry an own-faction reporter (`for_signal_match` walks
+  `comp.faction:GetEntitiesWithRegister`), which sidesteps the failure and also matches intent —
+  a guard defends an area, it doesn't chase every report on the map. When idle with `GuardPost`
+  configured, the Captain also walks back into range/network once nothing else is happening;
+  `GuardPost`'s own `num` doubles as the `@goto` arrival radius, so the walk-back stops on its
+  own once back in range. Implemented in `library/squad-captain.bsf`.
 - **RALLY** — threat spotted (`get_closest_entity(v_enemy_faction)` — visibility *is* the
   sensor at vis 40; no radar needed). Broadcast **the Captain itself** as a mobile rally
   point (simplification adopted during the first live test — the Captain already holds
