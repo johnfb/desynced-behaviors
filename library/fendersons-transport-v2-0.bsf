@@ -41,12 +41,15 @@ set_reg_2:
 set_reg(Value=c_small_radar, Target=@visual)  >jump_2 (next)
   cmt="""Have items, search for dropoff""";
 get_battery:
-get_battery(Result=$Num)
-check_number(Value=$Num, Compare=20)  >NEXT (If Larger) >set_reg_3 (If Smaller) >NEXT (If Equal)
-  cmt="""battery under 20%""";
+get_battery(Result=$Num, Max=$Max)
+check_number(Value=$Max, Compare=0)  >check_number (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+  cmt="""Have a battery""";
+wait:
 wait(Time=1)  >jump (next)
   cmt="""Everything is Okay""";
-set_reg_3:
+check_number:
+check_number(Value=$Num, Compare=20)  >wait (If Larger) >NEXT (If Smaller) >wait (If Equal)
+  cmt="""battery under 20%""";
 set_reg(Value=v_emergency, Target=@visual)  >jump (next)
 label_enemy_faction:
 label(Label=v_enemy_faction)
@@ -88,14 +91,14 @@ set_reg(Value=$Unit, Target=Target)
 set_reg(Target=Counter)
 set_reg(Value=v_arrow_upright, Target=@visual)  >POP (next)
 compare_item:
-compare_item(Value 1=@visual, Value 2=c_radar)  >set_reg_4 (If Different) >NEXT (If Equal)
+compare_item(Value 1=@visual, Value 2=c_radar)  >set_reg_3 (If Different) >NEXT (If Equal)
   cmt="""Did we find a pickup target?""";
 add(To=Counter, Num=1, Result=Counter)
   cmt="""Count the number of times we have searched for a pickup target""";
 check_number(Value=Counter, Compare=100)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
 set_reg(Target=Counter)
 random_coordinate(Coordinate=$Self, Range=1, Result=@goto)  >POP (next)
-set_reg_4:
+set_reg_3:
 set_reg(Target=Counter)  >POP (next)
 jump_3:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
@@ -110,10 +113,10 @@ wait(Time=10)
 jump(Label=@visual)  >POP (next)
 get_battery_2:
 get_battery(Result=$Num)
-check_number(Value=$Num, Compare=90)  >set_reg_5 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+check_number(Value=$Num, Compare=90)  >set_reg_4 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
 wait(Time=10)
 jump(Label=@visual)  >POP (next)
-set_reg_5:
+set_reg_4:
 set_reg(Target=@visual)
   cmt="""Health and charge full, reset state and resume""";
 set_reg(Target=@goto)
@@ -146,14 +149,14 @@ set_reg(Value=$Unit, Target=Target)
   cmt="""C is now our new dropoff target""";
 set_reg(Value=v_arrow_downright, Target=@visual)  >POP (next)
 compare_item_2:
-compare_item(Value 1=@visual, Value 2=c_small_radar)  >set_reg_6 (If Different) >NEXT (If Equal)
+compare_item(Value 1=@visual, Value 2=c_small_radar)  >set_reg_5 (If Different) >NEXT (If Equal)
   cmt="""Was a dropoff target found?""";
 add(To=Counter, Num=1, Result=Counter)
   cmt="""Count failures""";
 check_number(Value=Counter, Compare=100)  >NEXT (If Larger) >POP (If Smaller) >POP (If Equal)
 set_reg(Target=Counter)
 random_coordinate(Coordinate=$Self, Range=1, Result=@goto)  >POP (next)
-set_reg_6:
+set_reg_5:
 set_reg(Target=Counter)  >POP (next)
 jump_4:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
@@ -168,27 +171,27 @@ label(Label=v_arrow_up)
 sequence()  >NEXT (First) >POP (Second) >POP (Third) >POP (Fourth) >jump_5 (Last)
 getfreespace(Item=Resource, Result=$Num)
   cmt="""Are we full?""";
-check_number(Value=$Num, Compare=1)  >NEXT (If Larger) >set_reg_11 (If Smaller) >NEXT (If Equal)
+check_number(Value=$Num, Compare=1)  >NEXT (If Larger) >set_reg_10 (If Smaller) >NEXT (If Equal)
 add(To=Counter, Num=1, Result=Counter)
   cmt="""Count the pickup attempt iterations""";
-check_number(Value=Counter, Compare=100)  >set_reg_10 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+check_number(Value=Counter, Compare=100)  >set_reg_9 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
 get_distance(Target=Target, Distance=$DST)
-check_number(Value=$DST, Compare=10)  >set_reg_9 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+check_number(Value=$DST, Compare=10)  >set_reg_8 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
   cmt="""Is our target still in range?""";
 count_item(Item=Resource, Result=$Num, Unit=Target)
   cmt="""Does target have enough items for pickup?""";
 check_number(Value=$Num, Compare=Min Transfer)  >NEXT (If Larger) >for_entities_in_range (If Smaller) >NEXT (If Equal)
-check_number(Value=$DST, Compare=1)  >set_reg_8 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+check_number(Value=$DST, Compare=1)  >set_reg_7 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
   cmt="""in range for pickup?""";
 set_number(Value=Resource, Number=-2147483648, Result=$Num)
   cmt="""Pickup as much as we can""";
-dopickup(Source=Target, Item / Amount=$Num)  >set_reg_7 (Path Blocked) >NEXT (next)
+dopickup(Source=Target, Item / Amount=$Num)  >set_reg_6 (Path Blocked) >NEXT (next)
 set_reg(Target=Counter)  >POP (next)
   cmt="""Reset our pickup failure counter""";
-set_reg_7:
+set_reg_6:
 set_reg(Value=c_radar, Target=@visual)  >POP (next)
   cmt="""Blocked find new target""";
-set_reg_8:
+set_reg_7:
 set_reg(Value=v_arrow_upright, Target=@visual)  >POP (next)
 for_entities_in_range:
 for_entities_in_range(Range=-2147483648, Filter=v_own_faction, Filter2=v_bot, Unit=$Unit)  >POP (Done) >NEXT (next)
@@ -205,13 +208,13 @@ set_reg(Value=$Unit, Target=Target)
   cmt="""Make Unit our new target.""";
 set_reg(Value=v_arrow_upright, Target=@visual)
 last()
-set_reg_9:
+set_reg_8:
 set_reg(Value=c_radar, Target=@visual)  >POP (next)
   cmt="""Target not in range, find a new target""";
-set_reg_10:
+set_reg_9:
 set_reg(Value=c_radar, Target=@visual)  >POP (next)
   cmt="""We haven't been able to pickup anything in the last 100 times; find a new target.""";
-set_reg_11:
+set_reg_10:
 set_reg(Value=c_small_radar, Target=@visual)  >POP (next)
   cmt="""search for dropoff""";
 jump_5:
@@ -234,13 +237,13 @@ set_reg(Value=c_small_radar, Target=@visual)  >POP (next)
 get_distance:
 get_distance(Target=Target, Distance=$DST)
   cmt="""Yes; try to dropoff or get in range""";
-check_number(Value=$DST, Compare=1)  >set_reg_12 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
+check_number(Value=$DST, Compare=1)  >set_reg_11 (If Larger) >NEXT (If Smaller) >NEXT (If Equal)
 set_number(Value=Resource, Number=$Signal, Result=$Num)
   cmt="""Try to give them how many items they want""";
 dodrop(Destination=Target, Item / Amount=$Num)  >NEXT (Path Blocked) >POP (next)
 set_reg(Value=c_small_radar, Target=@visual)  >POP (next)
   cmt="""Blocked Find new dropoff""";
-set_reg_12:
+set_reg_11:
 set_reg(Value=v_arrow_downright, Target=@visual)  >POP (next)
 jump_6:
 jump(Label=v_arrow_right)  >POP (next) >label_arrow_right (jump→label)
