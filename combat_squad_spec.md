@@ -304,6 +304,8 @@ registers and return home (member-side fallback, §3's HOLD row).
 | Rally offset | ~5 | member spacing off the Captain / rally unit |
 | Heal-gate criterion | no member's retreat bit set | PATROL gate before new-fight-seeking; rides the gunner's own latch (clears at that member's full health), not a Captain-side health poll |
 | Healer `Range` | 3 | heal/cure standoff = virus cure range 3 (tighter tool); keeps target inside the range-5 AOE heal too |
+| Formup-skip enemy count | TBD | §7 swarm-mode item — max visible enemy count still eligible to skip the full gather-fraction gate (building targets always force the full gate regardless) |
+| Standoff/vis band (tech-tier) | TBD, nominal 30/40 | §7 swarm-mode item — scales down at low player tech: squad's own achievable vis is capped pre-visibility-module, and enemy speed/range/roster is also weaker, so both halves of the 30/40 band can shrink together |
 
 ## 7. Open items
 
@@ -379,6 +381,59 @@ registers and return home (member-side fallback, §3's HOLD row).
   clearing/preventing the retreat-path jam (the anti-bunch fix above, extended to cover
   mid-fight retreat, not just rally assembly). Fix direction pending confirmation of which
   mechanism(s) actually apply — see §5's live-observed note.
+- **Swarm-mode formup gating (live-observed 2026-08-02, not yet implemented)**: on swarm
+  difficulty, waves approach continuously rather than sitting still at a staging point (the
+  usual non-swarm case, mostly hive/bug-hole assaults). Two live failure modes fall out of
+  that: (1) the RALLY gather-fraction gate (§4) can starve entirely — the Captain's own
+  standoff kiting (§1.2) keeps receding from the approaching enemy, and since RALLY broadcasts
+  the Captain itself as the staging point, the squad is converging on a moving target whose
+  closing rate can match or exceed the squad's own approach rate; anchoring the staging point
+  at a fixed location does **not** fix this (user correction, 2026-08-02) — a fixed point in
+  the enemy's advance path gets overrun anyway, it only delays the same race. (2) Independent
+  of kiting, any squad with gunners slower than the Captain never closes the gather radius
+  against a live target at all. Plan, in four pieces:
+  1. **Key the gather-gate skip on threat classification, not just proximity/time.** Skip the
+     full assembled-fraction gate only when both (a) visible enemy count is low (≤ a small
+     constant, TBD in §6) **and** (b) the target is not a building (`movement_speed == 0`, or
+     equivalently is an explorable — covers hives/bug holes). Building alone forces the full
+     gate regardless of visible count, since a hive/hole showing one defender is exactly the
+     "horde hidden behind the one visible thing" case. **Known residual gap**: this does not
+     catch a mobile swarm whose lead scout alone sits inside vis 40 with the rest just past
+     it — count-based classification can only see what's visible. Accepted for now; the
+     gunner-side check below provides a second line of defense as more of the wave comes into
+     view.
+  2. **Decentralize the skirmish/full-press split to the gunner, not a new Captain state.**
+     Rather than adding a third Captain FSM state between RALLY and ENGAGE, a gunner receiving
+     an ENGAGE command only acts on it if it can currently see an enemy itself, or is already
+     close to the broadcast target; otherwise it ignores the order and keeps executing its own
+     RALLY convergence. This produces "nearest gunner(s) hold aggro on a lone/mobile target
+     while stragglers keep closing" for free, without new Captain-side machinery — and doubles
+     as the mechanism that actually pins a mobile enemy's attention before it wanders off
+     (engaging tends to make a target stop moving, which is itself part of why this closes the
+     speed-mismatch gap: once the lead gunner is in contact, the target holds still and
+     stragglers can catch up on a stationary point instead of chasing a live one).
+  3. **Carry a `formup_mandatory` bit on the ENGAGE broadcast's `num`**, alongside the existing
+     contact/retreat bitfield convention already used on the membership beacon (§3's bit
+     table, `bitwise_op`-maintained, entity-preserving). Set once by the Captain when target
+     classification (piece 1) determines the gather gate was not skipped, so gunners consume
+     the Captain's classification directly instead of re-deriving building/count status
+     themselves — centralizes the classification where the count/type data already lives
+     (Captain), decentralizes the reaction where position data already lives (gunner). §3's
+     command table needs a new row/column for this once implemented — today only the
+     membership-beacon direction (member → Captain) carries a bitfield; the command direction
+     (Captain → members) does not yet.
+  4. **Scale the standoff/vis band with enemy tech tier, not just the squad's own vis cap.**
+     The existing early-tech item (`todo.md`) parameterizes standoff/vis because a squad's own
+     achievable visibility is capped pre-visibility-module (as low as 15-20 vs. the nominal
+     40) — vis 15-20 cannot support a 30-standoff/10-margin band at all (the two constraints
+     are mutually exclusive below vis ~30-35), so below some vis floor the design should
+     either shrink the margin or fall back to uncoordinated auto-acquire (accepting the
+     scatter cost §1.1 warns about) rather than force an unachievable band. Separately, but
+     compounding: enemy speed/weapon-range/unit roster also scale with the player's own tech
+     level, so the *threat* side of the standoff math eases at low tech independent of the
+     squad's own vis cap — a smaller standoff can be tolerated early game not only because vis
+     is capped, but because what it's standing off from is also weaker. Both halves belong in
+     the same tech-tier-derived parameter, not two independent ones.
 - **Next-release interactions** (see `upcoming-changes.md`): `is_empty`-based death checks
   invert (use the entity-blank check via the settled dangling-ref semantics, and migrate to
   Target Type Switch's 'Destroyed Object' pin when it lands); `compare_unit` is removed

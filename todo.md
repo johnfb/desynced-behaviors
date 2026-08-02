@@ -241,6 +241,24 @@ detection (now fixed).
       item). In the field the Captain's signal protocol takes over; the autobase building is
       the barracks/quartermaster half.
 
+- [ ] **Swarm-mode formup gating** (user, 2026-08-02): on swarm difficulty, waves approach
+      continuously instead of sitting at a fixed staging point, which starves the RALLY
+      gather-fraction gate — the Captain's own standoff kiting keeps the staging point
+      (broadcast as the Captain itself) receding from the approaching enemy, and a squad with
+      gunners slower than the Captain never closes the gather radius on a live target either
+      way. Anchoring the staging point at a fixed location does **not** fix this (user
+      correction, 2026-08-02) — a fixed point in the enemy's advance path gets overrun anyway,
+      it only delays the same race. Four-piece plan recorded in `combat_squad_spec.md` §7
+      ("Swarm-mode formup gating"): (1) skip the full gather gate only when visible enemy count
+      is low **and** the target isn't a building (hives/bug holes always force the full gate);
+      (2) decentralize the skirmish/full-press split to the gunner (act on ENGAGE only if it
+      can see an enemy itself or is already close to the target, else keep converging) instead
+      of adding a third Captain FSM state; (3) carry a `formup_mandatory` bit on the ENGAGE
+      broadcast's `num`, extending the existing membership-beacon bitfield convention (§3) to
+      the command direction; (4) scale the standoff/vis band with enemy tech tier as well as
+      the squad's own vis cap — folds into the early-tech squad variant item above. Not yet
+      implemented; see `combat_squad_spec.md` §6 for the two new TBD constants.
+
 - [ ] **`GuardPost` leash — same-grid mode live-confirmed, distance mode still untested** (added
       2026-08-01, updated 2026-08-01): optional Captain parameter (`library/squad-captain.bsf`,
       `combat_squad_spec.md` §4) gating the reporter-driven PATROL→RALLY step to a distance or
